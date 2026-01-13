@@ -1,4 +1,4 @@
-# CJA Audit Log Monitor
+# Adobe Customer Journey Analytics Audit Log Monitor
 
 A command-line interface (CLI) tool for querying and analyzing Adobe Customer Journey Analytics (CJA) audit logs.
 
