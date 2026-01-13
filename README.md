@@ -2,8 +2,7 @@
 
 A command-line interface (CLI) tool for querying and analyzing Adobe Customer Journey Analytics (CJA) audit logs.
 
-<img width="1024" height="559" alt="image" src="https://github.com/user-attachments/assets/319be771-a7f5-41f8-87f0-ee0af3fbcc8c" />
-
+<img width="1439" height="1086" alt="Gemini_Generated_Image_djmarbdjmarbdjma" src="https://github.com/user-attachments/assets/0d8ba89d-41ff-465c-aad1-983123bd2428" />
 
 ## Features
 
