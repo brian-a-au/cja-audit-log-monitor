@@ -4,6 +4,7 @@ from collections import Counter
 from datetime import datetime, timedelta, timezone
 
 from .models import AuditLogEntry, AuditLogQuery
+from .utils import get_user_identifier
 
 
 def calculate_stats(entries: list[AuditLogEntry]) -> dict:
@@ -27,7 +28,7 @@ def calculate_stats(entries: list[AuditLogEntry]) -> dict:
     # Count by user
     user_counter: Counter[str] = Counter()
     for entry in entries:
-        user = entry.user_email or entry.user_id or "unknown"
+        user = get_user_identifier(entry)
         user_counter[user] += 1
 
     # Count by action
@@ -109,7 +110,7 @@ def get_user_activity(entries: list[AuditLogEntry]) -> list[tuple[str, int]]:
     """
     user_counter: Counter[str] = Counter()
     for entry in entries:
-        user = entry.user_email or entry.user_id or "unknown"
+        user = get_user_identifier(entry)
         user_counter[user] += 1
 
     return user_counter.most_common()

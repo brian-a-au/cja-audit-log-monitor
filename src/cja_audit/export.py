@@ -127,6 +127,58 @@ def export_to_csv(
     return count
 
 
+def export_to_tsv(
+    entries: list[AuditLogEntry] | Iterator[AuditLogEntry],
+    output: Path | TextIO,
+) -> int:
+    """Export audit logs to TSV (tab-separated values) file.
+
+    Args:
+        entries: Audit log entries to export.
+        output: Output file path or file object.
+
+    Returns:
+        Number of entries exported.
+    """
+    fieldnames = [
+        "id",
+        "timestamp",
+        "user_id",
+        "user_email",
+        "action",
+        "component_type",
+        "component_id",
+        "component_name",
+        "description",
+        "org_id",
+        "ip_address",
+    ]
+
+    count = 0
+
+    def write_tsv(f: TextIO) -> int:
+        nonlocal count
+        writer = csv.DictWriter(
+            f, fieldnames=fieldnames, extrasaction="ignore", delimiter="\t"
+        )
+        writer.writeheader()
+
+        for entry in entries:
+            row = entry_to_dict(entry)
+            writer.writerow(row)
+            count += 1
+
+        return count
+
+    if isinstance(output, Path):
+        with open(output, "w", newline="") as f:
+            write_tsv(f)
+    else:
+        write_tsv(output)
+
+    return count
+
+
 def export_entries(
     entries: list[AuditLogEntry] | Iterator[AuditLogEntry],
     output_path: Path,
@@ -138,7 +190,7 @@ def export_entries(
     Args:
         entries: Audit log entries to export.
         output_path: Output file path.
-        format: Output format ('json' or 'csv').
+        format: Output format ('json', 'csv', or 'tsv').
         pretty: For JSON, whether to pretty-print.
 
     Returns:
@@ -153,8 +205,10 @@ def export_entries(
         return export_to_json(entries, output_path, pretty=pretty)
     elif format == "csv":
         return export_to_csv(entries, output_path)
+    elif format == "tsv":
+        return export_to_tsv(entries, output_path)
     else:
-        raise ValueError(f"Unsupported export format: {format}. Use 'json' or 'csv'.")
+        raise ValueError(f"Unsupported export format: {format}. Use 'json', 'csv', or 'tsv'.")
 
 
 def export_stats_to_json(

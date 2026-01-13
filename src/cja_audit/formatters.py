@@ -1,6 +1,7 @@
 """Rich formatters for CLI output."""
 
 from datetime import datetime
+from typing import Any
 
 from rich.console import Console
 from rich.panel import Panel
@@ -8,6 +9,7 @@ from rich.table import Table
 from rich.text import Text
 
 from .models import ActionType, AuditLogEntry
+from .utils import get_user_identifier
 
 # Color mapping for action types
 ACTION_COLORS = {
@@ -79,7 +81,7 @@ def format_logs_table(
 
         row = [
             format_timestamp(entry.timestamp),
-            entry.user_email or entry.user_id or "-",
+            get_user_identifier(entry, default="-"),
             action_text,
             entry.component_type or "-",
             entry.component_name or entry.component_id or "-",
@@ -108,7 +110,7 @@ def format_single_entry(entry: AuditLogEntry) -> Panel:
     content.append(f"{format_timestamp(entry.timestamp)}\n")
 
     content.append("User: ", style="bold")
-    content.append(f"{entry.user_email or entry.user_id or '-'}\n")
+    content.append(f"{get_user_identifier(entry, default='-')}\n")
 
     content.append("Component Type: ", style="bold")
     content.append(f"{entry.component_type or '-'}\n")
@@ -136,7 +138,7 @@ def format_single_entry(entry: AuditLogEntry) -> Panel:
 
 
 def format_stats_panel(
-    stats: dict,
+    stats: dict[str, Any],
     title: str = "Audit Log Statistics",
 ) -> Panel:
     """Format statistics as a Rich panel."""
@@ -232,7 +234,7 @@ def format_alert(
     content.append(f"{format_timestamp(entry.timestamp)}\n")
 
     content.append("User: ", style="bold")
-    content.append(f"{entry.user_email or entry.user_id}\n")
+    content.append(f"{get_user_identifier(entry)}\n")
 
     content.append("Action: ", style="bold")
     action_color = get_action_color(entry.action or "")
@@ -266,7 +268,7 @@ def print_logs(
     console.print(f"\n[dim]Showing {len(entries)} entries[/dim]")
 
 
-def print_stats(stats: dict, console: Console | None = None) -> None:
+def print_stats(stats: dict[str, Any], console: Console | None = None) -> None:
     """Print statistics to console."""
     if console is None:
         console = Console()

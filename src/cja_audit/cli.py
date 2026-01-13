@@ -134,13 +134,26 @@ def main(ctx: click.Context, verbose: bool, config: Path | None) -> None:
 @click.option("--limit", "-l", default=50, help="Maximum number of entries to show")
 @click.option(
     "--component",
-    "-t",
+    "-C",
     multiple=True,
     help="Filter by component type (can specify multiple)",
 )
-@click.option("--details", "-d", is_flag=True, help="Show additional details")
+@click.option("--details", "-D", is_flag=True, help="Show additional details")
+@click.option(
+    "--output-format",
+    "-F",
+    type=click.Choice(["table", "json"]),
+    default="table",
+    help="Output format",
+)
 @click.pass_context
-def list(ctx: click.Context, limit: int, component: tuple[str, ...], details: bool) -> None:
+def list(
+    ctx: click.Context,
+    limit: int,
+    component: tuple[str, ...],
+    details: bool,
+    output_format: str,
+) -> None:
     """List recent audit log entries."""
     config_path = ctx.obj.get("config_path")
 
@@ -156,12 +169,22 @@ def list(ctx: click.Context, limit: int, component: tuple[str, ...], details: bo
             entries = client.get_all_logs(query, max_entries=limit)
 
         if not entries:
-            console.print("[dim]No audit logs found.[/dim]")
+            if output_format == "json":
+                import json
+                console.print(json.dumps({"entries": [], "count": 0}))
+            else:
+                console.print("[dim]No audit logs found.[/dim]")
             return
 
-        table = format_logs_table(entries, show_details=details)
-        console.print(table)
-        console.print(f"\n[dim]Showing {len(entries)} entries[/dim]")
+        if output_format == "json":
+            import json
+            from .export import entry_to_dict
+            data = {"entries": [entry_to_dict(e) for e in entries], "count": len(entries)}
+            console.print(json.dumps(data, indent=2, default=str))
+        else:
+            table = format_logs_table(entries, show_details=details)
+            console.print(table)
+            console.print(f"\n[dim]Showing {len(entries)} entries[/dim]")
 
     except AuthenticationError as e:
         console.print(f"[red]Authentication error:[/red] {e}")
@@ -183,14 +206,21 @@ def list(ctx: click.Context, limit: int, component: tuple[str, ...], details: bo
 @click.option("--end-date", "-e", help="End date (YYYY-MM-DD)")
 @click.option(
     "--component",
-    "-t",
+    "-C",
     multiple=True,
     help="Filter by component type",
 )
 @click.option("--component-id", help="Filter by specific component ID")
-@click.option("--description", "-d", help="Search in description")
+@click.option("--description", "--desc", help="Search in description")
 @click.option("--limit", "-l", default=100, help="Maximum entries to return")
 @click.option("--details", is_flag=True, help="Show additional details")
+@click.option(
+    "--output-format",
+    "-F",
+    type=click.Choice(["table", "json"]),
+    default="table",
+    help="Output format",
+)
 @click.pass_context
 def search(
     ctx: click.Context,
@@ -203,6 +233,7 @@ def search(
     description: str | None,
     limit: int,
     details: bool,
+    output_format: str,
 ) -> None:
     """Search audit logs with filters."""
     config_path = ctx.obj.get("config_path")
@@ -225,12 +256,22 @@ def search(
             entries = client.get_all_logs(query, max_entries=limit)
 
         if not entries:
-            console.print("[dim]No matching audit logs found.[/dim]")
+            if output_format == "json":
+                import json
+                console.print(json.dumps({"entries": [], "count": 0}))
+            else:
+                console.print("[dim]No matching audit logs found.[/dim]")
             return
 
-        table = format_logs_table(entries, show_details=details)
-        console.print(table)
-        console.print(f"\n[dim]Found {len(entries)} matching entries[/dim]")
+        if output_format == "json":
+            import json
+            from .export import entry_to_dict
+            data = {"entries": [entry_to_dict(e) for e in entries], "count": len(entries)}
+            console.print(json.dumps(data, indent=2, default=str))
+        else:
+            table = format_logs_table(entries, show_details=details)
+            console.print(table)
+            console.print(f"\n[dim]Found {len(entries)} matching entries[/dim]")
 
     except AuthenticationError as e:
         console.print(f"[red]Authentication error:[/red] {e}")
@@ -273,10 +314,139 @@ def dashboard(ctx: click.Context, dashboard_id: str, limit: int) -> None:
 
 
 @main.command()
+@click.option("--user-id", "-u", required=True, help="User ID or email address")
+@click.option("--days", "-d", default=7, help="Number of days to query")
+@click.option("--limit", "-l", default=100, help="Maximum entries to return")
+@click.option(
+    "--output-format",
+    "-F",
+    type=click.Choice(["table", "json"]),
+    default="table",
+    help="Output format",
+)
+@click.pass_context
+def user(ctx: click.Context, user_id: str, days: int, limit: int, output_format: str) -> None:
+    """Show all audit events for a specific user."""
+    config_path = ctx.obj.get("config_path")
+
+    try:
+        client, settings = get_client(config_path)
+
+        query = build_date_range_query(days)
+        query.user_id = user_id
+
+        with client:
+            entries = client.get_all_logs(query, max_entries=limit)
+
+        if not entries:
+            if output_format == "json":
+                import json
+                console.print(json.dumps({"user": user_id, "entries": [], "count": 0}))
+            else:
+                console.print(f"[dim]No audit logs found for user {user_id}[/dim]")
+            return
+
+        if output_format == "json":
+            import json
+            from .export import entry_to_dict
+            data = {
+                "user": user_id,
+                "entries": [entry_to_dict(e) for e in entries],
+                "count": len(entries),
+            }
+            console.print(json.dumps(data, indent=2, default=str))
+        else:
+            console.print(f"[bold]Audit history for user:[/bold] {user_id}\n")
+            table = format_logs_table(entries, show_details=True)
+            console.print(table)
+            console.print(f"\n[dim]Found {len(entries)} entries[/dim]")
+
+    except AuthenticationError as e:
+        console.print(f"[red]Authentication error:[/red] {e}")
+        sys.exit(1)
+    except APIError as e:
+        console.print(f"[red]API error:[/red] {e}")
+        sys.exit(1)
+
+
+@main.command()
+@click.option("--id", "-i", "component_id", required=True, help="Component ID")
+@click.option(
+    "--type",
+    "-t",
+    "component_type",
+    type=click.Choice([c.value for c in ComponentType]),
+    help="Component type (optional)",
+)
+@click.option("--limit", "-l", default=100, help="Maximum entries to return")
+@click.option(
+    "--output-format",
+    "-F",
+    type=click.Choice(["table", "json"]),
+    default="table",
+    help="Output format",
+)
+@click.pass_context
+def component(
+    ctx: click.Context,
+    component_id: str,
+    component_type: str | None,
+    limit: int,
+    output_format: str,
+) -> None:
+    """Show all audit events for a specific component."""
+    config_path = ctx.obj.get("config_path")
+
+    try:
+        client, settings = get_client(config_path)
+
+        with client:
+            entries = client.get_component_logs(component_id, component_type)
+            entries = entries[:limit]
+
+        if not entries:
+            if output_format == "json":
+                import json
+                console.print(json.dumps({
+                    "component_id": component_id,
+                    "component_type": component_type,
+                    "entries": [],
+                    "count": 0,
+                }))
+            else:
+                console.print(f"[dim]No audit logs found for component {component_id}[/dim]")
+            return
+
+        if output_format == "json":
+            import json
+            from .export import entry_to_dict
+            data = {
+                "component_id": component_id,
+                "component_type": component_type,
+                "entries": [entry_to_dict(e) for e in entries],
+                "count": len(entries),
+            }
+            console.print(json.dumps(data, indent=2, default=str))
+        else:
+            type_str = f" ({component_type})" if component_type else ""
+            console.print(f"[bold]Audit history for component:[/bold] {component_id}{type_str}\n")
+            table = format_logs_table(entries, show_details=True)
+            console.print(table)
+            console.print(f"\n[dim]Found {len(entries)} entries[/dim]")
+
+    except AuthenticationError as e:
+        console.print(f"[red]Authentication error:[/red] {e}")
+        sys.exit(1)
+    except APIError as e:
+        console.print(f"[red]API error:[/red] {e}")
+        sys.exit(1)
+
+
+@main.command()
 @click.option(
     "--format",
     "-f",
-    type=click.Choice(["json", "csv"]),
+    type=click.Choice(["json", "csv", "tsv"]),
     default="json",
     help="Export format",
 )
@@ -298,7 +468,7 @@ def dashboard(ctx: click.Context, dashboard_id: str, limit: int) -> None:
 )
 @click.option(
     "--component",
-    "-t",
+    "-C",
     multiple=True,
     help="Filter by component type",
 )
@@ -357,8 +527,15 @@ def export(
 @main.command()
 @click.option("--days", "-d", default=7, help="Number of days to analyze")
 @click.option("--top", "-t", default=10, help="Number of top users to show")
+@click.option(
+    "--output-format",
+    "-F",
+    type=click.Choice(["table", "json"]),
+    default="table",
+    help="Output format",
+)
 @click.pass_context
-def stats(ctx: click.Context, days: int, top: int) -> None:
+def stats(ctx: click.Context, days: int, top: int, output_format: str) -> None:
     """Display summary statistics for audit logs."""
     config_path = ctx.obj.get("config_path")
 
@@ -366,39 +543,53 @@ def stats(ctx: click.Context, days: int, top: int) -> None:
         client, settings = get_client(config_path)
 
         query = build_date_range_query(days)
-        console.print(f"[dim]Analyzing last {days} days of audit logs...[/dim]\n")
+        if output_format != "json":
+            console.print(f"[dim]Analyzing last {days} days of audit logs...[/dim]\n")
 
         with client:
             entries = client.get_all_logs(query)
 
         if not entries:
-            console.print("[dim]No audit logs found for the specified period.[/dim]")
+            if output_format == "json":
+                import json
+                console.print(json.dumps({"statistics": {}, "anomalies": []}))
+            else:
+                console.print("[dim]No audit logs found for the specified period.[/dim]")
             return
 
         stats_data = calculate_stats(entries)
+        anomalies = analyze_for_anomalies(entries)
 
-        # Show summary panel
-        panel = format_stats_panel(stats_data, title=f"Audit Log Statistics (Last {days} Days)")
-        console.print(panel)
-        console.print()
-
-        # Show user activity table
-        if stats_data["top_users"]:
-            user_table = format_user_stats_table(stats_data["top_users"][:top])
-            console.print(user_table)
+        if output_format == "json":
+            import json
+            data = {
+                "days": days,
+                "statistics": stats_data,
+                "anomalies": anomalies,
+            }
+            console.print(json.dumps(data, indent=2, default=str))
+        else:
+            # Show summary panel
+            panel = format_stats_panel(stats_data, title=f"Audit Log Statistics (Last {days} Days)")
+            console.print(panel)
             console.print()
 
-        # Show action distribution
-        if stats_data["action_counts"]:
-            action_table = format_action_stats_table(stats_data["action_counts"])
-            console.print(action_table)
+            # Show user activity table
+            if stats_data["top_users"]:
+                user_table = format_user_stats_table(stats_data["top_users"][:top])
+                console.print(user_table)
+                console.print()
 
-        # Check for anomalies
-        anomalies = analyze_for_anomalies(entries)
-        if anomalies:
-            console.print("\n[yellow bold]Potential Anomalies Detected:[/yellow bold]")
-            for anomaly in anomalies:
-                console.print(f"  [yellow]•[/yellow] {anomaly['description']}")
+            # Show action distribution
+            if stats_data["action_counts"]:
+                action_table = format_action_stats_table(stats_data["action_counts"])
+                console.print(action_table)
+
+            # Check for anomalies
+            if anomalies:
+                console.print("\n[yellow bold]Potential Anomalies Detected:[/yellow bold]")
+                for anomaly in anomalies:
+                    console.print(f"  [yellow]•[/yellow] {anomaly['description']}")
 
     except AuthenticationError as e:
         console.print(f"[red]Authentication error:[/red] {e}")
@@ -410,7 +601,7 @@ def stats(ctx: click.Context, days: int, top: int) -> None:
 
 @main.command()
 @click.option("--interval", "-i", default=60, help="Polling interval in seconds")
-@click.option("--duration", "-d", type=int, help="Duration in seconds (default: indefinite)")
+@click.option("--duration", "-D", type=int, help="Duration in seconds (default: indefinite)")
 @click.option("--alerts/--no-alerts", default=True, help="Enable alert detection")
 @click.pass_context
 def monitor(

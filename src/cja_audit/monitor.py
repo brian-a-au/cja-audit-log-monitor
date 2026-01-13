@@ -15,6 +15,7 @@ from .alerts import AlertEngine
 from .client import AuditLogsClient
 from .formatters import format_single_entry, get_action_color
 from .models import AuditLogEntry, AuditLogQuery
+from .utils import get_user_identifier
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +121,7 @@ class AuditLogMonitor:
         text.append(f"[{timestamp}] ", style="dim")
         text.append(f"{entry.action or '-'}", style=action_color)
         text.append(" | ")
-        text.append(f"{entry.user_email or entry.user_id or '-'}", style="cyan")
+        text.append(f"{get_user_identifier(entry, default='-')}", style="cyan")
         text.append(" | ")
         text.append(f"{entry.component_type or '-'}", style="yellow")
         text.append(" | ")

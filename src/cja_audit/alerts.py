@@ -9,6 +9,7 @@ from rich.panel import Panel
 
 from .formatters import format_alert
 from .models import ActionType, AlertRule, AuditLogEntry, ComponentType
+from .utils import get_user_identifier
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +68,6 @@ class AlertEngine:
         """
         self.rules = rules if rules is not None else DEFAULT_ALERT_RULES
         self._event_history: dict[str, list[tuple[datetime, AuditLogEntry]]] = defaultdict(list)
-        self._alert_callbacks: list[Any] = []
 
     def add_rule(self, rule: AlertRule) -> None:
         """Add an alert rule.
@@ -169,7 +169,7 @@ class AlertEngine:
 
         # Check user match
         if rule.users:
-            user = entry.user_email or entry.user_id
+            user = get_user_identifier(entry)
             if user not in rule.users:
                 return False
 
@@ -215,7 +215,7 @@ class AlertEngine:
                     "Alert triggered: %s - %s events by %s",
                     rule.name,
                     event_count,
-                    entry.user_email or entry.user_id,
+                    get_user_identifier(entry),
                 )
 
                 # Clear history to avoid repeated alerts
@@ -278,7 +278,7 @@ def analyze_for_anomalies(entries: list[AuditLogEntry]) -> list[dict[str, Any]]:
     # Group by user
     user_actions: dict[str, list[AuditLogEntry]] = defaultdict(list)
     for entry in entries:
-        user = entry.user_email or entry.user_id or "unknown"
+        user = get_user_identifier(entry)
         user_actions[user].append(entry)
 
     # Check for users with unusually high activity
@@ -298,7 +298,7 @@ def analyze_for_anomalies(entries: list[AuditLogEntry]) -> list[dict[str, Any]]:
     # Check for concentrated delete activity
     delete_entries = [e for e in entries if e.action == ActionType.DELETE.value]
     if len(delete_entries) > 10:
-        delete_users = set(e.user_email or e.user_id for e in delete_entries)
+        delete_users = set(get_user_identifier(e) for e in delete_entries)
         if len(delete_users) == 1:
             anomalies.append({
                 "type": "bulk_delete_single_user",
