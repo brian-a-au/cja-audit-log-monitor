@@ -2,6 +2,9 @@
 
 A command-line interface (CLI) tool for querying and analyzing Adobe Customer Journey Analytics (CJA) audit logs.
 
+<img width="1024" height="559" alt="image" src="https://github.com/user-attachments/assets/319be771-a7f5-41f8-87f0-ee0af3fbcc8c" />
+
+
 ## Features
 
 - **List & Search**: Query audit logs with filters for user, action, component, and date range
