@@ -1,8 +1,6 @@
 """Tests for Pydantic models."""
 
-from datetime import datetime, timezone
-
-import pytest
+from datetime import UTC, datetime
 
 from cja_audit.models import (
     ActionType,
@@ -130,8 +128,8 @@ class TestAuditLogQuery:
 
     def test_to_query_params_with_dates(self) -> None:
         """Test query params with date range."""
-        start = datetime(2024, 1, 1, tzinfo=timezone.utc)
-        end = datetime(2024, 1, 31, tzinfo=timezone.utc)
+        start = datetime(2024, 1, 1, tzinfo=UTC)
+        end = datetime(2024, 1, 31, tzinfo=UTC)
 
         query = AuditLogQuery(start_date=start, end_date=end)
         params = query.to_query_params()

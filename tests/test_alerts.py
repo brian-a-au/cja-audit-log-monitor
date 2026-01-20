@@ -1,10 +1,10 @@
 """Tests for alerts module."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
-from cja_audit.alerts import AlertEngine, DEFAULT_ALERT_RULES, analyze_for_anomalies
+from cja_audit.alerts import DEFAULT_ALERT_RULES, AlertEngine, analyze_for_anomalies
 from cja_audit.models import ActionType, AlertRule, AuditLogEntry, ComponentType
 
 
@@ -142,7 +142,7 @@ class TestAlertEngine:
 
         entry = AuditLogEntry(
             action="DELETE",
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
         )
 
         # First two should not trigger
@@ -166,8 +166,8 @@ class TestAlertEngine:
         engine = AlertEngine(rules=[rule])
 
         entries = [
-            AuditLogEntry(action="DELETE", timestamp=datetime.now(timezone.utc)),
-            AuditLogEntry(action="DELETE", timestamp=datetime.now(timezone.utc)),
+            AuditLogEntry(action="DELETE", timestamp=datetime.now(UTC)),
+            AuditLogEntry(action="DELETE", timestamp=datetime.now(UTC)),
         ]
 
         alerts = engine.check_batch(entries)
@@ -190,7 +190,7 @@ class TestAlertEngine:
         )
         engine = AlertEngine(rules=[rule])
 
-        entry = AuditLogEntry(action="DELETE", timestamp=datetime.now(timezone.utc))
+        entry = AuditLogEntry(action="DELETE", timestamp=datetime.now(UTC))
         alerts = engine.check_entry(entry)
         assert len(alerts) == 0
 
@@ -206,10 +206,13 @@ class TestAnalyzeForAnomalies:
     def test_high_activity_user(self) -> None:
         """Test detection of unusually active user."""
         entries = []
-        # Create entries where one user has 3x average activity
-        for i in range(10):
-            entries.append(AuditLogEntry(user_email="normal@example.com"))
-        for i in range(40):
+        # Create entries where one user has > 3x average activity
+        # 4 users with 5 entries each (20 total) + 1 user with 60 entries = 80 total
+        # Average = 80/5 = 16, so 60 > 16*3 = 48 triggers the anomaly
+        for i in range(4):
+            for _ in range(5):
+                entries.append(AuditLogEntry(user_email=f"normal{i}@example.com"))
+        for _ in range(60):
             entries.append(AuditLogEntry(user_email="active@example.com"))
 
         anomalies = analyze_for_anomalies(entries)
@@ -245,7 +248,7 @@ class TestAnalyzeForAnomalies:
         """Test detection of off-hours activity."""
         entries = [
             AuditLogEntry(
-                timestamp=datetime(2024, 1, 15, 3, 0, 0, tzinfo=timezone.utc),  # 3 AM
+                timestamp=datetime(2024, 1, 15, 3, 0, 0, tzinfo=UTC),  # 3 AM
                 action="CREATE",
             )
             for _ in range(50)

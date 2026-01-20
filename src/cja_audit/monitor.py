@@ -3,17 +3,15 @@
 import logging
 import signal
 import time
-from datetime import datetime, timedelta, timezone
-from typing import Callable
+from collections.abc import Callable
+from datetime import datetime, timedelta
 
 from rich.console import Console
-from rich.live import Live
-from rich.spinner import Spinner
 from rich.text import Text
 
 from .alerts import AlertEngine
 from .client import AuditLogsClient
-from .formatters import format_single_entry, get_action_color
+from .formatters import get_action_color
 from .models import AuditLogEntry, AuditLogQuery
 from .utils import get_user_identifier
 

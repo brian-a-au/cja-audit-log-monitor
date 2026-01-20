@@ -4,7 +4,7 @@ import pytest
 from pytest_httpx import HTTPXMock
 
 from cja_audit.auth import TokenManager
-from cja_audit.client import AuditLogsClient, APIError, RateLimitError
+from cja_audit.client import APIError, AuditLogsClient
 from cja_audit.config import CJASettings
 from cja_audit.models import AuditLogQuery
 

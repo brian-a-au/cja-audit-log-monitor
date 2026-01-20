@@ -2,9 +2,8 @@
 
 import logging
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
 
 import click
 from rich.console import Console
@@ -27,7 +26,6 @@ from .formatters import (
     format_single_entry,
     format_stats_panel,
     format_user_stats_table,
-    print_logs,
 )
 from .models import ActionType, AuditLogQuery, ComponentType
 from .monitor import AuditLogMonitor
@@ -74,7 +72,7 @@ def parse_date(date_str: str | None) -> datetime | None:
         try:
             dt = datetime.strptime(date_str, fmt)
             if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
+                dt = dt.replace(tzinfo=UTC)
             return dt
         except ValueError:
             continue
@@ -178,6 +176,7 @@ def list(
 
         if output_format == "json":
             import json
+
             from .export import entry_to_dict
             data = {"entries": [entry_to_dict(e) for e in entries], "count": len(entries)}
             console.print(json.dumps(data, indent=2, default=str))
@@ -265,6 +264,7 @@ def search(
 
         if output_format == "json":
             import json
+
             from .export import entry_to_dict
             data = {"entries": [entry_to_dict(e) for e in entries], "count": len(entries)}
             console.print(json.dumps(data, indent=2, default=str))
@@ -348,6 +348,7 @@ def user(ctx: click.Context, user_id: str, days: int, limit: int, output_format:
 
         if output_format == "json":
             import json
+
             from .export import entry_to_dict
             data = {
                 "user": user_id,
@@ -419,6 +420,7 @@ def component(
 
         if output_format == "json":
             import json
+
             from .export import entry_to_dict
             data = {
                 "component_id": component_id,
@@ -504,7 +506,7 @@ def export(
             query.actions = parse_actions(action)
             query.components = parse_components(component)
 
-        console.print(f"[dim]Fetching audit logs...[/dim]")
+        console.print("[dim]Fetching audit logs...[/dim]")
 
         with client:
             entries = client.get_all_logs(query)
@@ -619,7 +621,8 @@ def monitor(
         alert_engine = None
         if alerts:
             alert_engine = AlertEngine(settings.alert_rules or None)
-            console.print(f"[dim]Alert detection enabled with {len(alert_engine.rules)} rules[/dim]")
+            rule_count = len(alert_engine.rules)
+            console.print(f"[dim]Alert detection enabled with {rule_count} rules[/dim]")
 
         monitor = AuditLogMonitor(
             client,
@@ -677,8 +680,10 @@ def config(ctx: click.Context) -> None:
         console.print(f"Monitor interval: {settings.monitor_interval}s")
         console.print(f"OAuth configured: {settings.is_oauth_configured()}")
         console.print(f"JWT configured: {settings.is_jwt_configured()}")
-        console.print(f"Org ID: {settings.org_id[:8]}..." if settings.org_id else "Org ID: (not set)")
-        console.print(f"Client ID: {settings.client_id[:8]}..." if settings.client_id else "Client ID: (not set)")
+        org_display = f"{settings.org_id[:8]}..." if settings.org_id else "(not set)"
+        client_display = f"{settings.client_id[:8]}..." if settings.client_id else "(not set)"
+        console.print(f"Org ID: {org_display}")
+        console.print(f"Client ID: {client_display}")
         console.print(f"Alert rules: {len(settings.alert_rules)}")
 
     except Exception as e:
@@ -702,6 +707,617 @@ def components(ctx: click.Context) -> None:
     console.print("[bold]Available Component Types[/bold]\n")
     for component in ComponentType:
         console.print(f"  {component.value}")
+
+
+@main.command()
+@click.option(
+    "--output-format",
+    "-F",
+    type=click.Choice(["table", "json"]),
+    default="table",
+    help="Output format",
+)
+@click.pass_context
+def verify(ctx: click.Context, output_format: str) -> None:
+    """Verify API connection and authentication."""
+    config_path = ctx.obj.get("config_path")
+
+    try:
+        client, settings = get_client(config_path)
+
+        if output_format != "json":
+            console.print("[dim]Verifying connection...[/dim]\n")
+
+        with client:
+            result = client.verify_connection()
+
+        if output_format == "json":
+            import json
+            console.print(json.dumps(result, indent=2, default=str))
+        else:
+            if result["connected"] and result["authenticated"]:
+                console.print("[green]✓[/green] Connection successful")
+                console.print(f"  Organization: {result['org_id']}")
+                console.print(f"  API URL: {result['api_url']}")
+                total_logs = result.get('total_logs_available', 'N/A')
+                console.print(f"  Total logs available: {total_logs}")
+            else:
+                console.print("[red]✗[/red] Connection failed")
+                if result["error"]:
+                    console.print(f"  Error: {result['error']}")
+
+    except AuthenticationError as e:
+        if output_format == "json":
+            import json
+            console.print(json.dumps({"connected": False, "error": str(e)}))
+        else:
+            console.print(f"[red]✗[/red] Authentication failed: {e}")
+        sys.exit(1)
+    except APIError as e:
+        if output_format == "json":
+            import json
+            console.print(json.dumps({"connected": False, "error": str(e)}))
+        else:
+            console.print(f"[red]✗[/red] API error: {e}")
+        sys.exit(1)
+
+
+@main.command()
+@click.option("--days", "-d", default=7, help="Number of days to analyze")
+@click.option(
+    "--output",
+    "-o",
+    type=click.Path(path_type=Path),
+    help="Output file path (default: stdout)",
+)
+@click.option("--pretty/--compact", default=True, help="Pretty print JSON")
+@click.pass_context
+def report(ctx: click.Context, days: int, output: Path | None, pretty: bool) -> None:
+    """Generate a comprehensive audit log report."""
+    config_path = ctx.obj.get("config_path")
+
+    try:
+        client, settings = get_client(config_path)
+
+        console.print(f"[dim]Generating report for the last {days} days...[/dim]\n")
+
+        query = build_date_range_query(days)
+
+        with client:
+            entries = client.get_all_logs(query)
+
+        if not entries:
+            console.print("[yellow]No audit logs found for the specified period.[/yellow]")
+            return
+
+        report_data = generate_report(entries)
+        report_data["generated_at"] = datetime.now(UTC).isoformat()
+        report_data["days_analyzed"] = days
+        report_data["anomalies"] = analyze_for_anomalies(entries)
+
+        import json
+        indent = 2 if pretty else None
+        json_output = json.dumps(report_data, indent=indent, default=str)
+
+        if output:
+            output.write_text(json_output)
+            console.print(f"[green]Report saved to {output}[/green]")
+        else:
+            console.print(json_output)
+
+    except AuthenticationError as e:
+        console.print(f"[red]Authentication error:[/red] {e}")
+        sys.exit(1)
+    except APIError as e:
+        console.print(f"[red]API error:[/red] {e}")
+        sys.exit(1)
+
+
+@main.command()
+@click.option("--interval", "-i", default=5, help="Polling interval in seconds")
+@click.option("--user", "-u", help="Filter by user ID or email")
+@click.option("--component-id", "-c", help="Filter by component ID")
+@click.option(
+    "--action",
+    "-a",
+    multiple=True,
+    help="Filter by action type (can specify multiple)",
+)
+@click.option("--alerts/--no-alerts", default=True, help="Enable alert detection")
+@click.pass_context
+def tail(
+    ctx: click.Context,
+    interval: int,
+    user: str | None,
+    component_id: str | None,
+    action: tuple[str, ...],
+    alerts: bool,
+) -> None:
+    """Follow audit logs in real-time (like tail -f)."""
+    config_path = ctx.obj.get("config_path")
+
+    try:
+        client, settings = get_client(config_path)
+
+        alert_engine = None
+        if alerts:
+            alert_engine = AlertEngine(settings.alert_rules or None)
+
+        monitor_instance = AuditLogMonitor(
+            client,
+            console=console,
+            interval=interval,
+            alert_engine=alert_engine,
+        )
+
+        # Set up filters
+        actions_filter = parse_actions(action) if action else None
+
+        # Override get_new_entries to apply filters
+        original_get_new = monitor_instance._get_new_entries
+
+        def filtered_get_new() -> list:
+            entries = original_get_new()
+            filtered = entries
+
+            if user:
+                from .utils import get_user_identifier
+                filtered = [
+                    e for e in filtered
+                    if e.user_id == user or e.user_email == user
+                    or get_user_identifier(e) == user
+                ]
+
+            if component_id:
+                filtered = [e for e in filtered if e.component_id == component_id]
+
+            if actions_filter:
+                filtered = [
+                    e for e in filtered
+                    if e.action and ActionType(e.action) in actions_filter
+                ]
+
+            return filtered
+
+        monitor_instance._get_new_entries = filtered_get_new  # type: ignore
+
+        filters_desc = []
+        if user:
+            filters_desc.append(f"user={user}")
+        if component_id:
+            filters_desc.append(f"component={component_id}")
+        if action:
+            filters_desc.append(f"actions={','.join(action)}")
+
+        filter_str = f" [dim]({', '.join(filters_desc)})[/dim]" if filters_desc else ""
+
+        console.print(f"[green]Tailing audit logs{filter_str}[/green]")
+        console.print(f"[dim]Polling every {interval}s, Ctrl+C to stop[/dim]\n")
+
+        monitor_instance.start()
+
+    except AuthenticationError as e:
+        console.print(f"[red]Authentication error:[/red] {e}")
+        sys.exit(1)
+    except APIError as e:
+        console.print(f"[red]API error:[/red] {e}")
+        sys.exit(1)
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Stopped.[/yellow]")
+
+
+# Alert rules subcommand group
+@main.group()
+@click.pass_context
+def alerts(ctx: click.Context) -> None:
+    """Manage alert rules."""
+    pass
+
+
+@alerts.command("list")
+@click.option(
+    "--output-format",
+    "-F",
+    type=click.Choice(["table", "json"]),
+    default="table",
+    help="Output format",
+)
+@click.pass_context
+def alerts_list(ctx: click.Context, output_format: str) -> None:
+    """List all alert rules."""
+    config_path = ctx.obj.get("config_path")
+
+    try:
+        settings = load_config(config_path)
+        engine = AlertEngine(settings.alert_rules or None)
+        rules_status = engine.get_rule_status()
+
+        if output_format == "json":
+            import json
+            console.print(json.dumps(rules_status, indent=2))
+        else:
+            from rich.table import Table
+
+            table = Table(title="Alert Rules")
+            table.add_column("Name", style="cyan")
+            table.add_column("Description")
+            table.add_column("Enabled", justify="center")
+            table.add_column("Threshold", justify="right")
+            table.add_column("Window", justify="right")
+            table.add_column("Actions")
+            table.add_column("Components")
+
+            for rule in rules_status:
+                enabled = "[green]✓[/green]" if rule["enabled"] else "[red]✗[/red]"
+                actions = ", ".join(rule["actions"]) if rule["actions"] else "-"
+                components = ", ".join(rule["components"][:2]) if rule["components"] else "-"
+                if rule["components"] and len(rule["components"]) > 2:
+                    components += f" +{len(rule['components']) - 2}"
+
+                table.add_row(
+                    rule["name"],
+                    rule["description"] or "-",
+                    enabled,
+                    str(rule["threshold_count"]),
+                    f"{rule['threshold_window_minutes']}m",
+                    actions,
+                    components,
+                )
+
+            console.print(table)
+
+    except Exception as e:
+        console.print(f"[red]Error:[/red] {e}")
+        sys.exit(1)
+
+
+@alerts.command("test")
+@click.option("--days", "-d", default=1, help="Number of days to analyze")
+@click.pass_context
+def alerts_test(ctx: click.Context, days: int) -> None:
+    """Test alert rules against recent logs."""
+    config_path = ctx.obj.get("config_path")
+
+    try:
+        client, settings = get_client(config_path)
+        engine = AlertEngine(settings.alert_rules or None)
+
+        console.print(f"[dim]Testing alert rules against last {days} day(s) of logs...[/dim]\n")
+
+        query = build_date_range_query(days)
+
+        with client:
+            entries = client.get_all_logs(query)
+
+        if not entries:
+            console.print("[yellow]No audit logs found.[/yellow]")
+            return
+
+        # Check all entries
+        alert_panels = engine.check_batch(entries)
+
+        if alert_panels:
+            console.print(f"[yellow bold]Found {len(alert_panels)} alerts:[/yellow bold]\n")
+            for panel in alert_panels:
+                console.print(panel)
+        else:
+            console.print("[green]No alerts triggered.[/green]")
+
+        # Also run anomaly detection
+        anomalies = analyze_for_anomalies(entries)
+        if anomalies:
+            console.print(f"\n[yellow bold]Detected {len(anomalies)} anomalies:[/yellow bold]")
+            for anomaly in anomalies:
+                console.print(f"  [yellow]•[/yellow] {anomaly['description']}")
+
+    except AuthenticationError as e:
+        console.print(f"[red]Authentication error:[/red] {e}")
+        sys.exit(1)
+    except APIError as e:
+        console.print(f"[red]API error:[/red] {e}")
+        sys.exit(1)
+
+
+@main.command()
+@click.option("--yesterday", "date_preset", flag_value="yesterday", help="Query yesterday's logs")
+@click.option("--last-week", "date_preset", flag_value="last_week", help="Query last 7 days")
+@click.option("--last-month", "date_preset", flag_value="last_month", help="Query last 30 days")
+@click.option("--today", "date_preset", flag_value="today", help="Query today's logs")
+@click.option("--user", "-u", help="Filter by user ID or email")
+@click.option(
+    "--action",
+    "-a",
+    multiple=True,
+    help="Filter by action type",
+)
+@click.option(
+    "--component",
+    "-C",
+    multiple=True,
+    help="Filter by component type",
+)
+@click.option("--limit", "-l", default=100, help="Maximum entries to return")
+@click.option(
+    "--output-format",
+    "-F",
+    type=click.Choice(["table", "json"]),
+    default="table",
+    help="Output format",
+)
+@click.option("--quiet", "-q", is_flag=True, help="Minimal output (for scripting)")
+@click.pass_context
+def query(
+    ctx: click.Context,
+    date_preset: str | None,
+    user: str | None,
+    action: tuple[str, ...],
+    component: tuple[str, ...],
+    limit: int,
+    output_format: str,
+    quiet: bool,
+) -> None:
+    """Query audit logs with date presets."""
+    config_path = ctx.obj.get("config_path")
+
+    try:
+        client, settings = get_client(config_path)
+
+        # Build date range from preset
+        now = datetime.now(UTC)
+        if date_preset == "today":
+            start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            end = now
+            label = "today"
+        elif date_preset == "yesterday":
+            yesterday = now - timedelta(days=1)
+            start = yesterday.replace(hour=0, minute=0, second=0, microsecond=0)
+            end = yesterday.replace(hour=23, minute=59, second=59, microsecond=999999)
+            label = "yesterday"
+        elif date_preset == "last_week":
+            start = now - timedelta(days=7)
+            end = now
+            label = "last 7 days"
+        elif date_preset == "last_month":
+            start = now - timedelta(days=30)
+            end = now
+            label = "last 30 days"
+        else:
+            start = now - timedelta(days=7)
+            end = now
+            label = "last 7 days"
+
+        query_obj = AuditLogQuery(
+            start_date=start,
+            end_date=end,
+            user_id=user,
+            actions=parse_actions(action),
+            components=parse_components(component),
+            page_size=min(limit, 100),
+        )
+
+        if not quiet and output_format != "json":
+            console.print(f"[dim]Querying {label}...[/dim]")
+
+        with client:
+            entries = client.get_all_logs(query_obj, max_entries=limit)
+
+        if not entries:
+            if output_format == "json":
+                import json
+                console.print(json.dumps({"entries": [], "count": 0}))
+            elif not quiet:
+                console.print("[dim]No audit logs found.[/dim]")
+            return
+
+        if output_format == "json":
+            import json
+
+            from .export import entry_to_dict
+            data = {"entries": [entry_to_dict(e) for e in entries], "count": len(entries)}
+            console.print(json.dumps(data, indent=2, default=str))
+        else:
+            table = format_logs_table(entries, show_details=False)
+            console.print(table)
+            if not quiet:
+                console.print(f"\n[dim]Found {len(entries)} entries ({label})[/dim]")
+
+    except AuthenticationError as e:
+        console.print(f"[red]Authentication error:[/red] {e}")
+        sys.exit(1)
+    except APIError as e:
+        console.print(f"[red]API error:[/red] {e}")
+        sys.exit(1)
+
+
+@main.command()
+@click.option("--days", "-d", default=7, help="Number of days to analyze")
+@click.option(
+    "--action",
+    "-a",
+    multiple=True,
+    help="Filter by action type",
+)
+@click.option(
+    "--component",
+    "-C",
+    multiple=True,
+    help="Filter by component type",
+)
+@click.option("--user", "-u", help="Filter by user")
+@click.pass_context
+def timeline(
+    ctx: click.Context,
+    days: int,
+    action: tuple[str, ...],
+    component: tuple[str, ...],
+    user: str | None,
+) -> None:
+    """Show activity timeline visualization."""
+    config_path = ctx.obj.get("config_path")
+
+    try:
+        client, settings = get_client(config_path)
+
+        query = build_date_range_query(days)
+        query.actions = parse_actions(action)
+        query.components = parse_components(component)
+        query.user_id = user
+
+        console.print(f"[dim]Loading activity for the last {days} days...[/dim]\n")
+
+        with client:
+            entries = client.get_all_logs(query)
+
+        if not entries:
+            console.print("[dim]No audit logs found.[/dim]")
+            return
+
+        from .stats import get_daily_distribution, get_hourly_distribution
+
+        daily = get_daily_distribution(entries)
+        hourly = get_hourly_distribution(entries)
+
+        # Display daily activity
+        console.print("[bold]Daily Activity[/bold]")
+        if daily:
+            max_count = max(daily.values()) if daily else 1
+            for date, count in sorted(daily.items()):
+                bar_len = int((count / max_count) * 40) if max_count > 0 else 0
+                bar = "█" * bar_len
+                console.print(f"  {date} │ {bar} {count}")
+        console.print()
+
+        # Display hourly distribution
+        console.print("[bold]Hourly Distribution[/bold]")
+        max_hourly = max(hourly.values()) if hourly else 1
+        for hour in range(24):
+            count = hourly.get(hour, 0)
+            bar_len = int((count / max_hourly) * 30) if max_hourly > 0 else 0
+            bar = "█" * bar_len
+            console.print(f"  {hour:02d}:00 │ {bar} {count}")
+
+    except AuthenticationError as e:
+        console.print(f"[red]Authentication error:[/red] {e}")
+        sys.exit(1)
+    except APIError as e:
+        console.print(f"[red]API error:[/red] {e}")
+        sys.exit(1)
+
+
+@main.command()
+@click.option(
+    "--action",
+    "-a",
+    required=True,
+    type=click.Choice([a.value for a in ActionType]),
+    help="Action type to find",
+)
+@click.option("--days", "-d", default=7, help="Number of days to search")
+@click.option("--limit", "-l", default=50, help="Maximum entries to show")
+@click.pass_context
+def find_action(ctx: click.Context, action: str, days: int, limit: int) -> None:
+    """Find all occurrences of a specific action type."""
+    config_path = ctx.obj.get("config_path")
+
+    try:
+        client, settings = get_client(config_path)
+
+        query = build_date_range_query(days)
+        query.actions = [ActionType(action)]
+
+        console.print(f"[dim]Searching for {action} actions in the last {days} days...[/dim]\n")
+
+        with client:
+            entries = client.get_all_logs(query, max_entries=limit)
+
+        if not entries:
+            console.print(f"[dim]No {action} actions found.[/dim]")
+            return
+
+        table = format_logs_table(entries, show_details=True)
+        console.print(table)
+        console.print(f"\n[dim]Found {len(entries)} {action} actions[/dim]")
+
+    except AuthenticationError as e:
+        console.print(f"[red]Authentication error:[/red] {e}")
+        sys.exit(1)
+    except APIError as e:
+        console.print(f"[red]API error:[/red] {e}")
+        sys.exit(1)
+
+
+@main.command()
+@click.option("--days", "-d", default=7, help="Number of days to analyze")
+@click.option("--top", "-t", default=10, help="Number of top items to show")
+@click.pass_context
+def top_users(ctx: click.Context, days: int, top: int) -> None:
+    """Show most active users."""
+    config_path = ctx.obj.get("config_path")
+
+    try:
+        client, settings = get_client(config_path)
+
+        query = build_date_range_query(days)
+
+        console.print(f"[dim]Analyzing user activity for the last {days} days...[/dim]\n")
+
+        with client:
+            entries = client.get_all_logs(query)
+
+        if not entries:
+            console.print("[dim]No audit logs found.[/dim]")
+            return
+
+        from .stats import get_user_activity
+
+        users = get_user_activity(entries)[:top]
+
+        user_table = format_user_stats_table(users)
+        console.print(user_table)
+
+    except AuthenticationError as e:
+        console.print(f"[red]Authentication error:[/red] {e}")
+        sys.exit(1)
+    except APIError as e:
+        console.print(f"[red]API error:[/red] {e}")
+        sys.exit(1)
+
+
+@main.command()
+@click.argument("entry_id")
+@click.pass_context
+def show(ctx: click.Context, entry_id: str) -> None:
+    """Show detailed information for a specific audit log entry."""
+    config_path = ctx.obj.get("config_path")
+
+    try:
+        client, settings = get_client(config_path)
+
+        # Search for the entry by ID
+        query = AuditLogQuery(page_size=100)
+
+        with client:
+            # We need to search through logs to find the entry
+            found_entry = None
+            for entry in client.get_logs_paginated(query, max_pages=10):
+                if entry.id == entry_id:
+                    found_entry = entry
+                    break
+
+        if not found_entry:
+            console.print(f"[yellow]Entry not found: {entry_id}[/yellow]")
+            console.print("[dim]Note: Only recent entries can be found this way.[/dim]")
+            return
+
+        panel = format_single_entry(found_entry)
+        console.print(panel)
+
+    except AuthenticationError as e:
+        console.print(f"[red]Authentication error:[/red] {e}")
+        sys.exit(1)
+    except APIError as e:
+        console.print(f"[red]API error:[/red] {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

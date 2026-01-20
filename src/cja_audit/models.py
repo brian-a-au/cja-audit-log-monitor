@@ -164,3 +164,23 @@ class AlertRule(BaseModel):
     threshold_count: int = 1
     threshold_window_minutes: int = 60
     users: list[str] | None = None
+
+
+class WebhookConfig(BaseModel):
+    """Configuration for webhook notifications."""
+
+    url: str
+    enabled: bool = True
+    method: str = "POST"
+    headers: dict[str, str] | None = None
+    timeout: int = 30
+    include_entry_details: bool = True
+
+
+class NotificationConfig(BaseModel):
+    """Configuration for alert notifications."""
+
+    webhooks: list[WebhookConfig] = Field(default_factory=list)
+    slack_webhook_url: str | None = None
+    notify_on_anomalies: bool = True
+    notify_on_alerts: bool = True

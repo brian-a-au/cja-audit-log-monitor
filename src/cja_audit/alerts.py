@@ -2,7 +2,7 @@
 
 import logging
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from rich.panel import Panel
@@ -66,7 +66,11 @@ class AlertEngine:
         Args:
             rules: Alert rules to use. Defaults to DEFAULT_ALERT_RULES.
         """
-        self.rules = rules if rules is not None else DEFAULT_ALERT_RULES
+        # Create a copy of rules to avoid sharing state between instances
+        if rules is not None:
+            self.rules = list(rules)
+        else:
+            self.rules = [AlertRule(**rule.model_dump()) for rule in DEFAULT_ALERT_RULES]
         self._event_history: dict[str, list[tuple[datetime, AuditLogEntry]]] = defaultdict(list)
 
     def add_rule(self, rule: AlertRule) -> None:
@@ -128,7 +132,7 @@ class AlertEngine:
         Args:
             rule: Rule to clean events for.
         """
-        cutoff = datetime.now(timezone.utc) - timedelta(minutes=rule.threshold_window_minutes)
+        cutoff = datetime.now(UTC) - timedelta(minutes=rule.threshold_window_minutes)
         key = rule.name
 
         self._event_history[key] = [
@@ -185,7 +189,7 @@ class AlertEngine:
             List of alert panels for triggered alerts.
         """
         alerts: list[Panel] = []
-        timestamp = entry.timestamp or datetime.now(timezone.utc)
+        timestamp = entry.timestamp or datetime.now(UTC)
 
         for rule in self.rules:
             if not rule.enabled:

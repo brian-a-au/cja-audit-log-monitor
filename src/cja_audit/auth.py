@@ -2,7 +2,7 @@
 
 import logging
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import httpx
@@ -44,7 +44,7 @@ class TokenManager:
             )
 
         # Set expiry with 5 minute buffer
-        self._token_expiry = datetime.now(timezone.utc) + timedelta(
+        self._token_expiry = datetime.now(UTC) + timedelta(
             seconds=self._token.expires_in - 300
         )
         self._token.expires_at = self._token_expiry
@@ -56,7 +56,7 @@ class TokenManager:
         """Check if current token is still valid."""
         if not self._token or not self._token_expiry:
             return False
-        return datetime.now(timezone.utc) < self._token_expiry
+        return datetime.now(UTC) < self._token_expiry
 
     def _get_oauth_token(self) -> TokenInfo:
         """Get token using OAuth Server-to-Server flow."""

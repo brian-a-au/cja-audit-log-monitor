@@ -1,6 +1,6 @@
 """Tests for monitoring module."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
 import pytest
@@ -45,7 +45,7 @@ class TestAuditLogMonitor:
         entries = [
             AuditLogEntry(
                 id="entry-1",
-                timestamp=datetime(2024, 1, 15, 10, 0, 0, tzinfo=timezone.utc),
+                timestamp=datetime(2024, 1, 15, 10, 0, 0, tzinfo=UTC),
             ),
         ]
         mock_client.get_logs.return_value = AuditLogResponse(content=entries)
@@ -64,11 +64,11 @@ class TestAuditLogMonitor:
         entries = [
             AuditLogEntry(
                 id="entry-2",
-                timestamp=datetime(2024, 1, 15, 10, 1, 0, tzinfo=timezone.utc),
+                timestamp=datetime(2024, 1, 15, 10, 1, 0, tzinfo=UTC),
             ),
             AuditLogEntry(
                 id="entry-1",
-                timestamp=datetime(2024, 1, 15, 10, 0, 0, tzinfo=timezone.utc),
+                timestamp=datetime(2024, 1, 15, 10, 0, 0, tzinfo=UTC),
             ),
         ]
         mock_client.get_logs.return_value = AuditLogResponse(content=entries)

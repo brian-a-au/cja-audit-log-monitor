@@ -1,11 +1,11 @@
 """Pytest fixtures for CJA Audit tests."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
 from cja_audit.config import CJASettings
-from cja_audit.models import AuditLogEntry, AuditLogResponse
+from cja_audit.models import AuditLogEntry
 
 
 @pytest.fixture
@@ -24,7 +24,7 @@ def sample_audit_entry() -> AuditLogEntry:
     """Create a sample audit log entry."""
     return AuditLogEntry(
         id="entry-123",
-        timestamp=datetime(2024, 1, 15, 10, 30, 0, tzinfo=timezone.utc),
+        timestamp=datetime(2024, 1, 15, 10, 30, 0, tzinfo=UTC),
         user_id="user-456",
         user_email="user@example.com",
         action="CREATE",
@@ -43,7 +43,7 @@ def sample_audit_entries() -> list[AuditLogEntry]:
     return [
         AuditLogEntry(
             id=f"entry-{i}",
-            timestamp=datetime(2024, 1, 15, 10, i, 0, tzinfo=timezone.utc),
+            timestamp=datetime(2024, 1, 15, 10, i, 0, tzinfo=UTC),
             user_id=f"user-{i % 3}",
             user_email=f"user{i % 3}@example.com",
             action=["CREATE", "EDIT", "DELETE"][i % 3],

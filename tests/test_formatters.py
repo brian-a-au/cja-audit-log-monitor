@@ -1,9 +1,7 @@
 """Tests for formatters module."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-import pytest
-from rich.console import Console
 from rich.table import Table
 
 from cja_audit.formatters import (
@@ -45,7 +43,7 @@ class TestFormatTimestamp:
 
     def test_format_datetime(self) -> None:
         """Test formatting datetime."""
-        dt = datetime(2024, 1, 15, 10, 30, 45, tzinfo=timezone.utc)
+        dt = datetime(2024, 1, 15, 10, 30, 45, tzinfo=UTC)
         result = format_timestamp(dt)
         assert "2024-01-15" in result
         assert "10:30:45" in result

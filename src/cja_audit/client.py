@@ -35,7 +35,7 @@ class AuditLogsClient:
     """Client for querying CJA audit logs API."""
 
     AUDIT_LOGS_PATH = "/auditlogs/api/v1/auditlogs"
-    SEARCH_PATH = "/auditlogs/search"
+    SEARCH_PATH = "/auditlogs/api/v1/auditlogs/search"
 
     def __init__(
         self,
@@ -181,8 +181,7 @@ class AuditLogsClient:
             query.page = page
             response = self.get_logs(query)
 
-            for entry in response.content:
-                yield entry
+            yield from response.content
 
             pages_fetched += 1
 
@@ -274,3 +273,33 @@ class AuditLogsClient:
         query.user_id = user_id
 
         return self.get_all_logs(query)
+
+    def verify_connection(self) -> dict[str, Any]:
+        """Verify API connection and authentication.
+
+        Returns:
+            Dictionary with connection status and details.
+        """
+        result: dict[str, Any] = {
+            "connected": False,
+            "authenticated": False,
+            "org_id": self.settings.org_id,
+            "api_url": self.settings.api_base_url,
+            "error": None,
+        }
+
+        try:
+            # First check if we can get a token
+            token = self.token_manager.get_token()
+            result["authenticated"] = bool(token)
+
+            # Try to fetch a single log entry to verify API access
+            query = AuditLogQuery(page_size=1)
+            response = self.get_logs(query)
+            result["connected"] = True
+            result["total_logs_available"] = response.total_elements
+
+        except Exception as e:
+            result["error"] = str(e)
+
+        return result

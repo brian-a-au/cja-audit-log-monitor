@@ -1,7 +1,7 @@
 """Statistics and reporting for audit logs."""
 
 from collections import Counter
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from .models import AuditLogEntry, AuditLogQuery
 from .utils import get_user_identifier
@@ -163,7 +163,7 @@ def get_trend(
     Returns:
         Dictionary with date keys and action counts as values.
     """
-    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    cutoff = datetime.now(UTC) - timedelta(days=days)
     recent = [e for e in entries if e.timestamp and e.timestamp >= cutoff]
 
     trend: dict[str, Counter[str]] = {}
@@ -206,7 +206,7 @@ def build_date_range_query(days: int) -> AuditLogQuery:
     Returns:
         AuditLogQuery with date range set.
     """
-    end_date = datetime.now(timezone.utc)
+    end_date = datetime.now(UTC)
     start_date = end_date - timedelta(days=days)
 
     return AuditLogQuery(

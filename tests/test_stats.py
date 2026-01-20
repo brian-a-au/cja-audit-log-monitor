@@ -1,8 +1,6 @@
 """Tests for statistics module."""
 
-from datetime import datetime, timezone
 
-import pytest
 
 from cja_audit.models import AuditLogEntry
 from cja_audit.stats import (

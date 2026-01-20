@@ -8,7 +8,7 @@ import yaml
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from .models import AlertRule
+from .models import AlertRule, NotificationConfig
 
 DEFAULT_CONFIG_DIR = Path.home() / ".cja-audit"
 DEFAULT_CONFIG_FILE = DEFAULT_CONFIG_DIR / "config.yaml"
@@ -57,6 +57,10 @@ class CJASettings(BaseSettings):
 
     # Alert settings
     alert_rules: list[AlertRule] = Field(default_factory=list)
+
+    # Notification settings
+    notifications: NotificationConfig = Field(default_factory=NotificationConfig)
+    slack_webhook_url: str = Field(default="", description="Slack webhook URL for alerts")
 
     @property
     def scopes_list(self) -> list[str]:
