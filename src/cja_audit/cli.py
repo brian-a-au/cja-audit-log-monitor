@@ -110,7 +110,7 @@ def parse_components(components: tuple[str, ...] | None) -> list[ComponentType] 
     return result
 
 
-@click.group()
+@click.group(invoke_without_command=True)
 @click.option("--verbose", "-v", is_flag=True, help="Enable verbose logging")
 @click.option(
     "--config",
@@ -121,14 +121,33 @@ def parse_components(components: tuple[str, ...] | None) -> list[ComponentType] 
 @click.version_option(version=__version__)
 @click.pass_context
 def main(ctx: click.Context, verbose: bool, config: Path | None) -> None:
-    """CJA Audit Log Monitor - Query and analyze Adobe CJA audit logs."""
+    """CJA Audit Log Monitor - Query and analyze Adobe CJA audit logs.
+
+    Running without a subcommand launches the TUI interface.
+    Use 'cja-audit cli <command>' for traditional CLI commands.
+    """
     setup_logging(verbose)
     ctx.ensure_object(dict)
     ctx.obj["verbose"] = verbose
     ctx.obj["config_path"] = config
 
+    # If no subcommand is given, launch the TUI
+    if ctx.invoked_subcommand is None:
+        from .tui import CJAAuditApp
 
-@main.command()
+        app = CJAAuditApp(config)
+        app.run()
+
+
+# CLI subcommand group for traditional CLI commands
+@main.group()
+@click.pass_context
+def cli(ctx: click.Context) -> None:
+    """Traditional CLI commands for scripting and automation."""
+    pass
+
+
+@cli.command("list")
 @click.option("--limit", "-l", default=50, help="Maximum number of entries to show")
 @click.option(
     "--component",
@@ -145,7 +164,7 @@ def main(ctx: click.Context, verbose: bool, config: Path | None) -> None:
     help="Output format",
 )
 @click.pass_context
-def list(
+def cli_list(
     ctx: click.Context,
     limit: int,
     component: tuple[str, ...],
@@ -193,7 +212,7 @@ def list(
         sys.exit(1)
 
 
-@main.command()
+@cli.command()
 @click.option("--user", "-u", help="Filter by user ID or email")
 @click.option(
     "--action",
@@ -281,7 +300,7 @@ def search(
         sys.exit(1)
 
 
-@main.command()
+@cli.command()
 @click.option("--dashboard-id", "-i", required=True, help="Dashboard/Project ID")
 @click.option("--limit", "-l", default=100, help="Maximum entries to return")
 @click.pass_context
@@ -313,7 +332,7 @@ def dashboard(ctx: click.Context, dashboard_id: str, limit: int) -> None:
         sys.exit(1)
 
 
-@main.command()
+@cli.command()
 @click.option("--user-id", "-u", required=True, help="User ID or email address")
 @click.option("--days", "-d", default=7, help="Number of days to query")
 @click.option("--limit", "-l", default=100, help="Maximum entries to return")
@@ -370,7 +389,7 @@ def user(ctx: click.Context, user_id: str, days: int, limit: int, output_format:
         sys.exit(1)
 
 
-@main.command()
+@cli.command()
 @click.option("--id", "-i", "component_id", required=True, help="Component ID")
 @click.option(
     "--type",
@@ -444,7 +463,7 @@ def component(
         sys.exit(1)
 
 
-@main.command()
+@cli.command()
 @click.option(
     "--format",
     "-f",
@@ -526,7 +545,7 @@ def export(
         sys.exit(1)
 
 
-@main.command()
+@cli.command()
 @click.option("--days", "-d", default=7, help="Number of days to analyze")
 @click.option("--top", "-t", default=10, help="Number of top users to show")
 @click.option(
@@ -601,7 +620,7 @@ def stats(ctx: click.Context, days: int, top: int, output_format: str) -> None:
         sys.exit(1)
 
 
-@main.command()
+@cli.command()
 @click.option("--interval", "-i", default=60, help="Polling interval in seconds")
 @click.option("--duration", "-D", type=int, help="Duration in seconds (default: indefinite)")
 @click.option("--alerts/--no-alerts", default=True, help="Enable alert detection")
@@ -624,14 +643,14 @@ def monitor(
             rule_count = len(alert_engine.rules)
             console.print(f"[dim]Alert detection enabled with {rule_count} rules[/dim]")
 
-        monitor = AuditLogMonitor(
+        monitor_instance = AuditLogMonitor(
             client,
             console=console,
             interval=interval,
             alert_engine=alert_engine,
         )
 
-        monitor.start(duration=duration)
+        monitor_instance.start(duration=duration)
 
     except AuthenticationError as e:
         console.print(f"[red]Authentication error:[/red] {e}")
@@ -643,7 +662,7 @@ def monitor(
         console.print("\n[yellow]Monitor stopped.[/yellow]")
 
 
-@main.command()
+@cli.command()
 @click.pass_context
 def init(ctx: click.Context) -> None:
     """Initialize configuration file."""
@@ -662,7 +681,7 @@ def init(ctx: click.Context) -> None:
     console.print("\n[dim]Or add them to a .env file in your project directory.[/dim]")
 
 
-@main.command()
+@cli.command()
 @click.pass_context
 def config(ctx: click.Context) -> None:
     """Show current configuration (without secrets)."""
@@ -691,7 +710,7 @@ def config(ctx: click.Context) -> None:
         sys.exit(1)
 
 
-@main.command()
+@cli.command()
 @click.pass_context
 def actions(ctx: click.Context) -> None:
     """List available action types."""
@@ -700,16 +719,16 @@ def actions(ctx: click.Context) -> None:
         console.print(f"  {action.value}")
 
 
-@main.command()
+@cli.command()
 @click.pass_context
 def components(ctx: click.Context) -> None:
     """List available component types."""
     console.print("[bold]Available Component Types[/bold]\n")
-    for component in ComponentType:
-        console.print(f"  {component.value}")
+    for comp in ComponentType:
+        console.print(f"  {comp.value}")
 
 
-@main.command()
+@cli.command()
 @click.option(
     "--output-format",
     "-F",
@@ -762,7 +781,7 @@ def verify(ctx: click.Context, output_format: str) -> None:
         sys.exit(1)
 
 
-@main.command()
+@cli.command()
 @click.option("--days", "-d", default=7, help="Number of days to analyze")
 @click.option(
     "--output",
@@ -813,7 +832,7 @@ def report(ctx: click.Context, days: int, output: Path | None, pretty: bool) -> 
         sys.exit(1)
 
 
-@main.command()
+@cli.command()
 @click.option("--interval", "-i", default=5, help="Polling interval in seconds")
 @click.option("--user", "-u", help="Filter by user ID or email")
 @click.option("--component-id", "-c", help="Filter by component ID")
@@ -906,8 +925,8 @@ def tail(
         console.print("\n[yellow]Stopped.[/yellow]")
 
 
-# Alert rules subcommand group
-@main.group()
+# Alert rules subcommand group under cli
+@cli.group()
 @click.pass_context
 def alerts(ctx: click.Context) -> None:
     """Manage alert rules."""
@@ -949,10 +968,10 @@ def alerts_list(ctx: click.Context, output_format: str) -> None:
 
             for rule in rules_status:
                 enabled = "[green]✓[/green]" if rule["enabled"] else "[red]✗[/red]"
-                actions = ", ".join(rule["actions"]) if rule["actions"] else "-"
-                components = ", ".join(rule["components"][:2]) if rule["components"] else "-"
+                rule_actions = ", ".join(rule["actions"]) if rule["actions"] else "-"
+                rule_components = ", ".join(rule["components"][:2]) if rule["components"] else "-"
                 if rule["components"] and len(rule["components"]) > 2:
-                    components += f" +{len(rule['components']) - 2}"
+                    rule_components += f" +{len(rule['components']) - 2}"
 
                 table.add_row(
                     rule["name"],
@@ -960,8 +979,8 @@ def alerts_list(ctx: click.Context, output_format: str) -> None:
                     enabled,
                     str(rule["threshold_count"]),
                     f"{rule['threshold_window_minutes']}m",
-                    actions,
-                    components,
+                    rule_actions,
+                    rule_components,
                 )
 
             console.print(table)
@@ -1018,7 +1037,7 @@ def alerts_test(ctx: click.Context, days: int) -> None:
         sys.exit(1)
 
 
-@main.command()
+@cli.command()
 @click.option("--yesterday", "date_preset", flag_value="yesterday", help="Query yesterday's logs")
 @click.option("--last-week", "date_preset", flag_value="last_week", help="Query last 7 days")
 @click.option("--last-month", "date_preset", flag_value="last_month", help="Query last 30 days")
@@ -1129,7 +1148,7 @@ def query(
         sys.exit(1)
 
 
-@main.command()
+@cli.command()
 @click.option("--days", "-d", default=7, help="Number of days to analyze")
 @click.option(
     "--action",
@@ -1204,7 +1223,7 @@ def timeline(
         sys.exit(1)
 
 
-@main.command()
+@cli.command()
 @click.option(
     "--action",
     "-a",
@@ -1246,7 +1265,7 @@ def find_action(ctx: click.Context, action: str, days: int, limit: int) -> None:
         sys.exit(1)
 
 
-@main.command()
+@cli.command()
 @click.option("--days", "-d", default=7, help="Number of days to analyze")
 @click.option("--top", "-t", default=10, help="Number of top items to show")
 @click.pass_context
@@ -1283,7 +1302,7 @@ def top_users(ctx: click.Context, days: int, top: int) -> None:
         sys.exit(1)
 
 
-@main.command()
+@cli.command()
 @click.argument("entry_id")
 @click.pass_context
 def show(ctx: click.Context, entry_id: str) -> None:
@@ -1318,6 +1337,18 @@ def show(ctx: click.Context, entry_id: str) -> None:
     except APIError as e:
         console.print(f"[red]API error:[/red] {e}")
         sys.exit(1)
+
+
+# Convenience command to launch TUI explicitly
+@main.command()
+@click.pass_context
+def tui(ctx: click.Context) -> None:
+    """Launch the TUI interface (same as running without arguments)."""
+    from .tui import CJAAuditApp
+
+    config_path = ctx.obj.get("config_path")
+    app = CJAAuditApp(config_path)
+    app.run()
 
 
 if __name__ == "__main__":

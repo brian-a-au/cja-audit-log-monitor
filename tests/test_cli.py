@@ -29,13 +29,19 @@ class TestMainGroup:
         assert result.exit_code == 0
         assert "CJA Audit Log Monitor" in result.output
 
+    def test_cli_subgroup_help(self, runner: CliRunner) -> None:
+        """Test cli subgroup help."""
+        result = runner.invoke(main, ["cli", "--help"])
+        assert result.exit_code == 0
+        assert "Traditional CLI commands" in result.output
+
 
 class TestActionsCommand:
     """Tests for actions command."""
 
     def test_list_actions(self, runner: CliRunner) -> None:
         """Test listing available actions."""
-        result = runner.invoke(main, ["actions"])
+        result = runner.invoke(main, ["cli", "actions"])
         assert result.exit_code == 0
         assert "CREATE" in result.output
         assert "DELETE" in result.output
@@ -47,7 +53,7 @@ class TestComponentsCommand:
 
     def test_list_components(self, runner: CliRunner) -> None:
         """Test listing available components."""
-        result = runner.invoke(main, ["components"])
+        result = runner.invoke(main, ["cli", "components"])
         assert result.exit_code == 0
         assert "PROJECT" in result.output
         assert "FILTER" in result.output
@@ -59,7 +65,7 @@ class TestInitCommand:
     def test_init_creates_config(self, runner: CliRunner) -> None:
         """Test init command creates config file."""
         with runner.isolated_filesystem():
-            result = runner.invoke(main, ["--config", "test_config.yaml", "init"])
+            result = runner.invoke(main, ["--config", "test_config.yaml", "cli", "init"])
             assert result.exit_code == 0
             assert "Created config file" in result.output
 
@@ -77,7 +83,7 @@ class TestConfigCommand:
         """Test showing current configuration."""
         mock_load.return_value = sample_settings
 
-        result = runner.invoke(main, ["config"])
+        result = runner.invoke(main, ["cli", "config"])
         assert result.exit_code == 0
         assert "Current Configuration" in result.output
 
@@ -94,7 +100,7 @@ class TestListCommand:
         mock_client.__exit__ = MagicMock(return_value=False)
         mock_get_client.return_value = (mock_client, MagicMock())
 
-        result = runner.invoke(main, ["list"])
+        result = runner.invoke(main, ["cli", "list"])
         assert result.exit_code == 0
         assert "No audit logs found" in result.output
 
@@ -112,7 +118,7 @@ class TestListCommand:
         mock_client.__exit__ = MagicMock(return_value=False)
         mock_get_client.return_value = (mock_client, MagicMock())
 
-        result = runner.invoke(main, ["list", "--limit", "5"])
+        result = runner.invoke(main, ["cli", "list", "--limit", "5"])
         assert result.exit_code == 0
 
     @patch("cja_audit.cli.get_client")
@@ -129,7 +135,7 @@ class TestListCommand:
         mock_client.__exit__ = MagicMock(return_value=False)
         mock_get_client.return_value = (mock_client, MagicMock())
 
-        result = runner.invoke(main, ["list", "--output-format", "json"])
+        result = runner.invoke(main, ["cli", "list", "--output-format", "json"])
         assert result.exit_code == 0
         assert '"entries"' in result.output
         assert '"count"' in result.output
@@ -151,12 +157,12 @@ class TestSearchCommand:
         mock_client.__exit__ = MagicMock(return_value=False)
         mock_get_client.return_value = (mock_client, MagicMock())
 
-        result = runner.invoke(main, ["search", "--action", "DELETE"])
+        result = runner.invoke(main, ["cli", "search", "--action", "DELETE"])
         assert result.exit_code == 0
 
     def test_invalid_action(self, runner: CliRunner) -> None:
         """Test error on invalid action."""
-        result = runner.invoke(main, ["search", "--action", "INVALID_ACTION"])
+        result = runner.invoke(main, ["cli", "search", "--action", "INVALID_ACTION"])
         assert result.exit_code != 0 or "Invalid action" in result.output
 
 
@@ -176,7 +182,7 @@ class TestUserCommand:
         mock_client.__exit__ = MagicMock(return_value=False)
         mock_get_client.return_value = (mock_client, MagicMock())
 
-        result = runner.invoke(main, ["user", "--user-id", "test@example.com"])
+        result = runner.invoke(main, ["cli", "user", "--user-id", "test@example.com"])
         assert result.exit_code == 0
         assert "No audit logs found" in result.output
 
@@ -197,7 +203,7 @@ class TestComponentCommand:
         mock_client.__exit__ = MagicMock(return_value=False)
         mock_get_client.return_value = (mock_client, MagicMock())
 
-        result = runner.invoke(main, ["component", "--id", "test-component-id"])
+        result = runner.invoke(main, ["cli", "component", "--id", "test-component-id"])
         assert result.exit_code == 0
         assert "No audit logs found" in result.output
 
@@ -222,7 +228,7 @@ class TestExportCommand:
         with runner.isolated_filesystem():
             result = runner.invoke(
                 main,
-                ["export", "--format", "tsv", "--output", "export.tsv", "--days", "1"],
+                ["cli", "export", "--format", "tsv", "--output", "export.tsv", "--days", "1"],
             )
             assert result.exit_code == 0
 
@@ -244,7 +250,7 @@ class TestStatsCommand:
         mock_client.__exit__ = MagicMock(return_value=False)
         mock_get_client.return_value = (mock_client, MagicMock())
 
-        result = runner.invoke(main, ["stats", "--output-format", "json"])
+        result = runner.invoke(main, ["cli", "stats", "--output-format", "json"])
         assert result.exit_code == 0
         assert '"statistics"' in result.output
 
@@ -272,7 +278,7 @@ class TestVerifyCommand:
         mock_client.__exit__ = MagicMock(return_value=False)
         mock_get_client.return_value = (mock_client, MagicMock())
 
-        result = runner.invoke(main, ["verify"])
+        result = runner.invoke(main, ["cli", "verify"])
         assert result.exit_code == 0
         assert "Connection successful" in result.output
 
@@ -295,7 +301,7 @@ class TestVerifyCommand:
         mock_client.__exit__ = MagicMock(return_value=False)
         mock_get_client.return_value = (mock_client, MagicMock())
 
-        result = runner.invoke(main, ["verify", "--output-format", "json"])
+        result = runner.invoke(main, ["cli", "verify", "--output-format", "json"])
         assert result.exit_code == 0
         assert '"connected"' in result.output
 
@@ -317,7 +323,7 @@ class TestReportCommand:
         mock_client.__exit__ = MagicMock(return_value=False)
         mock_get_client.return_value = (mock_client, MagicMock())
 
-        result = runner.invoke(main, ["report", "--days", "1"])
+        result = runner.invoke(main, ["cli", "report", "--days", "1"])
         assert result.exit_code == 0
         assert '"summary"' in result.output
 
@@ -336,7 +342,7 @@ class TestReportCommand:
         mock_get_client.return_value = (mock_client, MagicMock())
 
         with runner.isolated_filesystem():
-            result = runner.invoke(main, ["report", "--output", "report.json"])
+            result = runner.invoke(main, ["cli", "report", "--output", "report.json"])
             assert result.exit_code == 0
             assert "Report saved" in result.output
 
@@ -357,7 +363,7 @@ class TestQueryCommand:
         mock_client.__exit__ = MagicMock(return_value=False)
         mock_get_client.return_value = (mock_client, MagicMock())
 
-        result = runner.invoke(main, ["query", "--today"])
+        result = runner.invoke(main, ["cli", "query", "--today"])
         assert result.exit_code == 0
 
     @patch("cja_audit.cli.get_client")
@@ -373,7 +379,7 @@ class TestQueryCommand:
         mock_client.__exit__ = MagicMock(return_value=False)
         mock_get_client.return_value = (mock_client, MagicMock())
 
-        result = runner.invoke(main, ["query", "--yesterday"])
+        result = runner.invoke(main, ["cli", "query", "--yesterday"])
         assert result.exit_code == 0
 
     @patch("cja_audit.cli.get_client")
@@ -389,7 +395,7 @@ class TestQueryCommand:
         mock_client.__exit__ = MagicMock(return_value=False)
         mock_get_client.return_value = (mock_client, MagicMock())
 
-        result = runner.invoke(main, ["query", "--last-week"])
+        result = runner.invoke(main, ["cli", "query", "--last-week"])
         assert result.exit_code == 0
 
 
@@ -398,13 +404,13 @@ class TestAlertsSubcommand:
 
     def test_alerts_list(self, runner: CliRunner) -> None:
         """Test alerts list command."""
-        result = runner.invoke(main, ["alerts", "list"])
+        result = runner.invoke(main, ["cli", "alerts", "list"])
         assert result.exit_code == 0
         assert "Alert Rules" in result.output or "bulk_delete" in result.output
 
     def test_alerts_list_json(self, runner: CliRunner) -> None:
         """Test alerts list with JSON output."""
-        result = runner.invoke(main, ["alerts", "list", "--output-format", "json"])
+        result = runner.invoke(main, ["cli", "alerts", "list", "--output-format", "json"])
         assert result.exit_code == 0
         assert '"name"' in result.output
 
@@ -426,7 +432,7 @@ class TestTimelineCommand:
         mock_client.__exit__ = MagicMock(return_value=False)
         mock_get_client.return_value = (mock_client, MagicMock())
 
-        result = runner.invoke(main, ["timeline", "--days", "1"])
+        result = runner.invoke(main, ["cli", "timeline", "--days", "1"])
         assert result.exit_code == 0
         assert "Daily Activity" in result.output
 
@@ -447,7 +453,7 @@ class TestFindActionCommand:
         mock_client.__exit__ = MagicMock(return_value=False)
         mock_get_client.return_value = (mock_client, MagicMock())
 
-        result = runner.invoke(main, ["find-action", "--action", "DELETE"])
+        result = runner.invoke(main, ["cli", "find-action", "--action", "DELETE"])
         assert result.exit_code == 0
 
 
@@ -468,5 +474,15 @@ class TestTopUsersCommand:
         mock_client.__exit__ = MagicMock(return_value=False)
         mock_get_client.return_value = (mock_client, MagicMock())
 
-        result = runner.invoke(main, ["top-users", "--days", "1"])
+        result = runner.invoke(main, ["cli", "top-users", "--days", "1"])
         assert result.exit_code == 0
+
+
+class TestTuiCommand:
+    """Tests for TUI command."""
+
+    def test_tui_help(self, runner: CliRunner) -> None:
+        """Test tui command help."""
+        result = runner.invoke(main, ["tui", "--help"])
+        assert result.exit_code == 0
+        assert "Launch the TUI interface" in result.output

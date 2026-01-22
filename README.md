@@ -1,18 +1,19 @@
 # Adobe Customer Journey Analytics Audit Log Monitor
 
-A command-line interface (CLI) tool for querying and analyzing Adobe Customer Journey Analytics (CJA) audit logs.
+A full-featured TUI (Text User Interface) and CLI tool for querying and analyzing Adobe Customer Journey Analytics (CJA) audit logs.
 
 <img width="1439" height="1086" alt="Gemini_Generated_Image_djmarbdjmarbdjma" src="https://github.com/user-attachments/assets/0d8ba89d-41ff-465c-aad1-983123bd2428" />
 
 ## Features
 
-- **List & Search**: Query audit logs with filters for user, action, component, and date range
-- **Dashboard Tracking**: View all audit events for a specific dashboard/project
-- **Export**: Export audit logs to JSON or CSV format
-- **Statistics**: View summary statistics including top users, action distribution, and trends
-- **Real-time Monitoring**: Watch for new audit events in real-time
-- **Alert System**: Detect suspicious patterns like bulk deletions or unusual activity
-- **Rich Output**: Colorized terminal output with formatted tables
+- **Interactive TUI**: Full-featured terminal interface with keyboard navigation
+- **Dashboard View**: Summary statistics, action distribution, and recent alerts
+- **Log Browser**: Browse and filter audit logs with real-time search
+- **Real-time Monitoring**: Watch for new audit events as they happen
+- **Statistics & Analytics**: Visualize activity patterns with charts
+- **Alert System**: Configure and manage rules for suspicious activity detection
+- **Export**: Export audit logs to JSON, CSV, or TSV format
+- **CLI Mode**: Traditional command-line interface for scripting and automation
 
 ## Installation
 
@@ -66,107 +67,253 @@ CJA_ORG_ID=your_org_id@AdobeOrg
 Initialize the configuration file for additional settings:
 
 ```bash
-cja-audit init
+cja-audit cli init
 ```
 
 This creates `~/.cja-audit/config.yaml` with default settings.
 
 ## Usage
 
-### List Recent Audit Logs
+### TUI Mode (Default)
+
+Simply run `cja-audit` without arguments to launch the interactive TUI:
+
+```bash
+cja-audit
+```
+
+Or explicitly:
+
+```bash
+cja-audit tui
+```
+
+#### TUI Keyboard Navigation
+
+| Key | Action |
+|-----|--------|
+| `d` | Dashboard - Summary view |
+| `l` | Logs - Browse audit log entries |
+| `m` | Monitor - Real-time log monitoring |
+| `s` | Stats - Statistics and analytics |
+| `a` | Alerts - Manage alert rules |
+| `c` | Config - View settings |
+| `/` | Focus search/filter |
+| `r` | Refresh data |
+| `e` | Export current data |
+| `Enter` | View entry details |
+| `?` | Show help |
+| `Esc` | Close modal/dialog |
+| `q` | Quit application |
+
+#### TUI Screens
+
+1. **Dashboard**: Overview with summary stats, action distribution chart, top users, and recent anomalies
+2. **Log Browser**: DataTable with filtering by user, action, component, and search text. Click/Enter to view entry details
+3. **Monitor**: Real-time polling with configurable intervals, live log stream, and alert notifications
+4. **Statistics**: Detailed analytics with action distribution, hourly/daily charts, and user rankings
+5. **Alerts**: Manage alert rules, enable/disable rules, and test against recent data
+6. **Settings**: View API connection info and configuration
+
+### CLI Mode
+
+For scripting and automation, use the `cli` subcommand:
+
+```bash
+cja-audit cli <command>
+```
+
+#### List Recent Audit Logs
 
 ```bash
 # List last 50 entries
-cja-audit list
+cja-audit cli list
 
 # List with limit and filter by component
-cja-audit list --limit 100 --component PROJECT
+cja-audit cli list --limit 100 --component PROJECT
 
 # Show additional details
-cja-audit list --details
+cja-audit cli list --details
+
+# Output as JSON
+cja-audit cli list --output-format json
 ```
 
-### Search Audit Logs
+#### Search Audit Logs
 
 ```bash
 # Search by user
-cja-audit search --user user@example.com
+cja-audit cli search --user user@example.com
 
 # Search by action type
-cja-audit search --action CREATE --action DELETE
+cja-audit cli search --action CREATE --action DELETE
 
 # Search by date range
-cja-audit search --start-date 2024-01-01 --end-date 2024-01-31
+cja-audit cli search --start-date 2024-01-01 --end-date 2024-01-31
 
 # Combine filters
-cja-audit search --user user@example.com --action DELETE --component FILTER
+cja-audit cli search --user user@example.com --action DELETE --component FILTER
 ```
 
-### View Dashboard History
+#### Query with Date Presets
 
 ```bash
-cja-audit dashboard --dashboard-id your-dashboard-id
+# Query today's logs
+cja-audit cli query --today
+
+# Query yesterday's logs
+cja-audit cli query --yesterday
+
+# Query last 7 days
+cja-audit cli query --last-week
+
+# Query last 30 days
+cja-audit cli query --last-month
 ```
 
-### Export Audit Logs
+#### View Dashboard History
+
+```bash
+cja-audit cli dashboard --dashboard-id your-dashboard-id
+```
+
+#### View User Activity
+
+```bash
+cja-audit cli user --user-id user@example.com --days 7
+```
+
+#### View Component History
+
+```bash
+cja-audit cli component --id component-id --type FILTER
+```
+
+#### Export Audit Logs
 
 ```bash
 # Export to JSON
-cja-audit export --format json --output audit_logs.json
+cja-audit cli export --format json --output audit_logs.json
 
 # Export to CSV
-cja-audit export --format csv --output audit_logs.csv
+cja-audit cli export --format csv --output audit_logs.csv
+
+# Export to TSV
+cja-audit cli export --format tsv --output audit_logs.tsv
 
 # Export specific date range
-cja-audit export --format json --output logs.json --start-date 2024-01-01 --end-date 2024-01-31
+cja-audit cli export --format json --output logs.json --start-date 2024-01-01 --end-date 2024-01-31
 
 # Export last 30 days
-cja-audit export --format json --output logs.json --days 30
+cja-audit cli export --format json --output logs.json --days 30
 ```
 
-### View Statistics
+#### View Statistics
 
 ```bash
 # Stats for last 7 days (default)
-cja-audit stats
+cja-audit cli stats
 
 # Stats for last 30 days
-cja-audit stats --days 30
+cja-audit cli stats --days 30
 
 # Show top 20 users
-cja-audit stats --top 20
+cja-audit cli stats --top 20
+
+# Output as JSON
+cja-audit cli stats --output-format json
 ```
 
-### Real-time Monitoring
+#### Activity Timeline
+
+```bash
+# Show daily and hourly activity visualization
+cja-audit cli timeline --days 7
+
+# Filter by action or user
+cja-audit cli timeline --action DELETE --user user@example.com
+```
+
+#### Real-time Monitoring (CLI)
 
 ```bash
 # Monitor with default 60-second interval
-cja-audit monitor
+cja-audit cli monitor
 
 # Custom interval
-cja-audit monitor --interval 30
+cja-audit cli monitor --interval 30
 
 # Monitor for specific duration (in seconds)
-cja-audit monitor --duration 3600
+cja-audit cli monitor --duration 3600
 
 # Disable alerts
-cja-audit monitor --no-alerts
+cja-audit cli monitor --no-alerts
 ```
 
-### Utility Commands
+#### Tail Mode (like tail -f)
+
+```bash
+# Follow logs in real-time
+cja-audit cli tail
+
+# With filters
+cja-audit cli tail --user user@example.com --action DELETE
+```
+
+#### Find Specific Actions
+
+```bash
+# Find all DELETE actions
+cja-audit cli find-action --action DELETE --days 7
+```
+
+#### Top Users
+
+```bash
+# Show most active users
+cja-audit cli top-users --days 7 --top 10
+```
+
+#### Generate Report
+
+```bash
+# Generate comprehensive report to stdout
+cja-audit cli report --days 7
+
+# Save report to file
+cja-audit cli report --days 30 --output report.json
+```
+
+#### Alert Management
+
+```bash
+# List all alert rules
+cja-audit cli alerts list
+
+# List as JSON
+cja-audit cli alerts list --output-format json
+
+# Test rules against recent logs
+cja-audit cli alerts test --days 1
+```
+
+#### Utility Commands
 
 ```bash
 # List available action types
-cja-audit actions
+cja-audit cli actions
 
 # List available component types
-cja-audit components
+cja-audit cli components
 
 # Show current configuration
-cja-audit config
+cja-audit cli config
+
+# Verify API connection
+cja-audit cli verify
 
 # Initialize config file
-cja-audit init
+cja-audit cli init
 ```
 
 ## Action Types

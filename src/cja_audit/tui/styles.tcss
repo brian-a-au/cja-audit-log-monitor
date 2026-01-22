@@ -1,0 +1,370 @@
+/* CJA Audit Log Monitor TUI Styles */
+
+/* Global styles */
+Screen {
+    background: $surface;
+}
+
+/* Header and Footer */
+Header {
+    dock: top;
+    height: 3;
+    background: $primary;
+}
+
+Footer {
+    dock: bottom;
+    height: 1;
+}
+
+/* Navigation sidebar */
+#sidebar {
+    width: 20;
+    dock: left;
+    background: $surface-darken-1;
+    border-right: solid $primary;
+}
+
+#sidebar Button {
+    width: 100%;
+    margin: 0 1;
+    height: 3;
+}
+
+#sidebar Button.active {
+    background: $primary;
+}
+
+/* Main content area */
+#main-content {
+    width: 1fr;
+    height: 1fr;
+}
+
+/* Dashboard */
+.dashboard-stats {
+    height: auto;
+    margin: 1;
+    padding: 1;
+    border: solid $primary;
+}
+
+.stat-card {
+    width: 1fr;
+    height: auto;
+    padding: 1;
+    margin: 0 1;
+    border: round $secondary;
+}
+
+.stat-value {
+    text-style: bold;
+    color: $primary;
+}
+
+.stat-label {
+    color: $text-muted;
+}
+
+/* Log table */
+LogTable {
+    height: 1fr;
+}
+
+LogTable > .datatable--header {
+    background: $primary-darken-2;
+    text-style: bold;
+}
+
+LogTable > .datatable--cursor {
+    background: $primary;
+}
+
+/* Action colors - matching existing ACTION_COLORS */
+.action-create {
+    color: green;
+}
+
+.action-delete {
+    color: red;
+}
+
+.action-edit {
+    color: yellow;
+}
+
+.action-export {
+    color: cyan;
+}
+
+.action-share {
+    color: blue;
+}
+
+.action-unshare {
+    color: magenta;
+}
+
+.action-approve {
+    color: green;
+}
+
+.action-unapprove {
+    color: yellow;
+}
+
+.action-transfer {
+    color: blue;
+}
+
+.action-embargo {
+    color: red;
+}
+
+.action-refresh {
+    color: cyan;
+}
+
+.action-org-change {
+    color: magenta;
+}
+
+.action-api-request {
+    color: $text-muted;
+}
+
+/* Filter bar */
+FilterBar {
+    height: auto;
+    dock: top;
+    padding: 1;
+    background: $surface-darken-1;
+}
+
+FilterBar Input {
+    width: 1fr;
+    margin: 0 1;
+}
+
+FilterBar Select {
+    width: 20;
+    margin: 0 1;
+}
+
+FilterBar Button {
+    margin: 0 1;
+}
+
+/* Stats panel */
+StatsPanel {
+    height: auto;
+    padding: 1;
+    margin: 1;
+    border: solid $primary;
+}
+
+.stats-grid {
+    layout: grid;
+    grid-size: 2;
+    grid-gutter: 1;
+}
+
+/* Bar chart in stats */
+.bar-chart {
+    height: auto;
+    margin: 1 0;
+}
+
+.bar {
+    height: 1;
+}
+
+/* Alert card */
+AlertCard {
+    height: auto;
+    padding: 1;
+    margin: 1;
+    border: heavy red;
+    background: $error-darken-3;
+}
+
+AlertCard .alert-title {
+    text-style: bold;
+    color: red;
+}
+
+AlertCard .alert-message {
+    color: $text;
+}
+
+/* Monitor screen */
+#monitor-controls {
+    height: auto;
+    dock: top;
+    padding: 1;
+    background: $surface-darken-1;
+}
+
+#monitor-status {
+    height: 3;
+    padding: 1;
+    margin: 1 0;
+}
+
+.monitor-running {
+    border: solid green;
+}
+
+.monitor-stopped {
+    border: solid red;
+}
+
+#monitor-log {
+    height: 1fr;
+    border: solid $primary;
+}
+
+/* Entry detail modal */
+EntryDetailModal {
+    align: center middle;
+}
+
+EntryDetailModal > Vertical {
+    width: 80;
+    height: auto;
+    max-height: 80%;
+    background: $surface;
+    border: thick $primary;
+    padding: 1 2;
+}
+
+.detail-row {
+    height: auto;
+    margin: 0 0 1 0;
+}
+
+.detail-label {
+    width: 15;
+    text-style: bold;
+}
+
+.detail-value {
+    width: 1fr;
+}
+
+/* Export dialog */
+ExportDialog {
+    align: center middle;
+}
+
+ExportDialog > Vertical {
+    width: 60;
+    height: auto;
+    background: $surface;
+    border: thick $primary;
+    padding: 1 2;
+}
+
+ExportDialog RadioSet {
+    height: auto;
+    margin: 1 0;
+}
+
+ExportDialog Input {
+    width: 100%;
+    margin: 1 0;
+}
+
+/* Settings screen */
+.settings-section {
+    height: auto;
+    padding: 1;
+    margin: 1;
+    border: solid $secondary;
+}
+
+.settings-row {
+    height: auto;
+    margin: 0 0 1 0;
+}
+
+/* Alerts management screen */
+.rule-card {
+    height: auto;
+    padding: 1;
+    margin: 1;
+    border: solid $secondary;
+}
+
+.rule-enabled {
+    border: solid green;
+}
+
+.rule-disabled {
+    border: solid $text-muted;
+}
+
+/* Help overlay */
+#help-overlay {
+    align: center middle;
+}
+
+#help-overlay > Vertical {
+    width: 70;
+    height: auto;
+    max-height: 90%;
+    background: $surface;
+    border: thick $primary;
+    padding: 2;
+}
+
+.help-section {
+    height: auto;
+    margin: 1 0;
+}
+
+.help-key {
+    width: 10;
+    text-style: bold;
+    color: $primary;
+}
+
+.help-description {
+    width: 1fr;
+}
+
+/* Loading indicator */
+.loading {
+    align: center middle;
+    height: 100%;
+    width: 100%;
+}
+
+/* Status indicators */
+.status-connected {
+    color: green;
+}
+
+.status-disconnected {
+    color: red;
+}
+
+.status-warning {
+    color: yellow;
+}
+
+/* Pagination controls */
+#pagination {
+    height: 3;
+    dock: bottom;
+    padding: 0 1;
+    background: $surface-darken-1;
+}
+
+#pagination Button {
+    margin: 0 1;
+}
+
+#pagination Label {
+    padding: 1;
+}

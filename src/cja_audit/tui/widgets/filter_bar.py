@@ -1,0 +1,88 @@
+"""Filter bar widget for log filtering."""
+
+from textual.app import ComposeResult
+from textual.containers import Horizontal
+from textual.message import Message
+from textual.widgets import Button, Input, Select, Static
+
+from ...models import ActionType, ComponentType
+
+
+class FilterBar(Static):
+    """Filter bar widget for searching and filtering logs."""
+
+    class FilterChanged(Message):
+        """Message emitted when filters change."""
+
+        def __init__(
+            self,
+            user: str,
+            action: str | None,
+            component: str | None,
+            search: str,
+        ) -> None:
+            super().__init__()
+            self.user = user
+            self.action = action
+            self.component = component
+            self.search = search
+
+    class FilterReset(Message):
+        """Message emitted when filters are reset."""
+
+        pass
+
+    def compose(self) -> ComposeResult:
+        """Compose filter bar widgets."""
+        with Horizontal():
+            yield Input(placeholder="Search...", id="filter-search")
+            yield Input(placeholder="User", id="filter-user")
+            yield Select(
+                [(a.value, a.value) for a in ActionType],
+                prompt="Action",
+                allow_blank=True,
+                id="filter-action",
+            )
+            yield Select(
+                [(c.value, c.value) for c in ComponentType],
+                prompt="Component",
+                allow_blank=True,
+                id="filter-component",
+            )
+            yield Button("Apply", id="filter-apply", variant="primary")
+            yield Button("Reset", id="filter-reset")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Handle filter button presses."""
+        if event.button.id == "filter-apply":
+            self._emit_filter_changed()
+        elif event.button.id == "filter-reset":
+            self._reset_filters()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        """Handle Enter key in input fields."""
+        self._emit_filter_changed()
+
+    def _emit_filter_changed(self) -> None:
+        """Emit filter changed message with current values."""
+        search = self.query_one("#filter-search", Input).value
+        user = self.query_one("#filter-user", Input).value
+        action_select = self.query_one("#filter-action", Select)
+        component_select = self.query_one("#filter-component", Select)
+
+        action = action_select.value if action_select.value != Select.BLANK else None
+        component = component_select.value if component_select.value != Select.BLANK else None
+
+        self.post_message(self.FilterChanged(user, action, component, search))
+
+    def _reset_filters(self) -> None:
+        """Reset all filter inputs."""
+        self.query_one("#filter-search", Input).value = ""
+        self.query_one("#filter-user", Input).value = ""
+        self.query_one("#filter-action", Select).value = Select.BLANK
+        self.query_one("#filter-component", Select).value = Select.BLANK
+        self.post_message(self.FilterReset())
+
+    def focus_search(self) -> None:
+        """Focus the search input."""
+        self.query_one("#filter-search", Input).focus()
