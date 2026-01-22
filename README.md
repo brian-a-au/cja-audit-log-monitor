@@ -26,43 +26,37 @@ The application provides a full-featured terminal interface built with [Textual]
 
 Your home base showing at-a-glance metrics including total entries, date range, action distribution charts, top active users, and recent anomalies.
 
-<!-- TODO: Add screenshot - Dashboard screen showing summary stats and charts -->
-![Dashboard](docs/screenshots/dashboard.png)
+![Dashboard](docs/screenshots/dashboard.svg)
 
 ### Log Browser (Press `l`)
 
 Browse, search, and filter audit logs with a powerful data table. Filter by user, action type, component, or search text. Press `Enter` on any row to view full entry details.
 
-<!-- TODO: Add screenshot - Log Browser with filter bar and data table -->
-![Log Browser](docs/screenshots/log-browser.png)
+![Log Browser](docs/screenshots/log-browser.svg)
 
 ### Real-Time Monitor (Press `m`)
 
 Watch audit events stream in as they happen. Configure polling intervals, see live statistics, and get instant alert notifications for suspicious activity.
 
-<!-- TODO: Add screenshot - Monitor screen with live log stream -->
-![Monitor](docs/screenshots/monitor.png)
+![Monitor](docs/screenshots/monitor.svg)
 
 ### Statistics (Press `s`)
 
 Detailed analytics with visual charts showing action distribution, hourly/daily activity patterns, and user rankings.
 
-<!-- TODO: Add screenshot - Statistics screen with charts -->
-![Statistics](docs/screenshots/statistics.png)
+![Statistics](docs/screenshots/statistics.svg)
 
 ### Alert Rules (Press `a`)
 
 Configure and manage suspicious activity detection rules. Enable/disable rules, adjust thresholds, and test against recent data.
 
-<!-- TODO: Add screenshot - Alert rules management -->
-![Alerts](docs/screenshots/alerts.png)
+![Alerts](docs/screenshots/alerts.svg)
 
 ### Settings (Press `c`)
 
 View connection status, API configuration, and application settings.
 
-<!-- TODO: Add screenshot - Settings/Config screen -->
-![Settings](docs/screenshots/settings.png)
+![Settings](docs/screenshots/settings.svg)
 
 ## Keyboard Shortcuts
 

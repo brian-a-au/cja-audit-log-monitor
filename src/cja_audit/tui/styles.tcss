@@ -63,7 +63,7 @@ Footer {
 }
 
 .stat-label {
-    color: $text-muted;
+    color: gray;
 }
 
 /* Log table */
@@ -130,7 +130,7 @@ LogTable > .datatable--cursor {
 }
 
 .action-api-request {
-    color: $text-muted;
+    color: gray;
 }
 
 /* Filter bar */
@@ -301,7 +301,7 @@ ExportDialog Input {
 }
 
 .rule-disabled {
-    border: solid $text-muted;
+    border: solid gray;
 }
 
 /* Help overlay */
