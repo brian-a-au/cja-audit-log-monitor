@@ -172,15 +172,126 @@ class SettingsScreen(Screen):
         loading = self.query_one("#loading", LoadingIndicator)
         loading.display = False
 
-    async def create_widget(self) -> Container:
-        """Create widget for embedding in main content area.
+    async def compose_content(self):
+        """Yield widgets for embedding in main content area.
 
-        Returns:
-            Container with settings content.
+        Yields:
+            Widgets for the settings content.
         """
-        container = Container()
-        for widget in self.compose():
-            await container.mount(widget)
-        # Trigger connection check
+        settings = self._state.settings
+
+        # Connection section
+        connection_section = Vertical(
+            Static("[bold]Connection Status[/bold]"),
+            Static(id="connection-status"),
+            classes="settings-section",
+        )
+
+        # API configuration section
+        api_section = Vertical(
+            Static("[bold]API Configuration[/bold]"),
+            Horizontal(
+                Static("[bold]Config File:[/bold]", classes="settings-label"),
+                Static(str(get_config_path()), classes="settings-value"),
+                classes="settings-row",
+            ),
+            Horizontal(
+                Static("[bold]API Base URL:[/bold]", classes="settings-label"),
+                Static(settings.api_base_url, classes="settings-value"),
+                classes="settings-row",
+            ),
+            Horizontal(
+                Static("[bold]IMS Base URL:[/bold]", classes="settings-label"),
+                Static(settings.ims_base_url, classes="settings-value"),
+                classes="settings-row",
+            ),
+            classes="settings-section",
+        )
+
+        # Authentication section
+        org_display = f"{settings.org_id[:12]}..." if settings.org_id else "(not set)"
+        client_display = f"{settings.client_id[:12]}..." if settings.client_id else "(not set)"
+        auth_section = Vertical(
+            Static("[bold]Authentication[/bold]"),
+            Horizontal(
+                Static("[bold]Organization ID:[/bold]", classes="settings-label"),
+                Static(org_display, classes="settings-value"),
+                classes="settings-row",
+            ),
+            Horizontal(
+                Static("[bold]Client ID:[/bold]", classes="settings-label"),
+                Static(client_display, classes="settings-value"),
+                classes="settings-row",
+            ),
+            Horizontal(
+                Static("[bold]OAuth Configured:[/bold]", classes="settings-label"),
+                Static(
+                    "[green]Yes[/green]" if settings.is_oauth_configured() else "[red]No[/red]",
+                    classes="settings-value",
+                ),
+                classes="settings-row",
+            ),
+            Horizontal(
+                Static("[bold]JWT Configured:[/bold]", classes="settings-label"),
+                Static(
+                    "[green]Yes[/green]" if settings.is_jwt_configured() else "[dim]No[/dim]",
+                    classes="settings-value",
+                ),
+                classes="settings-row",
+            ),
+            classes="settings-section",
+        )
+
+        # Defaults section
+        defaults_section = Vertical(
+            Static("[bold]Defaults[/bold]"),
+            Horizontal(
+                Static("[bold]Page Size:[/bold]", classes="settings-label"),
+                Static(str(settings.default_page_size), classes="settings-value"),
+                classes="settings-row",
+            ),
+            Horizontal(
+                Static("[bold]Days:[/bold]", classes="settings-label"),
+                Static(str(settings.default_days), classes="settings-value"),
+                classes="settings-row",
+            ),
+            Horizontal(
+                Static("[bold]Monitor Interval:[/bold]", classes="settings-label"),
+                Static(f"{settings.monitor_interval} seconds", classes="settings-value"),
+                classes="settings-row",
+            ),
+            classes="settings-section",
+        )
+
+        # Alert rules section
+        alerts_section = Vertical(
+            Static("[bold]Alert Rules[/bold]"),
+            Horizontal(
+                Static("[bold]Configured Rules:[/bold]", classes="settings-label"),
+                Static(str(len(settings.alert_rules)), classes="settings-value"),
+                classes="settings-row",
+            ),
+            classes="settings-section",
+        )
+
+        buttons = Horizontal(
+            Button("Verify Connection", id="verify-button", variant="primary"),
+            Button("Refresh Settings", id="refresh-button"),
+        )
+
+        container = Container(
+            Static("[bold]Configuration[/bold]", id="settings-title"),
+            connection_section,
+            api_section,
+            auth_section,
+            defaults_section,
+            alerts_section,
+            buttons,
+            LoadingIndicator(id="loading"),
+            id="settings-container",
+        )
+
+        yield container
+
+        # Trigger connection check after mounting
         self.set_timer(0.1, lambda: self.run_worker(self._check_connection(), exclusive=True))
-        return container

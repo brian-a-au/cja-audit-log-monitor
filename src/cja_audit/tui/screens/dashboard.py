@@ -199,15 +199,60 @@ class DashboardScreen(Screen):
             self.query_one("#loading").display = True
             self.run_worker(self._load_data(), exclusive=True)
 
-    async def create_widget(self) -> Container:
-        """Create widget for embedding in main content area.
+    async def compose_content(self):
+        """Yield widgets for embedding in main content area.
 
-        Returns:
-            Container with dashboard content.
+        This method creates widgets without using context managers,
+        making it safe to call outside of the compose context.
+
+        Yields:
+            Widgets for the dashboard content.
         """
-        container = Container()
-        for widget in self.compose():
-            await container.mount(widget)
-        # Trigger data load
+        # Build stat cards
+        stat_total = Vertical(
+            Static("Total Entries", classes="stat-label"),
+            Static("-", id="stat-total", classes="stat-value"),
+            classes="stat-card",
+        )
+        stat_range = Vertical(
+            Static("Date Range", classes="stat-label"),
+            Static("-", id="stat-range", classes="stat-value"),
+            classes="stat-card",
+        )
+        stat_users = Vertical(
+            Static("Active Users", classes="stat-label"),
+            Static("-", id="stat-users", classes="stat-value"),
+            classes="stat-card",
+        )
+        stat_alerts = Vertical(
+            Static("Recent Alerts", classes="stat-label"),
+            Static("-", id="stat-alerts", classes="stat-value"),
+            classes="stat-card",
+        )
+        stats_row = Horizontal(
+            stat_total, stat_range, stat_users, stat_alerts, classes="dashboard-stats"
+        )
+
+        # Build the container with all widgets
+        container = Container(
+            Static("[bold]Dashboard[/bold]", id="dashboard-title"),
+            Static(id="connection-status"),
+            stats_row,
+            Static("[bold]Action Distribution[/bold]"),
+            Static(id="action-chart", classes="bar-chart"),
+            Static("[bold]Top 5 Active Users (Last 7 Days)[/bold]"),
+            Static(id="top-users"),
+            Static("[bold]Recent Anomalies[/bold]"),
+            Static(id="anomalies"),
+            Horizontal(
+                Button("Refresh", id="refresh-button", variant="primary"),
+                Static(id="last-update"),
+            ),
+            LoadingIndicator(id="loading"),
+            id="dashboard-container",
+        )
+
+        yield container
+
+        # Trigger data load after mounting
         self.set_timer(0.1, lambda: self.run_worker(self._load_data(), exclusive=True))
-        return container

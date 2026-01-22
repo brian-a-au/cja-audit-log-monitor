@@ -152,15 +152,47 @@ class StatsScreen(Screen):
         """Hide loading indicator."""
         self.query_one("#loading").display = False
 
-    async def create_widget(self) -> Container:
-        """Create widget for embedding in main content area.
+    async def compose_content(self):
+        """Yield widgets for embedding in main content area.
 
-        Returns:
-            Container with stats content.
+        Yields:
+            Widgets for the stats content.
         """
-        container = Container()
-        for widget in self.compose():
-            await container.mount(widget)
-        # Trigger data load
+        controls = Horizontal(
+            Label("Days to analyze:"),
+            Input(value="7", id="days-input", type="integer"),
+            Button("Update", id="update-button", variant="primary"),
+            id="stats-controls",
+        )
+
+        action_section = Vertical(
+            Static("[bold]Action Distribution[/bold]"),
+            ActionBarChart(id="action-chart"),
+            classes="stats-section",
+        )
+
+        hourly_section = Vertical(
+            Static("[bold]Hourly Activity[/bold]"),
+            HourlyChart(id="hourly-chart"),
+            classes="stats-section",
+        )
+
+        charts_row = Horizontal(action_section, hourly_section)
+
+        container = Container(
+            Static("[bold]Statistics & Analytics[/bold]", id="stats-title"),
+            controls,
+            StatsPanel(id="stats-summary"),
+            charts_row,
+            Static("[bold]Daily Activity[/bold]"),
+            Static(id="daily-chart"),
+            Static("[bold]User Activity Ranking[/bold]"),
+            Static(id="user-ranking"),
+            LoadingIndicator(id="loading"),
+            id="stats-container",
+        )
+
+        yield container
+
+        # Trigger data load after mounting
         self.set_timer(0.1, lambda: self.run_worker(self._load_data(), exclusive=True))
-        return container

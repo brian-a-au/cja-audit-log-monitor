@@ -166,15 +166,29 @@ class LogBrowserScreen(Screen):
         """Handle DataTable row selection (Enter key)."""
         self.action_view_details()
 
-    async def create_widget(self) -> Container:
-        """Create widget for embedding in main content area.
+    async def compose_content(self):
+        """Yield widgets for embedding in main content area.
 
-        Returns:
-            Container with log browser content.
+        Yields:
+            Widgets for the log browser content.
         """
-        container = Container()
-        for widget in self.compose():
-            await container.mount(widget)
-        # Trigger data load
+        pagination = Horizontal(
+            Button("◀ Prev", id="prev-page"),
+            Label("Page 1 of 1", id="page-info"),
+            Button("Next ▶", id="next-page"),
+            Static("", id="entry-count"),
+            id="pagination",
+        )
+
+        container = Container(
+            FilterBar(id="filter-bar"),
+            LogTable(id="log-table", show_details=False),
+            pagination,
+            LoadingIndicator(id="loading"),
+            id="log-browser-container",
+        )
+
+        yield container
+
+        # Trigger data load after mounting
         self.set_timer(0.1, lambda: self.run_worker(self._load_data(), exclusive=True))
-        return container

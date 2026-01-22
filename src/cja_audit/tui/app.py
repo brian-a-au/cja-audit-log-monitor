@@ -168,11 +168,12 @@ class CJAAuditApp(App):
             if button.id == f"nav-{screen_name}":
                 button.add_class("active")
 
-        # Get screen widget and mount it
+        # Get screen and compose its widgets into the content area
         screen = self.get_screen(screen_name)
-        if hasattr(screen, "create_widget"):
-            widget = await screen.create_widget()
-            await content.mount(widget)
+        if hasattr(screen, "compose_content"):
+            # Use the new compose_content method that yields widgets directly
+            async for widget in screen.compose_content():
+                await content.mount(widget)
         else:
             # Fallback: push as modal screen
             self.push_screen(screen_name)

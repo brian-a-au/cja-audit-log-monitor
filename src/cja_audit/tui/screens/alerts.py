@@ -164,13 +164,30 @@ class AlertsScreen(Screen):
         """Hide loading indicator."""
         self.query_one("#loading").display = False
 
-    async def create_widget(self) -> Container:
-        """Create widget for embedding in main content area.
+    async def compose_content(self):
+        """Yield widgets for embedding in main content area.
 
-        Returns:
-            Container with alerts content.
+        Yields:
+            Widgets for the alerts content.
         """
-        container = Container()
-        for widget in self.compose():
-            await container.mount(widget)
-        return container
+        # Build rules list
+        rule_cards = [self._create_rule_card(rule) for rule in self._state.alert_engine.rules]
+        rules_list = Vertical(*rule_cards, id="rules-list")
+
+        buttons = Horizontal(
+            Button("Test Rules", id="test-rules", variant="primary"),
+            Button("Reset to Defaults", id="reset-rules"),
+        )
+
+        container = Container(
+            Static("[bold]Alert Rules Management[/bold]", id="alerts-title"),
+            Static("[dim]Toggle rules on/off or test against recent data[/dim]"),
+            rules_list,
+            buttons,
+            Static("[bold]Test Results[/bold]"),
+            Static(id="test-results"),
+            LoadingIndicator(id="loading"),
+            id="alerts-container",
+        )
+
+        yield container

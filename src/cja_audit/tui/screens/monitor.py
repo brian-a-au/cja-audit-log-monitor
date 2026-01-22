@@ -209,13 +209,37 @@ class MonitorScreen(Screen):
         alert_summary = self.query_one("#alert-summary", AlertSummary)
         alert_summary.add_alert("Alert", message)
 
-    async def create_widget(self) -> Container:
-        """Create widget for embedding in main content area.
+    async def compose_content(self):
+        """Yield widgets for embedding in main content area.
 
-        Returns:
-            Container with monitor content.
+        Yields:
+            Widgets for the monitor content.
         """
-        container = Container()
-        for widget in self.compose():
-            await container.mount(widget)
-        return container
+        controls = Horizontal(
+            Button("▶ Start", id="start-button", variant="success"),
+            Button("⏹ Stop", id="stop-button", variant="error", disabled=True),
+            Label("Interval:"),
+            Input(value="60", id="interval-input", type="integer"),
+            Label("seconds"),
+            id="monitor-controls",
+        )
+
+        status = Horizontal(
+            Static("● Stopped", id="status-indicator"),
+            Static("", id="stats-info"),
+            id="monitor-status",
+            classes="monitor-stopped",
+        )
+
+        container = Container(
+            controls,
+            status,
+            Static("[bold]Live Log Stream[/bold]"),
+            LogTable(id="monitor-log", show_details=False),
+            Static("[bold]Alerts[/bold]"),
+            AlertSummary(id="alert-summary"),
+            LoadingIndicator(id="loading"),
+            id="monitor-container",
+        )
+
+        yield container
