@@ -1,19 +1,96 @@
 # Adobe Customer Journey Analytics Audit Log Monitor
 
-A full-featured TUI (Text User Interface) and CLI tool for querying and analyzing Adobe Customer Journey Analytics (CJA) audit logs.
+A powerful TUI (Text User Interface) application for monitoring and analyzing Adobe Customer Journey Analytics (CJA) audit logs in real-time.
 
-<img width="1439" height="1086" alt="Gemini_Generated_Image_djmarbdjmarbdjma" src="https://github.com/user-attachments/assets/0d8ba89d-41ff-465c-aad1-983123bd2428" />
+## Quick Start
+
+```bash
+# Install
+uv pip install -e .
+
+# Configure credentials
+cp .env.example .env
+# Edit .env with your Adobe credentials
+
+# Launch the TUI
+cja-audit
+```
+
+That's it! The interactive TUI will launch with a dashboard showing your audit log activity.
+
+## The TUI Experience
+
+The application provides a full-featured terminal interface built with [Textual](https://textual.textualize.io/). Navigate between screens using keyboard shortcuts for a seamless experience.
+
+### Dashboard (Press `d`)
+
+Your home base showing at-a-glance metrics including total entries, date range, action distribution charts, top active users, and recent anomalies.
+
+<!-- TODO: Add screenshot - Dashboard screen showing summary stats and charts -->
+![Dashboard](docs/screenshots/dashboard.png)
+
+### Log Browser (Press `l`)
+
+Browse, search, and filter audit logs with a powerful data table. Filter by user, action type, component, or search text. Press `Enter` on any row to view full entry details.
+
+<!-- TODO: Add screenshot - Log Browser with filter bar and data table -->
+![Log Browser](docs/screenshots/log-browser.png)
+
+### Real-Time Monitor (Press `m`)
+
+Watch audit events stream in as they happen. Configure polling intervals, see live statistics, and get instant alert notifications for suspicious activity.
+
+<!-- TODO: Add screenshot - Monitor screen with live log stream -->
+![Monitor](docs/screenshots/monitor.png)
+
+### Statistics (Press `s`)
+
+Detailed analytics with visual charts showing action distribution, hourly/daily activity patterns, and user rankings.
+
+<!-- TODO: Add screenshot - Statistics screen with charts -->
+![Statistics](docs/screenshots/statistics.png)
+
+### Alert Rules (Press `a`)
+
+Configure and manage suspicious activity detection rules. Enable/disable rules, adjust thresholds, and test against recent data.
+
+<!-- TODO: Add screenshot - Alert rules management -->
+![Alerts](docs/screenshots/alerts.png)
+
+### Settings (Press `c`)
+
+View connection status, API configuration, and application settings.
+
+<!-- TODO: Add screenshot - Settings/Config screen -->
+![Settings](docs/screenshots/settings.png)
+
+## Keyboard Shortcuts
+
+| Key | Action |
+|-----|--------|
+| `d` | Go to Dashboard |
+| `l` | Go to Log Browser |
+| `m` | Go to Monitor |
+| `s` | Go to Statistics |
+| `a` | Go to Alerts |
+| `c` | Go to Config/Settings |
+| `/` | Focus search/filter bar |
+| `r` | Refresh current view |
+| `e` | Open export dialog |
+| `Enter` | View entry details (in Log Browser) |
+| `?` | Show help overlay |
+| `Esc` | Close modal/dialog |
+| `q` | Quit application |
 
 ## Features
 
-- **Interactive TUI**: Full-featured terminal interface with keyboard navigation
-- **Dashboard View**: Summary statistics, action distribution, and recent alerts
-- **Log Browser**: Browse and filter audit logs with real-time search
-- **Real-time Monitoring**: Watch for new audit events as they happen
-- **Statistics & Analytics**: Visualize activity patterns with charts
-- **Alert System**: Configure and manage rules for suspicious activity detection
-- **Export**: Export audit logs to JSON, CSV, or TSV format
-- **CLI Mode**: Traditional command-line interface for scripting and automation
+- **Interactive Navigation**: Keyboard-driven interface for fast navigation
+- **Real-Time Updates**: Monitor audit logs as they happen with configurable polling
+- **Smart Filtering**: Search by user, action type, component, and text
+- **Visual Analytics**: Bar charts for action distribution and activity patterns
+- **Alert Detection**: Configurable rules for bulk deletes, exports, and suspicious patterns
+- **Export Options**: Save filtered logs to JSON, CSV, or TSV
+- **Connection Status**: Live API connection monitoring
 
 ## Installation
 
@@ -27,7 +104,7 @@ cd cja_audit_log_monitor
 uv pip install -e .
 
 # Or run directly without installing
-uv run cja-audit --help
+uv run cja-audit
 ```
 
 ### Using pip
@@ -48,8 +125,6 @@ pip install -e .
 
 ### 2. Configure Environment Variables
 
-Copy the example environment file and fill in your credentials:
-
 ```bash
 cp .env.example .env
 ```
@@ -64,291 +139,85 @@ CJA_ORG_ID=your_org_id@AdobeOrg
 
 ### 3. (Optional) Create Config File
 
-Initialize the configuration file for additional settings:
-
 ```bash
 cja-audit cli init
 ```
 
-This creates `~/.cja-audit/config.yaml` with default settings.
+This creates `~/.cja-audit/config.yaml` with default settings for alert rules and preferences.
 
-## Usage
+## CLI Mode
 
-### TUI Mode (Default)
-
-Simply run `cja-audit` without arguments to launch the interactive TUI:
+For scripting and automation, a traditional CLI is available under the `cli` subcommand:
 
 ```bash
-cja-audit
-```
+# List recent logs
+cja-audit cli list --limit 100
 
-Or explicitly:
+# Search with filters
+cja-audit cli search --user user@example.com --action DELETE
 
-```bash
-cja-audit tui
-```
+# Export to file
+cja-audit cli export --format json --output audit_logs.json --days 30
 
-#### TUI Keyboard Navigation
+# View statistics
+cja-audit cli stats --days 7
 
-| Key | Action |
-|-----|--------|
-| `d` | Dashboard - Summary view |
-| `l` | Logs - Browse audit log entries |
-| `m` | Monitor - Real-time log monitoring |
-| `s` | Stats - Statistics and analytics |
-| `a` | Alerts - Manage alert rules |
-| `c` | Config - View settings |
-| `/` | Focus search/filter |
-| `r` | Refresh data |
-| `e` | Export current data |
-| `Enter` | View entry details |
-| `?` | Show help |
-| `Esc` | Close modal/dialog |
-| `q` | Quit application |
-
-#### TUI Screens
-
-1. **Dashboard**: Overview with summary stats, action distribution chart, top users, and recent anomalies
-2. **Log Browser**: DataTable with filtering by user, action, component, and search text. Click/Enter to view entry details
-3. **Monitor**: Real-time polling with configurable intervals, live log stream, and alert notifications
-4. **Statistics**: Detailed analytics with action distribution, hourly/daily charts, and user rankings
-5. **Alerts**: Manage alert rules, enable/disable rules, and test against recent data
-6. **Settings**: View API connection info and configuration
-
-### CLI Mode
-
-For scripting and automation, use the `cli` subcommand:
-
-```bash
-cja-audit cli <command>
-```
-
-#### List Recent Audit Logs
-
-```bash
-# List last 50 entries
-cja-audit cli list
-
-# List with limit and filter by component
-cja-audit cli list --limit 100 --component PROJECT
-
-# Show additional details
-cja-audit cli list --details
-
-# Output as JSON
-cja-audit cli list --output-format json
-```
-
-#### Search Audit Logs
-
-```bash
-# Search by user
-cja-audit cli search --user user@example.com
-
-# Search by action type
-cja-audit cli search --action CREATE --action DELETE
-
-# Search by date range
-cja-audit cli search --start-date 2024-01-01 --end-date 2024-01-31
-
-# Combine filters
-cja-audit cli search --user user@example.com --action DELETE --component FILTER
-```
-
-#### Query with Date Presets
-
-```bash
-# Query today's logs
-cja-audit cli query --today
-
-# Query yesterday's logs
-cja-audit cli query --yesterday
-
-# Query last 7 days
-cja-audit cli query --last-week
-
-# Query last 30 days
-cja-audit cli query --last-month
-```
-
-#### View Dashboard History
-
-```bash
-cja-audit cli dashboard --dashboard-id your-dashboard-id
-```
-
-#### View User Activity
-
-```bash
-cja-audit cli user --user-id user@example.com --days 7
-```
-
-#### View Component History
-
-```bash
-cja-audit cli component --id component-id --type FILTER
-```
-
-#### Export Audit Logs
-
-```bash
-# Export to JSON
-cja-audit cli export --format json --output audit_logs.json
-
-# Export to CSV
-cja-audit cli export --format csv --output audit_logs.csv
-
-# Export to TSV
-cja-audit cli export --format tsv --output audit_logs.tsv
-
-# Export specific date range
-cja-audit cli export --format json --output logs.json --start-date 2024-01-01 --end-date 2024-01-31
-
-# Export last 30 days
-cja-audit cli export --format json --output logs.json --days 30
-```
-
-#### View Statistics
-
-```bash
-# Stats for last 7 days (default)
-cja-audit cli stats
-
-# Stats for last 30 days
-cja-audit cli stats --days 30
-
-# Show top 20 users
-cja-audit cli stats --top 20
-
-# Output as JSON
-cja-audit cli stats --output-format json
-```
-
-#### Activity Timeline
-
-```bash
-# Show daily and hourly activity visualization
-cja-audit cli timeline --days 7
-
-# Filter by action or user
-cja-audit cli timeline --action DELETE --user user@example.com
-```
-
-#### Real-time Monitoring (CLI)
-
-```bash
-# Monitor with default 60-second interval
-cja-audit cli monitor
-
-# Custom interval
+# Real-time monitoring
 cja-audit cli monitor --interval 30
 
-# Monitor for specific duration (in seconds)
-cja-audit cli monitor --duration 3600
-
-# Disable alerts
-cja-audit cli monitor --no-alerts
-```
-
-#### Tail Mode (like tail -f)
-
-```bash
-# Follow logs in real-time
-cja-audit cli tail
-
-# With filters
-cja-audit cli tail --user user@example.com --action DELETE
-```
-
-#### Find Specific Actions
-
-```bash
-# Find all DELETE actions
-cja-audit cli find-action --action DELETE --days 7
-```
-
-#### Top Users
-
-```bash
-# Show most active users
-cja-audit cli top-users --days 7 --top 10
-```
-
-#### Generate Report
-
-```bash
-# Generate comprehensive report to stdout
-cja-audit cli report --days 7
-
-# Save report to file
+# Generate report
 cja-audit cli report --days 30 --output report.json
 ```
 
-#### Alert Management
+<details>
+<summary>View all CLI commands</summary>
 
+### Query Commands
 ```bash
-# List all alert rules
-cja-audit cli alerts list
-
-# List as JSON
-cja-audit cli alerts list --output-format json
-
-# Test rules against recent logs
-cja-audit cli alerts test --days 1
+cja-audit cli list [--limit N] [--component TYPE] [--details]
+cja-audit cli search [--user EMAIL] [--action TYPE] [--start-date DATE] [--end-date DATE]
+cja-audit cli query [--today|--yesterday|--last-week|--last-month]
+cja-audit cli user --user-id EMAIL [--days N]
+cja-audit cli component --id ID [--type TYPE]
+cja-audit cli dashboard --dashboard-id ID
+cja-audit cli find-action --action TYPE [--days N]
+cja-audit cli top-users [--days N] [--top N]
 ```
 
-#### Utility Commands
-
+### Analysis Commands
 ```bash
-# List available action types
-cja-audit cli actions
-
-# List available component types
-cja-audit cli components
-
-# Show current configuration
-cja-audit cli config
-
-# Verify API connection
-cja-audit cli verify
-
-# Initialize config file
-cja-audit cli init
+cja-audit cli stats [--days N] [--top N] [--output-format json|table]
+cja-audit cli timeline [--days N] [--action TYPE] [--user EMAIL]
+cja-audit cli report [--days N] [--output FILE]
 ```
 
-## Action Types
+### Monitoring Commands
+```bash
+cja-audit cli monitor [--interval N] [--duration N] [--no-alerts]
+cja-audit cli tail [--user EMAIL] [--action TYPE] [--interval N]
+```
 
-| Action | Description |
-|--------|-------------|
-| `CREATE` | Component created |
-| `EDIT` | Component modified |
-| `DELETE` | Component deleted |
-| `SHARE` | Component shared |
-| `UNSHARE` | Sharing removed |
-| `APPROVE` | Component approved |
-| `UNAPPROVE` | Approval removed |
-| `EXPORT` | Data exported |
-| `TRANSFER` | Ownership transferred |
-| `EMBARGO` | Access restricted |
-| `REFRESH` | Data refreshed |
-| `ORG_CHANGE` | Organization modified |
-| `API_REQUEST` | API request made |
+### Export Commands
+```bash
+cja-audit cli export --output FILE [--format json|csv|tsv] [--days N]
+```
 
-## Component Types
+### Alert Commands
+```bash
+cja-audit cli alerts list [--output-format json|table]
+cja-audit cli alerts test [--days N]
+```
 
-| Component | Description |
-|-----------|-------------|
-| `PROJECT` | Workspace projects/dashboards |
-| `FILTER` | Segments/filters |
-| `CALCULATED_METRIC` | Calculated metrics |
-| `DATA_VIEW` | Data views |
-| `CONNECTION` | Data connections |
-| `ANNOTATION` | Annotations |
-| `AUDIENCE` | Audiences |
-| `DATE_RANGE` | Date ranges |
-| `SCHEDULED_PROJECT` | Scheduled reports |
-| `USER` | User accounts |
-| `USER_GROUP` | User groups |
+### Utility Commands
+```bash
+cja-audit cli actions      # List action types
+cja-audit cli components   # List component types
+cja-audit cli config       # Show configuration
+cja-audit cli verify       # Test API connection
+cja-audit cli init         # Create config file
+```
+
+</details>
 
 ## Alert Rules
 
@@ -371,25 +240,52 @@ alert_rules:
       - EXPORT
     threshold_count: 3
     threshold_window_minutes: 30
+
+  - name: off_hours_activity
+    description: Activity outside business hours
+    enabled: true
+    threshold_count: 10
+    threshold_window_minutes: 60
 ```
+
+## Reference
+
+### Action Types
+
+| Action | Description |
+|--------|-------------|
+| `CREATE` | Component created |
+| `EDIT` | Component modified |
+| `DELETE` | Component deleted |
+| `SHARE` | Component shared |
+| `UNSHARE` | Sharing removed |
+| `APPROVE` | Component approved |
+| `UNAPPROVE` | Approval removed |
+| `EXPORT` | Data exported |
+| `TRANSFER` | Ownership transferred |
+
+### Component Types
+
+| Component | Description |
+|-----------|-------------|
+| `PROJECT` | Workspace projects/dashboards |
+| `FILTER` | Segments/filters |
+| `CALCULATED_METRIC` | Calculated metrics |
+| `DATA_VIEW` | Data views |
+| `CONNECTION` | Data connections |
+| `ANNOTATION` | Annotations |
+| `AUDIENCE` | Audiences |
 
 ## Development
 
-### Install Development Dependencies
-
 ```bash
+# Install with dev dependencies
 uv pip install -e ".[dev]"
-```
 
-### Run Tests
-
-```bash
+# Run tests
 pytest
-```
 
-### Run Linting
-
-```bash
+# Run linting
 ruff check src tests
 ```
 
