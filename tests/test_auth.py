@@ -91,7 +91,7 @@ class TestTokenManager:
         sample_settings: CJASettings,
         httpx_mock: HTTPXMock,
     ) -> None:
-        """Test OAuth error is properly raised."""
+        """Test OAuth error is properly raised with helpful message."""
         httpx_mock.add_response(
             url="https://ims-na1.adobelogin.com/ims/token/v3",
             status_code=401,
@@ -102,17 +102,23 @@ class TestTokenManager:
         with pytest.raises(AuthenticationError) as exc_info:
             token_manager.get_token()
 
-        assert "401" in str(exc_info.value)
+        assert "invalid_client" in str(exc_info.value)
 
     def test_no_credentials_error(self) -> None:
         """Test error when no credentials configured."""
-        settings = CJASettings()  # No credentials
+        # Explicitly create settings with empty credentials (bypass .env loading)
+        settings = CJASettings(
+            client_id="",
+            secret="",
+            org_id="",
+            _env_file=None,  # Disable .env loading for this test
+        )
         token_manager = TokenManager(settings)
 
         with pytest.raises(AuthenticationError) as exc_info:
             token_manager.get_token()
 
-        assert "No authentication configured" in str(exc_info.value)
+        assert "OAuth not configured" in str(exc_info.value)
 
     def test_get_auth_headers(
         self,

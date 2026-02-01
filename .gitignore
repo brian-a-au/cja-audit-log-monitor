@@ -32,9 +32,13 @@ ENV/
 *.swp
 *.swo
 
-# Environment variables
+# Environment variables and credentials
 .env
 .env.local
+config.json
+*.pem
+private.key
+credentials/
 
 # Testing
 .pytest_cache/

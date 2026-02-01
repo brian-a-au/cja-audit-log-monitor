@@ -13,8 +13,8 @@ def sample_settings() -> CJASettings:
     """Create sample settings for testing."""
     return CJASettings(
         client_id="test_client_id",
-        client_secret="test_client_secret",
-        org_id="test_org_id",
+        secret="test_secret",
+        org_id="test_org_id@AdobeOrg",
         scopes="openid,AdobeID",
     )
 

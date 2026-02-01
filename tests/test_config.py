@@ -35,15 +35,21 @@ class TestCJASettings:
 
     def test_is_oauth_configured_false(self) -> None:
         """Test OAuth configuration check returns False when not configured."""
-        settings = CJASettings()
+        # Explicitly create with empty credentials, bypassing .env
+        settings = CJASettings(
+            client_id="",
+            secret="",
+            org_id="",
+            _env_file=None,
+        )
         assert not settings.is_oauth_configured()
 
     def test_is_oauth_configured_true(self) -> None:
         """Test OAuth configuration check returns True when configured."""
         settings = CJASettings(
             client_id="id",
-            client_secret="secret",
-            org_id="org",
+            secret="mysecret",
+            org_id="org@AdobeOrg",
         )
         assert settings.is_oauth_configured()
 
@@ -51,15 +57,18 @@ class TestCJASettings:
         """Test OAuth configuration check returns False when partially configured."""
         settings = CJASettings(
             client_id="id",
-            client_secret="",  # Missing
-            org_id="org",
+            secret="",  # Missing
+            org_id="org@AdobeOrg",
         )
         assert not settings.is_oauth_configured()
 
-    def test_is_jwt_configured_false(self) -> None:
-        """Test JWT configuration check returns False when not configured."""
-        settings = CJASettings()
-        assert not settings.is_jwt_configured()
+    def test_org_id_validation(self) -> None:
+        """Test org_id must end with @AdobeOrg."""
+        import pytest
+
+        with pytest.raises(ValueError, match="must end with @AdobeOrg"):
+            CJASettings(org_id="invalid_org_id")
+
 
 
 class TestLoadConfig:
@@ -117,7 +126,7 @@ class TestSaveConfig:
             config_path = Path(tmpdir) / "config.yaml"
             settings = CJASettings(
                 client_id="secret_id",
-                client_secret="super_secret",
+                secret="super_secret",
             )
 
             save_config(settings, config_path)
@@ -126,7 +135,7 @@ class TestSaveConfig:
                 saved = yaml.safe_load(f)
 
             assert "client_id" not in saved
-            assert "client_secret" not in saved
+            assert "secret" not in saved
 
     def test_save_creates_directory(self) -> None:
         """Test save creates parent directory if needed."""

@@ -77,14 +77,6 @@ class SettingsScreen(Screen):
                     ),
                     classes="settings-row",
                 )
-                yield Horizontal(
-                    Static("[bold]JWT Configured:[/bold]", classes="settings-label"),
-                    Static(
-                        "[green]Yes[/green]" if settings.is_jwt_configured() else "[dim]No[/dim]",
-                        classes="settings-value",
-                    ),
-                    classes="settings-row",
-                )
 
             with Vertical(classes="settings-section"):
                 yield Static("[bold]Defaults[/bold]")
@@ -227,14 +219,6 @@ class SettingsScreen(Screen):
                 Static("[bold]OAuth Configured:[/bold]", classes="settings-label"),
                 Static(
                     "[green]Yes[/green]" if settings.is_oauth_configured() else "[red]No[/red]",
-                    classes="settings-value",
-                ),
-                classes="settings-row",
-            ),
-            Horizontal(
-                Static("[bold]JWT Configured:[/bold]", classes="settings-label"),
-                Static(
-                    "[green]Yes[/green]" if settings.is_jwt_configured() else "[dim]No[/dim]",
                     classes="settings-value",
                 ),
                 classes="settings-row",

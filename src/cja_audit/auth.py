@@ -1,9 +1,7 @@
 """Authentication handling for Adobe CJA API."""
 
 import logging
-import time
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 
 import httpx
 
@@ -20,7 +18,7 @@ class AuthenticationError(Exception):
 
 
 class TokenManager:
-    """Manages OAuth/JWT tokens for Adobe CJA API."""
+    """Manages OAuth tokens for Adobe CJA API."""
 
     def __init__(self, settings: CJASettings) -> None:
         self.settings = settings
@@ -32,16 +30,13 @@ class TokenManager:
         if self._is_token_valid():
             return self._token.access_token  # type: ignore
 
-        # Try OAuth first, fall back to JWT
-        if self.settings.is_oauth_configured():
-            self._token = self._get_oauth_token()
-        elif self.settings.is_jwt_configured():
-            self._token = self._get_jwt_token()
-        else:
+        if not self.settings.is_oauth_configured():
             raise AuthenticationError(
-                "No authentication configured. Set CJA_CLIENT_ID, CJA_CLIENT_SECRET, "
-                "and CJA_ORG_ID environment variables for OAuth authentication."
+                "OAuth not configured. Set ORG_ID, CLIENT_ID, SECRET, and SCOPES "
+                "environment variables. See .env.example for details."
             )
+
+        self._token = self._get_oauth_token()
 
         # Set expiry with 5 minute buffer
         self._token_expiry = datetime.now(UTC) + timedelta(
@@ -65,7 +60,7 @@ class TokenManager:
         data = {
             "grant_type": "client_credentials",
             "client_id": self.settings.client_id,
-            "client_secret": self.settings.client_secret,
+            "client_secret": self.settings.secret,
             "scope": ",".join(self.settings.scopes_list),
         }
 
@@ -83,82 +78,49 @@ class TokenManager:
                     expires_in=token_data.get("expires_in", 86400),
                 )
         except httpx.HTTPStatusError as e:
-            error_detail = ""
-            try:
-                error_detail = e.response.json()
-            except Exception:
-                error_detail = e.response.text
-            raise AuthenticationError(
-                f"OAuth authentication failed: {e.response.status_code} - {error_detail}"
-            ) from e
+            error_detail = self._parse_oauth_error(e)
+            raise AuthenticationError(error_detail) from e
         except httpx.RequestError as e:
             raise AuthenticationError(f"OAuth request failed: {e}") from e
 
-    def _get_jwt_token(self) -> TokenInfo:
-        """Get token using JWT authentication (legacy)."""
+    def _parse_oauth_error(self, e: httpx.HTTPStatusError) -> str:
+        """Parse OAuth error response and return helpful message."""
         try:
-            import jwt as pyjwt
-        except ImportError:
-            raise AuthenticationError(
-                "PyJWT package required for JWT authentication. Install with: pip install PyJWT"
-            )
+            error_data = e.response.json()
+            error_code = error_data.get("error", "")
+            error_desc = error_data.get("error_description", "")
 
-        # Read private key
-        key_path = Path(self.settings.private_key_path)
-        if not key_path.exists():
-            raise AuthenticationError(f"Private key file not found: {key_path}")
-
-        with open(key_path) as f:
-            private_key = f.read()
-
-        # Build JWT claims
-        now = int(time.time())
-        expiry = now + 86400  # 24 hours
-
-        claims = {
-            "exp": expiry,
-            "iss": self.settings.org_id,
-            "sub": self.settings.tech_account_id,
-            "aud": f"{self.settings.ims_base_url}/c/{self.settings.client_id}",
-            f"{self.settings.ims_base_url}/s/ent_cja_sdk": True,
-        }
-
-        # Sign JWT
-        jwt_token = pyjwt.encode(claims, private_key, algorithm="RS256")
-
-        # Exchange JWT for access token
-        exchange_url = f"{self.settings.ims_base_url}/ims/exchange/jwt"
-
-        data = {
-            "client_id": self.settings.client_id,
-            "client_secret": self.settings.client_secret,
-            "jwt_token": jwt_token,
-        }
-
-        logger.debug("Exchanging JWT token at %s", exchange_url)
-
-        try:
-            with httpx.Client(timeout=30.0) as client:
-                response = client.post(exchange_url, data=data)
-                response.raise_for_status()
-                token_data = response.json()
-
-                return TokenInfo(
-                    access_token=token_data["access_token"],
-                    token_type=token_data.get("token_type", "bearer"),
-                    expires_in=token_data.get("expires_in", 86400),
+            if error_code == "invalid_client":
+                return (
+                    f"invalid_client: {error_desc}\n"
+                    "Check that CLIENT_ID and SECRET are correct and not expired. "
+                    "Re-retrieve credentials from Adobe Developer Console."
                 )
-        except httpx.HTTPStatusError as e:
-            error_detail = ""
-            try:
-                error_detail = e.response.json()
-            except Exception:
-                error_detail = e.response.text
-            raise AuthenticationError(
-                f"JWT exchange failed: {e.response.status_code} - {error_detail}"
-            ) from e
-        except httpx.RequestError as e:
-            raise AuthenticationError(f"JWT exchange request failed: {e}") from e
+            elif error_code == "invalid_scope":
+                return (
+                    f"invalid_scope: {error_desc}\n"
+                    "Copy SCOPES exactly from Developer Console > OAuth Server-to-Server > Scopes."
+                )
+            elif error_code == "unauthorized_client":
+                return (
+                    f"unauthorized_client: {error_desc}\n"
+                    "Ensure OAuth Server-to-Server is enabled in Developer Console."
+                )
+            else:
+                return f"OAuth error ({e.response.status_code}): {error_code} - {error_desc}"
+        except Exception:
+            status = e.response.status_code
+            if status == 401:
+                return (
+                    "401 Unauthorized: Check that credentials are current and not regenerated."
+                )
+            elif status == 403:
+                return (
+                    "403 Forbidden: Ensure both CJA API and Experience Platform API are added "
+                    "to your project in Developer Console, and service account is assigned "
+                    "to product profiles in Admin Console."
+                )
+            return f"OAuth authentication failed: {status} - {e.response.text}"
 
     def get_auth_headers(self) -> dict[str, str]:
         """Get headers with authentication for API requests."""

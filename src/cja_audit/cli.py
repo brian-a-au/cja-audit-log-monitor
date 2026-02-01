@@ -675,10 +675,11 @@ def init(ctx: click.Context) -> None:
     create_default_config(config_path)
     console.print(f"[green]Created config file at:[/green] {config_path}")
     console.print("\n[dim]Set these environment variables for authentication:[/dim]")
-    console.print("  CJA_CLIENT_ID=your_client_id")
-    console.print("  CJA_CLIENT_SECRET=your_client_secret")
-    console.print("  CJA_ORG_ID=your_org_id")
-    console.print("\n[dim]Or add them to a .env file in your project directory.[/dim]")
+    console.print("  ORG_ID=your_org_id@AdobeOrg")
+    console.print("  CLIENT_ID=your_client_id")
+    console.print("  SECRET=your_client_secret")
+    console.print("  SCOPES=<copy from Developer Console>")
+    console.print("\n[dim]Or add them to a .env file. See .env.example for details.[/dim]")
 
 
 @cli.command()
@@ -698,7 +699,6 @@ def config(ctx: click.Context) -> None:
         console.print(f"Default days: {settings.default_days}")
         console.print(f"Monitor interval: {settings.monitor_interval}s")
         console.print(f"OAuth configured: {settings.is_oauth_configured()}")
-        console.print(f"JWT configured: {settings.is_jwt_configured()}")
         org_display = f"{settings.org_id[:8]}..." if settings.org_id else "(not set)"
         client_display = f"{settings.client_id[:8]}..." if settings.client_id else "(not set)"
         console.print(f"Org ID: {org_display}")

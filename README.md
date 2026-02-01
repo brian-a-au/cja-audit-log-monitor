@@ -112,10 +112,11 @@ pip install -e .
 ### 1. Set up Adobe Developer Console
 
 1. Go to [Adobe Developer Console](https://developer.adobe.com/console)
-2. Create a new project or use an existing one
-3. Add the **Customer Journey Analytics API** to your project
-4. Create OAuth Server-to-Server credentials
-5. Note your Client ID, Client Secret, and Organization ID
+2. Verify you're in the correct organization (top-right dropdown)
+3. Create a new project or use an existing one
+4. Add the **Customer Journey Analytics API** (select OAuth Server-to-Server)
+5. **Important:** Also add the **Experience Platform API** (required even for CJA-only usage)
+6. Both APIs share the same OAuth credentials
 
 ### 2. Configure Environment Variables
 
@@ -123,13 +124,16 @@ pip install -e .
 cp .env.example .env
 ```
 
-Edit `.env` with your credentials:
+Edit `.env` with your credentials from Developer Console:
 
 ```bash
-CJA_CLIENT_ID=your_client_id
-CJA_CLIENT_SECRET=your_client_secret
-CJA_ORG_ID=your_org_id@AdobeOrg
+ORG_ID=your_org_id@AdobeOrg
+CLIENT_ID=your_client_id
+SECRET=your_client_secret
+SCOPES=openid,AdobeID,read_organizations,additional_info.projectedProductContext
 ```
+
+**Note:** Copy SCOPES exactly from Developer Console > OAuth Server-to-Server > Scopes.
 
 ### 3. (Optional) Create Config File
 
@@ -138,6 +142,25 @@ cja-audit cli init
 ```
 
 This creates `~/.cja-audit/config.yaml` with default settings for alert rules and preferences.
+
+## Troubleshooting
+
+### Common OAuth Errors
+
+| Error | Cause | Solution |
+|-------|-------|----------|
+| `invalid_client` | Wrong CLIENT_ID or SECRET | Re-copy credentials from Developer Console |
+| `invalid_scope` | SCOPES don't match console | Copy SCOPES exactly from Developer Console |
+| `403 Forbidden` | Missing API or permissions | Add both CJA API and Experience Platform API to project; check product profile assignments |
+| `401 Unauthorized` | Expired or regenerated credentials | Re-retrieve SECRET from Developer Console |
+
+### Checklist
+
+- [ ] ORG_ID ends with `@AdobeOrg`
+- [ ] Both CJA API and Experience Platform API added to project
+- [ ] OAuth Server-to-Server authentication selected (not JWT)
+- [ ] SCOPES copied exactly from Developer Console
+- [ ] Service account assigned to product profiles in Admin Console
 
 ## CLI Mode
 

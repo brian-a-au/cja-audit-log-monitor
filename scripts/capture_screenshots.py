@@ -158,7 +158,7 @@ def create_mock_settings():
 
     mock_settings = MagicMock()
     mock_settings.client_id = "demo_client_12345"
-    mock_settings.client_secret = "demo_secret"
+    mock_settings.secret = "demo_secret"
     mock_settings.org_id = "ABC123DEF@AdobeOrg"
     mock_settings.api_base_url = "https://cja.adobe.io"
     mock_settings.ims_base_url = "https://ims-na1.adobelogin.com"
@@ -167,7 +167,6 @@ def create_mock_settings():
     mock_settings.monitor_interval = 60
     mock_settings.scopes = "openid,AdobeID"
     mock_settings.is_oauth_configured = lambda: True
-    mock_settings.is_jwt_configured = lambda: False
     mock_settings.alert_rules = [
         AlertRule(
             name="bulk_delete",

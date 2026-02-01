@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from .models import AlertRule, NotificationConfig
@@ -18,24 +18,19 @@ class CJASettings(BaseSettings):
     """Application settings with environment variable support."""
 
     model_config = SettingsConfigDict(
-        env_prefix="CJA_",
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
     )
 
-    # Authentication
-    client_id: str = Field(default="", description="Adobe OAuth client ID")
-    client_secret: str = Field(default="", description="Adobe OAuth client secret")
-    org_id: str = Field(default="", description="Adobe IMS organization ID")
+    # Authentication (matches Adobe API skill: org_id, client_id, secret, scopes)
+    org_id: str = Field(default="", description="Adobe IMS organization ID (ORG_ID)")
+    client_id: str = Field(default="", description="Adobe OAuth client ID (CLIENT_ID)")
+    secret: str = Field(default="", description="Adobe OAuth client secret (SECRET)")
     scopes: str = Field(
         default="openid,AdobeID,read_organizations,additional_info.projectedProductContext",
-        description="OAuth scopes (comma-separated)",
+        description="OAuth scopes (SCOPES, comma-separated)",
     )
-
-    # JWT authentication (legacy)
-    tech_account_id: str = Field(default="", description="Technical account ID for JWT")
-    private_key_path: str = Field(default="", description="Path to private key for JWT")
 
     # API settings
     api_base_url: str = Field(
@@ -62,6 +57,14 @@ class CJASettings(BaseSettings):
     notifications: NotificationConfig = Field(default_factory=NotificationConfig)
     slack_webhook_url: str = Field(default="", description="Slack webhook URL for alerts")
 
+    @field_validator("org_id")
+    @classmethod
+    def validate_org_id(cls, v: str) -> str:
+        """Validate org_id format ends with @AdobeOrg."""
+        if v and not v.endswith("@AdobeOrg"):
+            raise ValueError("ORG_ID must end with @AdobeOrg")
+        return v
+
     @property
     def scopes_list(self) -> list[str]:
         """Get scopes as a list."""
@@ -69,16 +72,7 @@ class CJASettings(BaseSettings):
 
     def is_oauth_configured(self) -> bool:
         """Check if OAuth credentials are configured."""
-        return bool(self.client_id and self.client_secret and self.org_id)
-
-    def is_jwt_configured(self) -> bool:
-        """Check if JWT credentials are configured."""
-        return bool(
-            self.client_id
-            and self.tech_account_id
-            and self.private_key_path
-            and Path(self.private_key_path).exists()
-        )
+        return bool(self.client_id and self.secret and self.org_id)
 
 
 def load_config(config_path: Path | None = None) -> CJASettings:
