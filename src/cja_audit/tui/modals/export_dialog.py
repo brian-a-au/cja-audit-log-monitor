@@ -104,7 +104,7 @@ class ExportDialog(ModalScreen):
             count = export_entries(
                 self._state.entries,
                 output_path,
-                format=export_format,
+                output_format=export_format,
                 pretty=True,
             )
             status.update(f"[green]Exported {count} entries to {output_path}[/green]")

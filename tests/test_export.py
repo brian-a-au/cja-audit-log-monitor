@@ -184,21 +184,21 @@ class TestExportEntries:
         """Test export with JSON format."""
         with TemporaryDirectory() as tmpdir:
             output_path = Path(tmpdir) / "export.json"
-            count = export_entries([sample_audit_entry], output_path, format="json")
+            count = export_entries([sample_audit_entry], output_path, output_format="json")
             assert count == 1
 
     def test_csv_format(self, sample_audit_entry: AuditLogEntry) -> None:
         """Test export with CSV format."""
         with TemporaryDirectory() as tmpdir:
             output_path = Path(tmpdir) / "export.csv"
-            count = export_entries([sample_audit_entry], output_path, format="csv")
+            count = export_entries([sample_audit_entry], output_path, output_format="csv")
             assert count == 1
 
     def test_tsv_format(self, sample_audit_entry: AuditLogEntry) -> None:
         """Test export with TSV format."""
         with TemporaryDirectory() as tmpdir:
             output_path = Path(tmpdir) / "export.tsv"
-            count = export_entries([sample_audit_entry], output_path, format="tsv")
+            count = export_entries([sample_audit_entry], output_path, output_format="tsv")
             assert count == 1
 
     def test_invalid_format(self, sample_audit_entry: AuditLogEntry) -> None:
@@ -206,12 +206,12 @@ class TestExportEntries:
         with TemporaryDirectory() as tmpdir:
             output_path = Path(tmpdir) / "export.txt"
             with pytest.raises(ValueError) as exc_info:
-                export_entries([sample_audit_entry], output_path, format="xml")
+                export_entries([sample_audit_entry], output_path, output_format="xml")
             assert "Unsupported" in str(exc_info.value)
 
     def test_format_case_insensitive(self, sample_audit_entry: AuditLogEntry) -> None:
         """Test that format is case insensitive."""
         with TemporaryDirectory() as tmpdir:
             output_path = Path(tmpdir) / "export.json"
-            count = export_entries([sample_audit_entry], output_path, format="JSON")
+            count = export_entries([sample_audit_entry], output_path, output_format="JSON")
             assert count == 1

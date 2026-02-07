@@ -1,5 +1,7 @@
 """Entry detail modal for viewing full audit log entry details."""
 
+import json
+
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
@@ -114,7 +116,6 @@ class EntryDetailModal(ModalScreen):
 
             if entry.changes:
                 yield Static("[bold]Changes:[/bold]", classes="detail-label")
-                import json
                 changes_str = json.dumps(entry.changes, indent=2, default=str)
                 yield Static(changes_str, classes="detail-changes")
 
