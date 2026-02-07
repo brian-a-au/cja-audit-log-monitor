@@ -133,8 +133,7 @@ class AppState:
             Dictionary with connection status and details.
         """
         try:
-            with self.client:
-                result = self.client.verify_connection()
+            result = self.client.verify_connection()
             self.is_connected = result.get("connected", False)
             self.connection_error = result.get("error")
             return result
@@ -157,9 +156,8 @@ class AppState:
             List of audit log entries.
         """
         query = self.filters.to_query()
-        with self.client:
-            self.entries = self.client.get_all_logs(query, max_entries=max_entries)
-            self.last_refresh = datetime.now()
+        self.entries = self.client.get_all_logs(query, max_entries=max_entries)
+        self.last_refresh = datetime.now()
         return self.entries
 
     def fetch_logs_page(self) -> tuple[list[AuditLogEntry], int]:
@@ -169,11 +167,10 @@ class AppState:
             Tuple of (entries list, total count).
         """
         query = self.filters.to_query()
-        with self.client:
-            response = self.client.get_logs(query)
-            self.entries = response.content
-            self.total_entries = response.total_elements
-            self.last_refresh = datetime.now()
+        response = self.client.get_logs(query)
+        self.entries = response.content
+        self.total_entries = response.total_elements
+        self.last_refresh = datetime.now()
         return self.entries, self.total_entries
 
     def check_alerts(self, entries: list[AuditLogEntry]) -> list["Panel"]:

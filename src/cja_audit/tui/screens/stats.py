@@ -84,8 +84,7 @@ class StatsScreen(Screen):
 
         try:
             query = build_date_range_query(self._days)
-            with self._state.client:
-                entries = self._state.client.get_all_logs(query, max_entries=5000)
+            entries = self._state.client.get_all_logs(query, max_entries=5000)
 
             if worker.is_cancelled:
                 return

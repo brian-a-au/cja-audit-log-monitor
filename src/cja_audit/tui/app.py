@@ -5,6 +5,7 @@ from pathlib import Path
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical
+from textual.message import Message
 from textual.screen import Screen
 from textual.widgets import Button, Footer, Header, Static
 
@@ -221,7 +222,7 @@ class CJAAuditApp(App):
         self.exit()
 
 
-class RefreshData:
+class RefreshData(Message):
     """Message to trigger data refresh."""
 
     pass

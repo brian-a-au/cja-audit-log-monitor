@@ -99,8 +99,7 @@ class DashboardScreen(Screen):
 
             # Fetch last 7 days of data
             query = build_date_range_query(7)
-            with self._state.client:
-                entries = self._state.client.get_all_logs(query, max_entries=1000)
+            entries = self._state.client.get_all_logs(query, max_entries=1000)
 
             if worker.is_cancelled:
                 return

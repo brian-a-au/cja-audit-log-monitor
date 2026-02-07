@@ -150,8 +150,7 @@ class MonitorScreen(Screen):
         )
 
         try:
-            with self._state.client:
-                entries = self._state.client.get_all_logs(query, max_entries=100)
+            entries = self._state.client.get_all_logs(query, max_entries=100)
         except Exception as e:
             self.call_from_thread(self._show_error, f"API error: {e}")
             return

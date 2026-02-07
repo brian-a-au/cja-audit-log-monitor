@@ -118,8 +118,7 @@ class AlertsScreen(Screen):
         try:
             # Fetch last day of data
             query = build_date_range_query(1)
-            with self._state.client:
-                entries = self._state.client.get_all_logs(query, max_entries=1000)
+            entries = self._state.client.get_all_logs(query, max_entries=1000)
 
             if worker.is_cancelled:
                 return
