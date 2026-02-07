@@ -1,11 +1,13 @@
 """Pytest fixtures for CJA Audit tests."""
 
 from datetime import UTC, datetime
+from unittest.mock import MagicMock
 
 import pytest
 
 from cja_audit.config import CJASettings
-from cja_audit.models import AuditLogEntry
+from cja_audit.models import AuditLogEntry, AuditLogResponse
+from cja_audit.tui.state import AppState
 
 
 @pytest.fixture
@@ -89,3 +91,41 @@ def mock_token_response() -> dict:
         "token_type": "bearer",
         "expires_in": 86400,
     }
+
+
+@pytest.fixture
+def mock_app_state(sample_settings, sample_audit_entries) -> AppState:
+    """Create an AppState with mocked client and services for TUI testing."""
+    state = AppState()
+    state._settings = sample_settings
+
+    # Mock client
+    mock_client = MagicMock()
+    mock_client.get_all_logs.return_value = sample_audit_entries
+    mock_client.get_logs.return_value = AuditLogResponse(
+        content=sample_audit_entries,
+        total_elements=len(sample_audit_entries),
+        total_pages=1,
+        number_of_elements=len(sample_audit_entries),
+        first=True,
+        last=True,
+        number=0,
+        size=50,
+    )
+    mock_client.verify_connection.return_value = {
+        "connected": True,
+        "authenticated": True,
+        "org_id": sample_settings.org_id,
+        "api_url": sample_settings.api_base_url,
+        "total_logs_available": len(sample_audit_entries),
+    }
+    mock_client.close = MagicMock()
+    state._client = mock_client
+
+    # Mock alert engine
+    mock_alert_engine = MagicMock()
+    mock_alert_engine.rules = []
+    mock_alert_engine.check_batch.return_value = []
+    state._alert_engine = mock_alert_engine
+
+    return state

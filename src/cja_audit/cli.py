@@ -534,7 +534,7 @@ def export(
             console.print("[yellow]No audit logs found to export.[/yellow]")
             return
 
-        count = export_entries(entries, output, format=format, pretty=pretty)
+        count = export_entries(entries, output, output_format=format, pretty=pretty)
         console.print(f"[green]Exported {count} entries to {output}[/green]")
 
     except AuthenticationError as e:

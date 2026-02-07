@@ -182,7 +182,7 @@ def export_to_tsv(
 def export_entries(
     entries: list[AuditLogEntry] | Iterator[AuditLogEntry],
     output_path: Path,
-    format: str = "json",
+    output_format: str = "json",
     pretty: bool = True,
 ) -> int:
     """Export audit logs to file in specified format.
@@ -190,7 +190,7 @@ def export_entries(
     Args:
         entries: Audit log entries to export.
         output_path: Output file path.
-        format: Output format ('json', 'csv', or 'tsv').
+        output_format: Output format ('json', 'csv', or 'tsv').
         pretty: For JSON, whether to pretty-print.
 
     Returns:
@@ -199,16 +199,18 @@ def export_entries(
     Raises:
         ValueError: If format is not supported.
     """
-    format = format.lower()
+    output_format = output_format.lower()
 
-    if format == "json":
+    if output_format == "json":
         return export_to_json(entries, output_path, pretty=pretty)
-    elif format == "csv":
+    elif output_format == "csv":
         return export_to_csv(entries, output_path)
-    elif format == "tsv":
+    elif output_format == "tsv":
         return export_to_tsv(entries, output_path)
     else:
-        raise ValueError(f"Unsupported export format: {format}. Use 'json', 'csv', or 'tsv'.")
+        raise ValueError(
+            f"Unsupported export format: {output_format}. Use 'json', 'csv', or 'tsv'."
+        )
 
 
 def export_stats_to_json(
