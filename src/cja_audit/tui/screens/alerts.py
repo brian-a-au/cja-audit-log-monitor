@@ -1,8 +1,10 @@
 """Alerts management screen."""
 
-from textual.app import ComposeResult
+from collections.abc import Iterator
+
 from textual.containers import Container, Horizontal, Vertical
 from textual.screen import Screen
+from textual.widget import Widget
 from textual.widgets import Button, Checkbox, LoadingIndicator, Static
 from textual.worker import get_current_worker
 
@@ -23,25 +25,30 @@ class AlertsScreen(Screen):
         super().__init__(**kwargs)
         self._state = state
 
-    def compose(self) -> ComposeResult:
-        """Compose alerts screen widgets."""
-        with Container(id="alerts-container"):
-            yield Static("[bold]Alert Rules Management[/bold]", id="alerts-title")
+    def compose_content(self) -> Iterator[Widget]:
+        """Yield widgets for embedding in main content area.
 
-            yield Static("[dim]Toggle rules on/off or test against recent data[/dim]")
+        Yields:
+            Widgets for the alerts content.
+        """
+        rule_cards = [self._create_rule_card(rule) for rule in self._state.alert_engine.rules]
+        rules_list = Vertical(*rule_cards, id="rules-list")
 
-            with Vertical(id="rules-list"):
-                for rule in self._state.alert_engine.rules:
-                    yield self._create_rule_card(rule)
+        buttons = Horizontal(
+            Button("Test Rules", id="test-rules", variant="primary"),
+            Button("Reset to Defaults", id="reset-rules"),
+        )
 
-            with Horizontal():
-                yield Button("Test Rules", id="test-rules", variant="primary")
-                yield Button("Reset to Defaults", id="reset-rules")
-
-            yield Static("[bold]Test Results[/bold]")
-            yield Static(id="test-results")
-
-            yield LoadingIndicator(id="loading")
+        yield Container(
+            Static("[bold]Alert Rules Management[/bold]", id="alerts-title"),
+            Static("[dim]Toggle rules on/off or test against recent data[/dim]"),
+            rules_list,
+            buttons,
+            Static("[bold]Test Results[/bold]"),
+            Static(id="test-results"),
+            LoadingIndicator(id="loading"),
+            id="alerts-container",
+        )
 
     def _create_rule_card(self, rule) -> Container:
         """Create a rule card widget.
@@ -101,7 +108,6 @@ class AlertsScreen(Screen):
 
     def _reset_rules(self) -> None:
         """Reset rules to defaults."""
-        # Reset engine with default rules
         self._state._alert_engine = None  # Force recreation
         self.app.notify("Rules reset to defaults", severity="information")
 
@@ -116,7 +122,6 @@ class AlertsScreen(Screen):
         worker = get_current_worker()
 
         try:
-            # Fetch last day of data
             query = build_date_range_query(1)
             entries = self._state.client.get_all_logs(query, max_entries=1000)
 
@@ -130,13 +135,11 @@ class AlertsScreen(Screen):
                 )
                 return
 
-            # Test rules
             alerts = self._state.alert_engine.check_batch(entries)
 
             if alerts:
                 result_lines = [f"[yellow]Found {len(alerts)} alerts:[/yellow]"]
                 for alert in alerts[:10]:
-                    # Extract alert name from panel title
                     result_lines.append("  [red]⚠[/red] Alert triggered")
                 self.call_from_thread(self._show_results, "\n".join(result_lines))
             else:
@@ -162,31 +165,3 @@ class AlertsScreen(Screen):
     def _hide_loading(self) -> None:
         """Hide loading indicator."""
         self.query_one("#loading").display = False
-
-    async def compose_content(self):
-        """Yield widgets for embedding in main content area.
-
-        Yields:
-            Widgets for the alerts content.
-        """
-        # Build rules list
-        rule_cards = [self._create_rule_card(rule) for rule in self._state.alert_engine.rules]
-        rules_list = Vertical(*rule_cards, id="rules-list")
-
-        buttons = Horizontal(
-            Button("Test Rules", id="test-rules", variant="primary"),
-            Button("Reset to Defaults", id="reset-rules"),
-        )
-
-        container = Container(
-            Static("[bold]Alert Rules Management[/bold]", id="alerts-title"),
-            Static("[dim]Toggle rules on/off or test against recent data[/dim]"),
-            rules_list,
-            buttons,
-            Static("[bold]Test Results[/bold]"),
-            Static(id="test-results"),
-            LoadingIndicator(id="loading"),
-            id="alerts-container",
-        )
-
-        yield container

@@ -1,8 +1,10 @@
 """Log browser screen for viewing and filtering audit logs."""
 
-from textual.app import ComposeResult
+from collections.abc import Iterator
+
 from textual.containers import Container, Horizontal
 from textual.screen import Screen
+from textual.widget import Widget
 from textual.widgets import Button, Label, LoadingIndicator, Static
 from textual.worker import get_current_worker
 
@@ -31,24 +33,30 @@ class LogBrowserScreen(Screen):
         super().__init__(**kwargs)
         self._state = state
 
-    def compose(self) -> ComposeResult:
-        """Compose log browser widgets."""
-        with Container(id="log-browser-container"):
-            yield FilterBar(id="filter-bar")
+    def compose_content(self) -> Iterator[Widget]:
+        """Yield widgets for embedding in main content area.
 
-            yield LogTable(id="log-table", show_details=False)
+        Yields:
+            Widgets for the log browser content.
+        """
+        pagination = Horizontal(
+            Button("◀ Prev", id="prev-page"),
+            Label("Page 1 of 1", id="page-info"),
+            Button("Next ▶", id="next-page"),
+            Static("", id="entry-count"),
+            id="pagination",
+        )
 
-            with Horizontal(id="pagination"):
-                yield Button("◀ Prev", id="prev-page")
-                yield Label("Page 1 of 1", id="page-info")
-                yield Button("Next ▶", id="next-page")
-                yield Static("", id="entry-count")
+        yield Container(
+            FilterBar(id="filter-bar"),
+            LogTable(id="log-table", show_details=False),
+            pagination,
+            LoadingIndicator(id="loading"),
+            id="log-browser-container",
+        )
 
-            yield LoadingIndicator(id="loading")
-
-    async def on_mount(self) -> None:
-        """Load initial data when screen mounts."""
-        self.query_one("#loading").display = True
+    def on_content_mounted(self) -> None:
+        """Called after compose_content widgets are mounted."""
         self.run_worker(self._load_data(), exclusive=True)
 
     async def _load_data(self) -> None:
@@ -95,7 +103,6 @@ class LogBrowserScreen(Screen):
 
     def on_filter_bar_filter_changed(self, event: FilterBar.FilterChanged) -> None:
         """Handle filter changes."""
-        # Update state filters
         self._state.filters.user = event.user
         self._state.filters.search_text = event.search
 
@@ -157,38 +164,6 @@ class LogBrowserScreen(Screen):
         else:
             self.app.notify("No entry selected", severity="warning")
 
-    def on_log_table_row_selected(self, event) -> None:
-        """Handle row selection in log table."""
-        # Double-click to view details
-        pass
-
     def on_data_table_row_selected(self, event) -> None:
         """Handle DataTable row selection (Enter key)."""
         self.action_view_details()
-
-    async def compose_content(self):
-        """Yield widgets for embedding in main content area.
-
-        Yields:
-            Widgets for the log browser content.
-        """
-        pagination = Horizontal(
-            Button("◀ Prev", id="prev-page"),
-            Label("Page 1 of 1", id="page-info"),
-            Button("Next ▶", id="next-page"),
-            Static("", id="entry-count"),
-            id="pagination",
-        )
-
-        container = Container(
-            FilterBar(id="filter-bar"),
-            LogTable(id="log-table", show_details=False),
-            pagination,
-            LoadingIndicator(id="loading"),
-            id="log-browser-container",
-        )
-
-        yield container
-
-        # Trigger data load after mounting
-        self.set_timer(0.1, lambda: self.run_worker(self._load_data(), exclusive=True))

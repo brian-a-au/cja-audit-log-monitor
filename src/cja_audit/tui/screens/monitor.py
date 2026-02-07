@@ -1,16 +1,20 @@
 """Real-time monitoring screen."""
 
+from collections.abc import Iterator
 from datetime import UTC, datetime
 
-from textual.app import ComposeResult
 from textual.containers import Container, Horizontal
 from textual.screen import Screen
+from textual.widget import Widget
 from textual.widgets import Button, Input, Label, LoadingIndicator, Static
 from textual.worker import Worker
 
 from ...models import AuditLogQuery
 from ..state import AppState
 from ..widgets import AlertSummary, LogTable
+
+# Cap _seen_ids to prevent unbounded memory growth during long sessions
+_MAX_SEEN_IDS = 10_000
 
 
 class MonitorScreen(Screen):
@@ -33,27 +37,38 @@ class MonitorScreen(Screen):
         self._last_timestamp: datetime | None = None
         self._seen_ids: set[str] = set()
 
-    def compose(self) -> ComposeResult:
-        """Compose monitor screen widgets."""
-        with Container(id="monitor-container"):
-            with Horizontal(id="monitor-controls"):
-                yield Button("▶ Start", id="start-button", variant="success")
-                yield Button("⏹ Stop", id="stop-button", variant="error", disabled=True)
-                yield Label("Interval:")
-                yield Input(value="60", id="interval-input", type="integer")
-                yield Label("seconds")
+    def compose_content(self) -> Iterator[Widget]:
+        """Yield widgets for embedding in main content area.
 
-            with Horizontal(id="monitor-status", classes="monitor-stopped"):
-                yield Static("● Stopped", id="status-indicator")
-                yield Static("", id="stats-info")
+        Yields:
+            Widgets for the monitor content.
+        """
+        controls = Horizontal(
+            Button("▶ Start", id="start-button", variant="success"),
+            Button("⏹ Stop", id="stop-button", variant="error", disabled=True),
+            Label("Interval:"),
+            Input(value="60", id="interval-input", type="integer"),
+            Label("seconds"),
+            id="monitor-controls",
+        )
 
-            yield Static("[bold]Live Log Stream[/bold]")
-            yield LogTable(id="monitor-log", show_details=False)
+        status = Horizontal(
+            Static("● Stopped", id="status-indicator"),
+            Static("", id="stats-info"),
+            id="monitor-status",
+            classes="monitor-stopped",
+        )
 
-            yield Static("[bold]Alerts[/bold]")
-            yield AlertSummary(id="alert-summary")
-
-            yield LoadingIndicator(id="loading")
+        yield Container(
+            controls,
+            status,
+            Static("[bold]Live Log Stream[/bold]"),
+            LogTable(id="monitor-log", show_details=False),
+            Static("[bold]Alerts[/bold]"),
+            AlertSummary(id="alert-summary"),
+            LoadingIndicator(id="loading"),
+            id="monitor-container",
+        )
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button presses."""
@@ -162,6 +177,14 @@ class MonitorScreen(Screen):
                 self._seen_ids.add(entry.id)
                 new_entries.append(entry)
 
+        # Prune _seen_ids if it grows too large
+        if len(self._seen_ids) > _MAX_SEEN_IDS:
+            # Keep only the most recent half
+            excess = len(self._seen_ids) - _MAX_SEEN_IDS // 2
+            it = iter(self._seen_ids)
+            to_remove = [next(it) for _ in range(excess)]
+            self._seen_ids.difference_update(to_remove)
+
         if new_entries:
             # Update last timestamp
             timestamps = [e.timestamp for e in new_entries if e.timestamp]
@@ -176,7 +199,6 @@ class MonitorScreen(Screen):
             if alerts:
                 self._state.monitor.alerts_triggered += len(alerts)
                 for alert in alerts:
-                    # Extract alert info and notify
                     self.call_from_thread(self._show_alert, "Alert triggered")
 
             # Add entries to table (in reverse order so newest is at top)
@@ -207,38 +229,3 @@ class MonitorScreen(Screen):
         self.app.notify(message, severity="warning")
         alert_summary = self.query_one("#alert-summary", AlertSummary)
         alert_summary.add_alert("Alert", message)
-
-    async def compose_content(self):
-        """Yield widgets for embedding in main content area.
-
-        Yields:
-            Widgets for the monitor content.
-        """
-        controls = Horizontal(
-            Button("▶ Start", id="start-button", variant="success"),
-            Button("⏹ Stop", id="stop-button", variant="error", disabled=True),
-            Label("Interval:"),
-            Input(value="60", id="interval-input", type="integer"),
-            Label("seconds"),
-            id="monitor-controls",
-        )
-
-        status = Horizontal(
-            Static("● Stopped", id="status-indicator"),
-            Static("", id="stats-info"),
-            id="monitor-status",
-            classes="monitor-stopped",
-        )
-
-        container = Container(
-            controls,
-            status,
-            Static("[bold]Live Log Stream[/bold]"),
-            LogTable(id="monitor-log", show_details=False),
-            Static("[bold]Alerts[/bold]"),
-            AlertSummary(id="alert-summary"),
-            LoadingIndicator(id="loading"),
-            id="monitor-container",
-        )
-
-        yield container

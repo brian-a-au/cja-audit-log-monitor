@@ -1,8 +1,10 @@
 """Settings screen for viewing configuration."""
 
-from textual.app import ComposeResult
+from collections.abc import Iterator
+
 from textual.containers import Container, Horizontal, Vertical
 from textual.screen import Screen
+from textual.widget import Widget
 from textual.widgets import Button, LoadingIndicator, Static
 from textual.worker import get_current_worker
 
@@ -23,148 +25,7 @@ class SettingsScreen(Screen):
         super().__init__(**kwargs)
         self._state = state
 
-    def compose(self) -> ComposeResult:
-        """Compose settings screen widgets."""
-        settings = self._state.settings
-
-        with Container(id="settings-container"):
-            yield Static("[bold]Configuration[/bold]", id="settings-title")
-
-            with Vertical(classes="settings-section"):
-                yield Static("[bold]Connection Status[/bold]")
-                yield Static(id="connection-status")
-
-            with Vertical(classes="settings-section"):
-                yield Static("[bold]API Configuration[/bold]")
-                yield Horizontal(
-                    Static("[bold]Config File:[/bold]", classes="settings-label"),
-                    Static(str(get_config_path()), classes="settings-value"),
-                    classes="settings-row",
-                )
-                yield Horizontal(
-                    Static("[bold]API Base URL:[/bold]", classes="settings-label"),
-                    Static(settings.api_base_url, classes="settings-value"),
-                    classes="settings-row",
-                )
-                yield Horizontal(
-                    Static("[bold]IMS Base URL:[/bold]", classes="settings-label"),
-                    Static(settings.ims_base_url, classes="settings-value"),
-                    classes="settings-row",
-                )
-
-            with Vertical(classes="settings-section"):
-                yield Static("[bold]Authentication[/bold]")
-                org_display = f"{settings.org_id[:12]}..." if settings.org_id else "(not set)"
-                if settings.client_id:
-                    client_display = f"{settings.client_id[:12]}..."
-                else:
-                    client_display = "(not set)"
-                yield Horizontal(
-                    Static("[bold]Organization ID:[/bold]", classes="settings-label"),
-                    Static(org_display, classes="settings-value"),
-                    classes="settings-row",
-                )
-                yield Horizontal(
-                    Static("[bold]Client ID:[/bold]", classes="settings-label"),
-                    Static(client_display, classes="settings-value"),
-                    classes="settings-row",
-                )
-                yield Horizontal(
-                    Static("[bold]OAuth Configured:[/bold]", classes="settings-label"),
-                    Static(
-                        "[green]Yes[/green]" if settings.is_oauth_configured() else "[red]No[/red]",
-                        classes="settings-value",
-                    ),
-                    classes="settings-row",
-                )
-
-            with Vertical(classes="settings-section"):
-                yield Static("[bold]Defaults[/bold]")
-                yield Horizontal(
-                    Static("[bold]Page Size:[/bold]", classes="settings-label"),
-                    Static(str(settings.default_page_size), classes="settings-value"),
-                    classes="settings-row",
-                )
-                yield Horizontal(
-                    Static("[bold]Days:[/bold]", classes="settings-label"),
-                    Static(str(settings.default_days), classes="settings-value"),
-                    classes="settings-row",
-                )
-                yield Horizontal(
-                    Static("[bold]Monitor Interval:[/bold]", classes="settings-label"),
-                    Static(f"{settings.monitor_interval} seconds", classes="settings-value"),
-                    classes="settings-row",
-                )
-
-            with Vertical(classes="settings-section"):
-                yield Static("[bold]Alert Rules[/bold]")
-                yield Horizontal(
-                    Static("[bold]Configured Rules:[/bold]", classes="settings-label"),
-                    Static(str(len(settings.alert_rules)), classes="settings-value"),
-                    classes="settings-row",
-                )
-
-            yield Horizontal(
-                Button("Verify Connection", id="verify-button", variant="primary"),
-                Button("Refresh Settings", id="refresh-button"),
-            )
-
-            yield LoadingIndicator(id="loading")
-
-    async def on_mount(self) -> None:
-        """Check connection status on mount."""
-        self.run_worker(self._check_connection(), exclusive=True)
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        """Handle button presses."""
-        if event.button.id == "verify-button":
-            self.query_one("#loading").display = True
-            self.run_worker(self._check_connection(), exclusive=True)
-        elif event.button.id == "refresh-button":
-            self._state.refresh_client()
-            self.app.notify("Settings refreshed", severity="information")
-
-    async def _check_connection(self) -> None:
-        """Verify API connection."""
-        worker = get_current_worker()
-
-        try:
-            result = await self._state.verify_connection()
-
-            if worker.is_cancelled:
-                return
-
-            self.call_from_thread(self._update_connection_status, result)
-
-        except Exception as e:
-            self.call_from_thread(
-                self._update_connection_status,
-                {"connected": False, "error": str(e)},
-            )
-        finally:
-            self.call_from_thread(self._hide_loading)
-
-    def _update_connection_status(self, result: dict) -> None:
-        """Update connection status display."""
-        status = self.query_one("#connection-status", Static)
-
-        if result.get("connected") and result.get("authenticated"):
-            status.update(
-                f"[green]● Connected[/green]\n"
-                f"  Organization: {result.get('org_id', 'Unknown')}\n"
-                f"  API URL: {result.get('api_url', 'Unknown')}\n"
-                f"  Total logs available: {result.get('total_logs_available', 'N/A'):,}"
-            )
-        else:
-            error = result.get("error", "Unknown error")
-            status.update(f"[red]● Disconnected[/red]\n  Error: {error}")
-
-    def _hide_loading(self) -> None:
-        """Hide loading indicator."""
-        loading = self.query_one("#loading", LoadingIndicator)
-        loading.display = False
-
-    async def compose_content(self):
+    def compose_content(self) -> Iterator[Widget]:
         """Yield widgets for embedding in main content area.
 
         Yields:
@@ -263,7 +124,7 @@ class SettingsScreen(Screen):
             Button("Refresh Settings", id="refresh-button"),
         )
 
-        container = Container(
+        yield Container(
             Static("[bold]Configuration[/bold]", id="settings-title"),
             connection_section,
             api_section,
@@ -275,7 +136,55 @@ class SettingsScreen(Screen):
             id="settings-container",
         )
 
-        yield container
+    def on_content_mounted(self) -> None:
+        """Called after compose_content widgets are mounted."""
+        self.run_worker(self._check_connection(), exclusive=True)
 
-        # Trigger connection check after mounting
-        self.set_timer(0.1, lambda: self.run_worker(self._check_connection(), exclusive=True))
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Handle button presses."""
+        if event.button.id == "verify-button":
+            self.query_one("#loading").display = True
+            self.run_worker(self._check_connection(), exclusive=True)
+        elif event.button.id == "refresh-button":
+            self._state.refresh_client()
+            self.app.notify("Settings refreshed", severity="information")
+
+    async def _check_connection(self) -> None:
+        """Verify API connection."""
+        worker = get_current_worker()
+
+        try:
+            result = self._state.verify_connection()
+
+            if worker.is_cancelled:
+                return
+
+            self.call_from_thread(self._update_connection_status, result)
+
+        except Exception as e:
+            self.call_from_thread(
+                self._update_connection_status,
+                {"connected": False, "error": str(e)},
+            )
+        finally:
+            self.call_from_thread(self._hide_loading)
+
+    def _update_connection_status(self, result: dict) -> None:
+        """Update connection status display."""
+        status = self.query_one("#connection-status", Static)
+
+        if result.get("connected") and result.get("authenticated"):
+            status.update(
+                f"[green]● Connected[/green]\n"
+                f"  Organization: {result.get('org_id', 'Unknown')}\n"
+                f"  API URL: {result.get('api_url', 'Unknown')}\n"
+                f"  Total logs available: {result.get('total_logs_available', 'N/A'):,}"
+            )
+        else:
+            error = result.get("error", "Unknown error")
+            status.update(f"[red]● Disconnected[/red]\n  Error: {error}")
+
+    def _hide_loading(self) -> None:
+        """Hide loading indicator."""
+        loading = self.query_one("#loading", LoadingIndicator)
+        loading.display = False

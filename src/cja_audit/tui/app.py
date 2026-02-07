@@ -113,6 +113,7 @@ class CJAAuditApp(App):
         super().__init__()
         self.state = AppState(config_path)
         self._current_screen = "dashboard"
+        self._screens: dict[str, Screen] = {}
 
     def compose(self) -> ComposeResult:
         """Create child widgets for the app."""
@@ -133,7 +134,6 @@ class CJAAuditApp(App):
 
     async def on_mount(self) -> None:
         """Handle application mount."""
-        # Import screens here to avoid circular imports
         from .screens import (
             AlertsScreen,
             DashboardScreen,
@@ -143,13 +143,14 @@ class CJAAuditApp(App):
             StatsScreen,
         )
 
-        # Install screens
-        self.install_screen(DashboardScreen(self.state), name="dashboard")
-        self.install_screen(LogBrowserScreen(self.state), name="logs")
-        self.install_screen(MonitorScreen(self.state), name="monitor")
-        self.install_screen(StatsScreen(self.state), name="stats")
-        self.install_screen(AlertsScreen(self.state), name="alerts")
-        self.install_screen(SettingsScreen(self.state), name="settings")
+        self._screens = {
+            "dashboard": DashboardScreen(self.state),
+            "logs": LogBrowserScreen(self.state),
+            "monitor": MonitorScreen(self.state),
+            "stats": StatsScreen(self.state),
+            "alerts": AlertsScreen(self.state),
+            "settings": SettingsScreen(self.state),
+        }
 
         # Show dashboard by default
         await self._show_screen("dashboard")
@@ -170,14 +171,13 @@ class CJAAuditApp(App):
                 button.add_class("active")
 
         # Get screen and compose its widgets into the content area
-        screen = self.get_screen(screen_name)
-        if hasattr(screen, "compose_content"):
-            # Use the new compose_content method that yields widgets directly
-            async for widget in screen.compose_content():
+        screen = self._screens.get(screen_name)
+        if screen and hasattr(screen, "compose_content"):
+            for widget in screen.compose_content():
                 await content.mount(widget)
-        else:
-            # Fallback: push as modal screen
-            self.push_screen(screen_name)
+            # Notify the screen that its content has been mounted
+            if hasattr(screen, "on_content_mounted"):
+                screen.on_content_mounted()
 
         self._current_screen = screen_name
 
@@ -195,7 +195,6 @@ class CJAAuditApp(App):
     def action_refresh(self) -> None:
         """Refresh current screen data."""
         self.notify("Refreshing...", severity="information")
-        # Post refresh message to current screen
         self.post_message(RefreshData())
 
     def action_export(self) -> None:

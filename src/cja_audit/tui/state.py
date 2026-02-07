@@ -126,7 +126,7 @@ class AppState:
             self._client = None
         self._token_manager = None
 
-    async def verify_connection(self) -> dict:
+    def verify_connection(self) -> dict:
         """Verify API connection and authentication.
 
         Returns:

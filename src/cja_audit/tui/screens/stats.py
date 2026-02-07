@@ -1,8 +1,10 @@
 """Statistics screen for analytics and visualizations."""
 
-from textual.app import ComposeResult
+from collections.abc import Iterator
+
 from textual.containers import Container, Horizontal, Vertical
 from textual.screen import Screen
+from textual.widget import Widget
 from textual.widgets import Button, Input, Label, LoadingIndicator, Static
 from textual.worker import get_current_worker
 
@@ -31,38 +33,48 @@ class StatsScreen(Screen):
         self._state = state
         self._days = 7
 
-    def compose(self) -> ComposeResult:
-        """Compose statistics screen widgets."""
-        with Container(id="stats-container"):
-            yield Static("[bold]Statistics & Analytics[/bold]", id="stats-title")
+    def compose_content(self) -> Iterator[Widget]:
+        """Yield widgets for embedding in main content area.
 
-            with Horizontal(id="stats-controls"):
-                yield Label("Days to analyze:")
-                yield Input(value="7", id="days-input", type="integer")
-                yield Button("Update", id="update-button", variant="primary")
+        Yields:
+            Widgets for the stats content.
+        """
+        controls = Horizontal(
+            Label("Days to analyze:"),
+            Input(value="7", id="days-input", type="integer"),
+            Button("Update", id="update-button", variant="primary"),
+            id="stats-controls",
+        )
 
-            yield StatsPanel(id="stats-summary")
+        action_section = Vertical(
+            Static("[bold]Action Distribution[/bold]"),
+            ActionBarChart(id="action-chart"),
+            classes="stats-section",
+        )
 
-            with Horizontal():
-                with Vertical(classes="stats-section"):
-                    yield Static("[bold]Action Distribution[/bold]")
-                    yield ActionBarChart(id="action-chart")
+        hourly_section = Vertical(
+            Static("[bold]Hourly Activity[/bold]"),
+            HourlyChart(id="hourly-chart"),
+            classes="stats-section",
+        )
 
-                with Vertical(classes="stats-section"):
-                    yield Static("[bold]Hourly Activity[/bold]")
-                    yield HourlyChart(id="hourly-chart")
+        charts_row = Horizontal(action_section, hourly_section)
 
-            yield Static("[bold]Daily Activity[/bold]")
-            yield Static(id="daily-chart")
+        yield Container(
+            Static("[bold]Statistics & Analytics[/bold]", id="stats-title"),
+            controls,
+            StatsPanel(id="stats-summary"),
+            charts_row,
+            Static("[bold]Daily Activity[/bold]"),
+            Static(id="daily-chart"),
+            Static("[bold]User Activity Ranking[/bold]"),
+            Static(id="user-ranking"),
+            LoadingIndicator(id="loading"),
+            id="stats-container",
+        )
 
-            yield Static("[bold]User Activity Ranking[/bold]")
-            yield Static(id="user-ranking")
-
-            yield LoadingIndicator(id="loading")
-
-    async def on_mount(self) -> None:
-        """Load data when screen mounts."""
-        self.query_one("#loading").display = True
+    def on_content_mounted(self) -> None:
+        """Called after compose_content widgets are mounted."""
         self.run_worker(self._load_data(), exclusive=True)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
@@ -150,48 +162,3 @@ class StatsScreen(Screen):
     def _hide_loading(self) -> None:
         """Hide loading indicator."""
         self.query_one("#loading").display = False
-
-    async def compose_content(self):
-        """Yield widgets for embedding in main content area.
-
-        Yields:
-            Widgets for the stats content.
-        """
-        controls = Horizontal(
-            Label("Days to analyze:"),
-            Input(value="7", id="days-input", type="integer"),
-            Button("Update", id="update-button", variant="primary"),
-            id="stats-controls",
-        )
-
-        action_section = Vertical(
-            Static("[bold]Action Distribution[/bold]"),
-            ActionBarChart(id="action-chart"),
-            classes="stats-section",
-        )
-
-        hourly_section = Vertical(
-            Static("[bold]Hourly Activity[/bold]"),
-            HourlyChart(id="hourly-chart"),
-            classes="stats-section",
-        )
-
-        charts_row = Horizontal(action_section, hourly_section)
-
-        container = Container(
-            Static("[bold]Statistics & Analytics[/bold]", id="stats-title"),
-            controls,
-            StatsPanel(id="stats-summary"),
-            charts_row,
-            Static("[bold]Daily Activity[/bold]"),
-            Static(id="daily-chart"),
-            Static("[bold]User Activity Ranking[/bold]"),
-            Static(id="user-ranking"),
-            LoadingIndicator(id="loading"),
-            id="stats-container",
-        )
-
-        yield container
-
-        # Trigger data load after mounting
-        self.set_timer(0.1, lambda: self.run_worker(self._load_data(), exclusive=True))
