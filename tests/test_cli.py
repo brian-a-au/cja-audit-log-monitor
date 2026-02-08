@@ -1,11 +1,13 @@
 """Tests for CLI commands."""
 
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
 from click.testing import CliRunner
 
-from cja_audit.cli import main
+from cja_audit.cli import main, parse_date
+from cja_audit.models import AuditLogEntry, AuditLogResponse
 
 
 @pytest.fixture
@@ -34,6 +36,17 @@ class TestMainGroup:
         result = runner.invoke(main, ["cli", "--help"])
         assert result.exit_code == 0
         assert "Traditional CLI commands" in result.output
+
+
+class TestParseDate:
+    """Tests for date parsing helper."""
+
+    def test_parse_iso_with_z_suffix(self) -> None:
+        """Test parsing ISO-8601 timestamps ending in Z."""
+        parsed = parse_date("2024-01-15T10:30:45Z")
+        assert parsed is not None
+        assert parsed.tzinfo is not None
+        assert parsed.utcoffset() == timedelta(0)
 
 
 class TestActionsCommand:
@@ -86,6 +99,20 @@ class TestConfigCommand:
         result = runner.invoke(main, ["cli", "config"])
         assert result.exit_code == 0
         assert "Current Configuration" in result.output
+
+    @patch("cja_audit.cli.load_config")
+    def test_show_config_uses_explicit_config_path(
+        self,
+        mock_load: MagicMock,
+        runner: CliRunner,
+        sample_settings,
+    ) -> None:
+        """Test config output reflects an explicit --config path."""
+        mock_load.return_value = sample_settings
+
+        result = runner.invoke(main, ["--config", "custom.yaml", "cli", "config"])
+        assert result.exit_code == 0
+        assert "Config file: custom.yaml" in result.output
 
 
 class TestListCommand:
@@ -232,6 +259,29 @@ class TestExportCommand:
             )
             assert result.exit_code == 0
 
+    @patch("cja_audit.cli.get_client")
+    def test_export_tsv_uses_paginated_stream(
+        self,
+        mock_get_client: MagicMock,
+        runner: CliRunner,
+        sample_audit_entries,
+    ) -> None:
+        """Test TSV export streams from paginated iterator."""
+        mock_client = MagicMock()
+        mock_client.__enter__ = MagicMock(return_value=mock_client)
+        mock_client.__exit__ = MagicMock(return_value=False)
+        mock_client.get_logs_paginated.return_value = iter(sample_audit_entries)
+        mock_get_client.return_value = (mock_client, MagicMock())
+
+        with runner.isolated_filesystem():
+            result = runner.invoke(
+                main,
+                ["cli", "export", "--format", "tsv", "--output", "export.tsv", "--days", "1"],
+            )
+            assert result.exit_code == 0
+
+        mock_client.get_logs_paginated.assert_called_once()
+
 
 class TestStatsCommand:
     """Tests for stats command."""
@@ -345,6 +395,26 @@ class TestReportCommand:
             result = runner.invoke(main, ["cli", "report", "--output", "report.json"])
             assert result.exit_code == 0
             assert "Report saved" in result.output
+
+    @patch("cja_audit.cli.get_client")
+    def test_report_honors_max_entries(
+        self,
+        mock_get_client: MagicMock,
+        runner: CliRunner,
+        sample_audit_entries,
+    ) -> None:
+        """Test report command forwards --max-entries to client fetch."""
+        mock_client = MagicMock()
+        mock_client.get_all_logs.return_value = sample_audit_entries[:1]
+        mock_client.__enter__ = MagicMock(return_value=mock_client)
+        mock_client.__exit__ = MagicMock(return_value=False)
+        mock_get_client.return_value = (mock_client, MagicMock())
+
+        result = runner.invoke(main, ["cli", "report", "--days", "1", "--max-entries", "1"])
+        assert result.exit_code == 0
+        _, kwargs = mock_client.get_all_logs.call_args
+        assert kwargs["max_entries"] == 1
+        assert '"truncated": true' in result.output
 
 
 class TestQueryCommand:
@@ -475,6 +545,43 @@ class TestTopUsersCommand:
         mock_get_client.return_value = (mock_client, MagicMock())
 
         result = runner.invoke(main, ["cli", "top-users", "--days", "1"])
+        assert result.exit_code == 0
+
+
+class TestTailCommand:
+    """Tests for tail command."""
+
+    @patch("cja_audit.cli.AuditLogMonitor.start", autospec=True)
+    @patch("cja_audit.cli.get_client")
+    def test_tail_handles_unknown_action_values(
+        self,
+        mock_get_client: MagicMock,
+        mock_monitor_start: MagicMock,
+        runner: CliRunner,
+    ) -> None:
+        """Test tail filtering does not crash on unknown API action strings."""
+        mock_client = MagicMock()
+        mock_client.get_logs.return_value = AuditLogResponse(
+            content=[
+                AuditLogEntry(
+                    id="entry-1",
+                    action="NEW_FUTURE_ACTION",
+                    timestamp=datetime(2024, 1, 15, 10, 0, 0, tzinfo=UTC),
+                )
+            ],
+            last=True,
+        )
+        mock_get_client.return_value = (mock_client, MagicMock())
+
+        def run_single_poll(monitor, *args, **kwargs):
+            monitor._get_new_entries()
+
+        mock_monitor_start.side_effect = run_single_poll
+
+        result = runner.invoke(
+            main,
+            ["cli", "tail", "--action", "DELETE", "--interval", "1", "--no-alerts"],
+        )
         assert result.exit_code == 0
 
 

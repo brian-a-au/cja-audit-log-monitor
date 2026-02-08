@@ -17,6 +17,9 @@ from .utils import get_user_identifier
 
 logger = logging.getLogger(__name__)
 
+_MONITOR_PAGE_SIZE = 100
+_MAX_POLL_PAGES = 20
+
 
 class AuditLogMonitor:
     """Real-time monitor for CJA audit logs."""
@@ -55,7 +58,7 @@ class AuditLogMonitor:
 
     def _get_new_entries(self) -> list[AuditLogEntry]:
         """Fetch new audit log entries since last check."""
-        query = AuditLogQuery(page_size=50)
+        query = AuditLogQuery(page_size=_MONITOR_PAGE_SIZE, page=0)
 
         # If we have a last seen timestamp, use it as start date
         if self._last_seen_timestamp:
@@ -63,8 +66,40 @@ class AuditLogMonitor:
             query.start_date = self._last_seen_timestamp - timedelta(seconds=1)
 
         try:
-            response = self.client.get_logs(query)
-            entries = response.content
+            entries: list[AuditLogEntry] = []
+            page = 0
+            hit_page_limit = False
+            while page < _MAX_POLL_PAGES:
+                query.page = page
+                response = self.client.get_logs(query)
+                batch = response.content
+                if not batch:
+                    break
+                entries.extend(batch)
+
+                saw_last_seen_id = bool(
+                    self._last_seen_id and any(entry.id == self._last_seen_id for entry in batch)
+                )
+                oldest_ts = next(
+                    (entry.timestamp for entry in reversed(batch) if entry.timestamp),
+                    None,
+                )
+                reached_known_time = bool(
+                    self._last_seen_timestamp
+                    and oldest_ts
+                    and oldest_ts <= self._last_seen_timestamp
+                )
+                if response.last or saw_last_seen_id or reached_known_time:
+                    break
+                page += 1
+            else:
+                hit_page_limit = True
+
+            if hit_page_limit:
+                logger.warning(
+                    "Monitor poll reached %d pages; backlog may be larger than one cycle",
+                    _MAX_POLL_PAGES,
+                )
 
             if not entries:
                 return []

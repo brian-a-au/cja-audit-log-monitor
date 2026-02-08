@@ -162,7 +162,7 @@ class CJAAuditApp(App):
             screen_name: Name of screen to show.
         """
         content = self.query_one("#main-content", Container)
-        content.remove_children()
+        await content.remove_children()
 
         # Update navigation button states
         for button in self.query("#sidebar Button"):
@@ -170,12 +170,10 @@ class CJAAuditApp(App):
             if button.id == f"nav-{screen_name}":
                 button.add_class("active")
 
-        # Get screen and compose its widgets into the content area
+        # Mount the screen widget directly so its event handlers and queries work.
         screen = self._screens.get(screen_name)
-        if screen and hasattr(screen, "compose_content"):
-            for widget in screen.compose_content():
-                await content.mount(widget)
-            # Notify the screen that its content has been mounted
+        if screen:
+            await content.mount(screen)
             if hasattr(screen, "on_content_mounted"):
                 screen.on_content_mounted()
 
@@ -196,6 +194,13 @@ class CJAAuditApp(App):
         """Refresh current screen data."""
         self.notify("Refreshing...", severity="information")
         self.post_message(RefreshData())
+
+    def on_refresh_data(self, event: "RefreshData") -> None:
+        """Handle refresh requests by forwarding to the active screen."""
+        current = self._screens.get(self._current_screen)
+        refresh_method = getattr(current, "refresh_data", None)
+        if callable(refresh_method):
+            refresh_method()
 
     def action_export(self) -> None:
         """Show export dialog."""

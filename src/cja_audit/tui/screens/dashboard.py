@@ -3,6 +3,7 @@
 from collections.abc import Iterator
 from datetime import datetime
 
+from textual.app import ComposeResult
 from textual.containers import Container, Horizontal, Vertical
 from textual.screen import Screen
 from textual.widget import Widget
@@ -28,6 +29,10 @@ class DashboardScreen(Screen):
         super().__init__(**kwargs)
         self._state = state
         self._stats: dict = {}
+
+    def compose(self) -> ComposeResult:
+        """Compose the screen."""
+        yield from self.compose_content()
 
     def compose_content(self) -> Iterator[Widget]:
         """Yield widgets for embedding in main content area.
@@ -79,7 +84,12 @@ class DashboardScreen(Screen):
 
     def on_content_mounted(self) -> None:
         """Called after compose_content widgets are mounted."""
-        self.run_worker(self._load_data(), exclusive=True)
+        self.run_worker(self._load_data(), exclusive=True, thread=True)
+
+    def refresh_data(self) -> None:
+        """Refresh dashboard data."""
+        self.query_one("#loading", LoadingIndicator).display = True
+        self.run_worker(self._load_data(), exclusive=True, thread=True)
 
     async def _load_data(self) -> None:
         """Load dashboard data."""
@@ -92,13 +102,13 @@ class DashboardScreen(Screen):
                 return
 
             if result.get("connected"):
-                self.call_from_thread(
+                self.app.call_from_thread(
                     self._update_connection_status,
                     True,
                     result.get("org_id", "Unknown"),
                 )
             else:
-                self.call_from_thread(
+                self.app.call_from_thread(
                     self._update_connection_status,
                     False,
                     result.get("error", "Connection failed"),
@@ -117,12 +127,12 @@ class DashboardScreen(Screen):
             anomalies = analyze_for_anomalies(entries)
 
             # Update UI from worker
-            self.call_from_thread(self._update_stats, stats, anomalies, len(entries))
+            self.app.call_from_thread(self._update_stats, stats, anomalies, len(entries))
 
         except Exception as e:
-            self.call_from_thread(self._show_error, str(e))
+            self.app.call_from_thread(self._show_error, str(e))
         finally:
-            self.call_from_thread(self._hide_loading)
+            self.app.call_from_thread(self._hide_loading)
 
     def _update_connection_status(self, connected: bool, info: str) -> None:
         """Update connection status display."""
@@ -203,5 +213,4 @@ class DashboardScreen(Screen):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button presses."""
         if event.button.id == "refresh-button":
-            self.query_one("#loading").display = True
-            self.run_worker(self._load_data(), exclusive=True)
+            self.refresh_data()

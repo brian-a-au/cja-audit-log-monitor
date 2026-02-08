@@ -1,8 +1,10 @@
 """Real-time monitoring screen."""
 
+import threading
 from collections.abc import Iterator
 from datetime import UTC, datetime
 
+from textual.app import ComposeResult
 from textual.containers import Container, Horizontal
 from textual.screen import Screen
 from textual.widget import Widget
@@ -15,6 +17,8 @@ from ..widgets import AlertSummary, LogTable
 
 # Cap _seen_ids to prevent unbounded memory growth during long sessions
 _MAX_SEEN_IDS = 10_000
+# Fetch multiple pages per poll to avoid dropping events during bursts.
+_MAX_POLL_PAGES = 20
 
 
 class MonitorScreen(Screen):
@@ -34,8 +38,15 @@ class MonitorScreen(Screen):
         super().__init__(**kwargs)
         self._state = state
         self._monitor_worker: Worker | None = None
+        self._refresh_worker: Worker | None = None
         self._last_timestamp: datetime | None = None
         self._seen_ids: set[str] = set()
+        # Guard shared poll state against concurrent refresh/background workers.
+        self._poll_lock = threading.Lock()
+
+    def compose(self) -> ComposeResult:
+        """Compose the screen."""
+        yield from self.compose_content()
 
     def compose_content(self) -> Iterator[Widget]:
         """Yield widgets for embedding in main content area.
@@ -69,6 +80,22 @@ class MonitorScreen(Screen):
             LoadingIndicator(id="loading"),
             id="monitor-container",
         )
+
+    def refresh_data(self) -> None:
+        """Refresh monitor data for the active screen."""
+        if self._state.monitor.is_running:
+            if self._poll_lock.locked() or (
+                self._refresh_worker is not None and self._refresh_worker.is_running
+            ):
+                self.app.notify("Monitor poll already in progress.", severity="information")
+                return
+            self._refresh_worker = self.run_worker(
+                self._poll_once(),
+                exclusive=False,
+                thread=True,
+            )
+        else:
+            self.app.notify("Monitor is stopped. Start monitoring to fetch live entries.")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button presses."""
@@ -131,6 +158,9 @@ class MonitorScreen(Screen):
         if self._monitor_worker:
             self._monitor_worker.cancel()
             self._monitor_worker = None
+        if self._refresh_worker:
+            self._refresh_worker.cancel()
+            self._refresh_worker = None
 
         # Update UI
         self.query_one("#start-button", Button).disabled = False
@@ -148,33 +178,92 @@ class MonitorScreen(Screen):
 
         while self._state.monitor.is_running:
             try:
-                await self._poll_for_new_entries()
-                self._state.monitor.last_check = datetime.now(UTC)
-                self.call_from_thread(self._update_stats_display)
+                with self._poll_lock:
+                    await self._poll_for_new_entries()
+                    self._state.monitor.last_check = datetime.now(UTC)
+                if self._state.monitor.is_running:
+                    self.app.call_from_thread(self._update_stats_display)
             except Exception as e:
-                self.call_from_thread(self._show_error, str(e))
+                self.app.call_from_thread(self._show_error, str(e))
 
             # Wait for interval
             await asyncio.sleep(self._state.monitor.interval)
 
+    async def _poll_once(self) -> None:
+        """Poll once for new entries (used by manual refresh)."""
+        try:
+            if not self._state.monitor.is_running:
+                return
+            with self._poll_lock:
+                if not self._state.monitor.is_running:
+                    return
+                await self._poll_for_new_entries()
+                if not self._state.monitor.is_running:
+                    return
+                self._state.monitor.last_check = datetime.now(UTC)
+            if self._state.monitor.is_running:
+                self.app.call_from_thread(self._update_stats_display)
+        except Exception as e:
+            self.app.call_from_thread(self._show_error, str(e))
+
     async def _poll_for_new_entries(self) -> None:
         """Poll API for new entries."""
-        query = AuditLogQuery(
-            start_date=self._last_timestamp,
-            page_size=100,
-        )
-
+        if not self._state.monitor.is_running:
+            return
         try:
-            entries = self._state.client.get_all_logs(query, max_entries=100)
+            query = AuditLogQuery(
+                start_date=self._last_timestamp,
+                page_size=100,
+                page=0,
+            )
+            entries = []
+            hit_page_limit = False
+            page = 0
+            while page < _MAX_POLL_PAGES:
+                if not self._state.monitor.is_running:
+                    return
+                query.page = page
+                response = self._state.client.get_logs(query)
+                batch = response.content
+                if not batch:
+                    break
+                entries.extend(batch)
+
+                oldest_ts = next(
+                    (entry.timestamp for entry in reversed(batch) if entry.timestamp),
+                    None,
+                )
+                reached_known_time = bool(
+                    self._last_timestamp and oldest_ts and oldest_ts <= self._last_timestamp
+                )
+                if response.last or reached_known_time:
+                    break
+                page += 1
+            else:
+                hit_page_limit = True
+
+            if hit_page_limit:
+                self.app.call_from_thread(
+                    self._show_warning,
+                    "High event volume detected; only the most recent pages were fetched.",
+                )
         except Exception as e:
-            self.call_from_thread(self._show_error, f"API error: {e}")
+            self.app.call_from_thread(self._show_error, f"API error: {e}")
+            return
+
+        if not self._state.monitor.is_running:
             return
 
         # Filter out already seen entries
         new_entries = []
         for entry in entries:
-            if entry.id and entry.id not in self._seen_ids:
-                self._seen_ids.add(entry.id)
+            entry_key = (
+                entry.id
+                or f"{entry.timestamp}-{entry.action}-{entry.component_type}-{entry.component_id}-"
+                f"{entry.user_id}-{entry.user_email}"
+            )
+            if entry_key not in self._seen_ids:
+                self._seen_ids.add(entry_key)
                 new_entries.append(entry)
 
         # Prune _seen_ids if it grows too large
@@ -199,11 +288,11 @@ class MonitorScreen(Screen):
             if alerts:
                 self._state.monitor.alerts_triggered += len(alerts)
                 for alert in alerts:
-                    self.call_from_thread(self._show_alert, "Alert triggered")
+                    self.app.call_from_thread(self._show_alert, "Alert triggered")
 
             # Add entries to table (in reverse order so newest is at top)
             for entry in reversed(new_entries):
-                self.call_from_thread(self._add_entry_to_table, entry)
+                self.app.call_from_thread(self._add_entry_to_table, entry)
 
     def _add_entry_to_table(self, entry) -> None:
         """Add entry to the monitor log table."""
@@ -223,6 +312,10 @@ class MonitorScreen(Screen):
     def _show_error(self, error: str) -> None:
         """Show error message."""
         self.app.notify(f"Monitor error: {error}", severity="error")
+
+    def _show_warning(self, warning: str) -> None:
+        """Show warning message."""
+        self.app.notify(warning, severity="warning")
 
     def _show_alert(self, message: str) -> None:
         """Show alert notification."""

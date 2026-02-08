@@ -148,9 +148,10 @@ def format_stats_panel(
         content.append("Total Entries: ", style="bold")
         content.append(f"{stats['total_entries']:,}\n\n")
 
-    if "date_range" in stats:
+    if stats.get("date_range"):
+        date_range = stats["date_range"]
         content.append("Date Range: ", style="bold")
-        content.append(f"{stats['date_range']['start']} to {stats['date_range']['end']}\n\n")
+        content.append(f"{date_range['start']} to {date_range['end']}\n\n")
 
     if "top_users" in stats:
         content.append("Top Users:\n", style="bold")

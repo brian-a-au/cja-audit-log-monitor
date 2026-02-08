@@ -2,6 +2,7 @@
 
 from collections.abc import Iterator
 
+from textual.app import ComposeResult
 from textual.containers import Container, Horizontal
 from textual.screen import Screen
 from textual.widget import Widget
@@ -33,6 +34,10 @@ class LogBrowserScreen(Screen):
         super().__init__(**kwargs)
         self._state = state
 
+    def compose(self) -> ComposeResult:
+        """Compose the screen."""
+        yield from self.compose_content()
+
     def compose_content(self) -> Iterator[Widget]:
         """Yield widgets for embedding in main content area.
 
@@ -57,7 +62,12 @@ class LogBrowserScreen(Screen):
 
     def on_content_mounted(self) -> None:
         """Called after compose_content widgets are mounted."""
-        self.run_worker(self._load_data(), exclusive=True)
+        self.run_worker(self._load_data(), exclusive=True, thread=True)
+
+    def refresh_data(self) -> None:
+        """Refresh log data."""
+        self.query_one("#loading", LoadingIndicator).display = True
+        self.run_worker(self._load_data(), exclusive=True, thread=True)
 
     async def _load_data(self) -> None:
         """Load log data based on current filters."""
@@ -69,12 +79,12 @@ class LogBrowserScreen(Screen):
             if worker.is_cancelled:
                 return
 
-            self.call_from_thread(self._update_table, entries, total)
+            self.app.call_from_thread(self._update_table, entries, total)
 
         except Exception as e:
-            self.call_from_thread(self._show_error, str(e))
+            self.app.call_from_thread(self._show_error, str(e))
         finally:
-            self.call_from_thread(self._hide_loading)
+            self.app.call_from_thread(self._hide_loading)
 
     def _update_table(self, entries: list, total: int) -> None:
         """Update the log table with entries."""
@@ -126,14 +136,12 @@ class LogBrowserScreen(Screen):
         self._state.filters.page = 0
 
         # Reload data
-        self.query_one("#loading").display = True
-        self.run_worker(self._load_data(), exclusive=True)
+        self.refresh_data()
 
     def on_filter_bar_filter_reset(self, event: FilterBar.FilterReset) -> None:
         """Handle filter reset."""
         self._state.filters.reset()
-        self.query_one("#loading").display = True
-        self.run_worker(self._load_data(), exclusive=True)
+        self.refresh_data()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle pagination button presses."""
@@ -145,15 +153,13 @@ class LogBrowserScreen(Screen):
     def action_next_page(self) -> None:
         """Go to next page."""
         self._state.filters.page += 1
-        self.query_one("#loading").display = True
-        self.run_worker(self._load_data(), exclusive=True)
+        self.refresh_data()
 
     def action_prev_page(self) -> None:
         """Go to previous page."""
         if self._state.filters.page > 0:
             self._state.filters.page -= 1
-            self.query_one("#loading").display = True
-            self.run_worker(self._load_data(), exclusive=True)
+            self.refresh_data()
 
     def action_view_details(self) -> None:
         """View details of selected entry."""

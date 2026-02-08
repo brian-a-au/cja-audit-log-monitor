@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from ..alerts import AlertEngine
 from ..auth import TokenManager
 from ..client import AuditLogsClient
-from ..config import CJASettings, load_config
+from ..config import CJASettings, get_config_path, load_config
 from ..models import ActionType, AuditLogEntry, AuditLogQuery, ComponentType
 
 if TYPE_CHECKING:
@@ -101,8 +101,13 @@ class AppState:
     def settings(self) -> CJASettings:
         """Get settings, loading if necessary."""
         if self._settings is None:
-            self._settings = load_config(self._config_path)
+            self._settings = load_config(self.config_path)
         return self._settings
+
+    @property
+    def config_path(self) -> Path:
+        """Get effective config path."""
+        return self._config_path or get_config_path()
 
     @property
     def client(self) -> AuditLogsClient:

@@ -3,6 +3,7 @@
 import logging
 import sys
 from datetime import UTC, datetime, timedelta
+from itertools import chain, islice
 from pathlib import Path
 
 import click
@@ -60,6 +61,18 @@ def parse_date(date_str: str | None) -> datetime | None:
     """Parse date string to datetime."""
     if not date_str:
         return None
+
+    normalized = date_str.strip()
+    if normalized.endswith("Z"):
+        normalized = normalized[:-1] + "+00:00"
+
+    try:
+        dt = datetime.fromisoformat(normalized)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC)
+        return dt
+    except ValueError:
+        pass
 
     formats = [
         "%Y-%m-%d",
@@ -494,6 +507,11 @@ def component(
     help="Filter by component type",
 )
 @click.option("--pretty/--compact", default=True, help="Pretty print JSON")
+@click.option(
+    "--max-entries",
+    type=click.IntRange(min=1),
+    help="Maximum number of entries to export",
+)
 @click.pass_context
 def export(
     ctx: click.Context,
@@ -505,6 +523,7 @@ def export(
     action: tuple[str, ...],
     component: tuple[str, ...],
     pretty: bool,
+    max_entries: int | None,
 ) -> None:
     """Export audit logs to file."""
     config_path = ctx.obj.get("config_path")
@@ -528,13 +547,29 @@ def export(
         console.print("[dim]Fetching audit logs...[/dim]")
 
         with client:
-            entries = client.get_all_logs(query)
+            if format in {"csv", "tsv"}:
+                entries_iter = client.get_logs_paginated(query)
+                if max_entries is not None:
+                    entries_iter = islice(entries_iter, max_entries)
 
-        if not entries:
-            console.print("[yellow]No audit logs found to export.[/yellow]")
-            return
+                first_entry = next(entries_iter, None)
+                if first_entry is None:
+                    console.print("[yellow]No audit logs found to export.[/yellow]")
+                    return
 
-        count = export_entries(entries, output, output_format=format, pretty=pretty)
+                count = export_entries(
+                    chain([first_entry], entries_iter),
+                    output,
+                    output_format=format,
+                    pretty=pretty,
+                )
+            else:
+                entries = client.get_all_logs(query, max_entries=max_entries)
+                if not entries:
+                    console.print("[yellow]No audit logs found to export.[/yellow]")
+                    return
+                count = export_entries(entries, output, output_format=format, pretty=pretty)
+
         console.print(f"[green]Exported {count} entries to {output}[/green]")
 
     except AuthenticationError as e:
@@ -692,7 +727,8 @@ def config(ctx: click.Context) -> None:
         settings = load_config(config_path)
 
         console.print("[bold]Current Configuration[/bold]\n")
-        console.print(f"Config file: {get_config_path()}")
+        effective_config_path = config_path or get_config_path()
+        console.print(f"Config file: {effective_config_path}")
         console.print(f"API base URL: {settings.api_base_url}")
         console.print(f"IMS base URL: {settings.ims_base_url}")
         console.print(f"Default page size: {settings.default_page_size}")
@@ -790,8 +826,21 @@ def verify(ctx: click.Context, output_format: str) -> None:
     help="Output file path (default: stdout)",
 )
 @click.option("--pretty/--compact", default=True, help="Pretty print JSON")
+@click.option(
+    "--max-entries",
+    type=click.IntRange(min=1),
+    default=10000,
+    show_default=True,
+    help="Maximum number of entries to process",
+)
 @click.pass_context
-def report(ctx: click.Context, days: int, output: Path | None, pretty: bool) -> None:
+def report(
+    ctx: click.Context,
+    days: int,
+    output: Path | None,
+    pretty: bool,
+    max_entries: int,
+) -> None:
     """Generate a comprehensive audit log report."""
     config_path = ctx.obj.get("config_path")
 
@@ -803,16 +852,24 @@ def report(ctx: click.Context, days: int, output: Path | None, pretty: bool) -> 
         query = build_date_range_query(days)
 
         with client:
-            entries = client.get_all_logs(query)
+            entries = client.get_all_logs(query, max_entries=max_entries)
 
         if not entries:
             console.print("[yellow]No audit logs found for the specified period.[/yellow]")
             return
 
+        truncated = len(entries) >= max_entries
+        if truncated:
+            console.print(
+                f"[yellow]Reached --max-entries limit ({max_entries}); "
+                "report is based on a subset of logs.[/yellow]"
+            )
+
         report_data = generate_report(entries)
         report_data["generated_at"] = datetime.now(UTC).isoformat()
         report_data["days_analyzed"] = days
         report_data["anomalies"] = analyze_for_anomalies(entries)
+        report_data["truncated"] = truncated
 
         import json
         indent = 2 if pretty else None
@@ -871,6 +928,7 @@ def tail(
 
         # Set up filters
         actions_filter = parse_actions(action) if action else None
+        action_values = {item.value for item in actions_filter} if actions_filter else None
 
         # Override get_new_entries to apply filters
         original_get_new = monitor_instance._get_new_entries
@@ -890,11 +948,8 @@ def tail(
             if component_id:
                 filtered = [e for e in filtered if e.component_id == component_id]
 
-            if actions_filter:
-                filtered = [
-                    e for e in filtered
-                    if e.action and ActionType(e.action) in actions_filter
-                ]
+            if action_values:
+                filtered = [e for e in filtered if e.action in action_values]
 
             return filtered
 

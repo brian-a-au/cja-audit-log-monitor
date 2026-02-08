@@ -1,10 +1,11 @@
 """Tests for the TUI module."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from textual.widgets import Button, Static
 
+from cja_audit.models import AlertRule
 from cja_audit.tui.app import CJAAuditApp, HelpScreen
 
 # ---------------------------------------------------------------------------
@@ -70,6 +71,13 @@ class TestAppLifecycle:
         async with app.run_test() as _pilot:
             sidebar_buttons = app.query("#sidebar Button")
             assert len(sidebar_buttons) == 6
+
+    async def test_main_content_mounts_active_screen_widget(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            mounted_screens = app.query("#main-content Screen")
+            assert len(mounted_screens) == 1
 
     async def test_quit_calls_state_close(self, mock_app_state):
         mock_app_state.close = MagicMock()
@@ -150,6 +158,17 @@ class TestNavigation:
             await pilot.pause()
             assert not isinstance(app.screen, HelpScreen)
 
+    async def test_refresh_key_calls_current_screen_refresh(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test() as pilot:
+            await pilot.press("l")
+            await pilot.pause()
+            log_screen = app._screens["logs"]
+            log_screen.refresh_data = MagicMock()
+            await pilot.press("r")
+            await pilot.pause()
+            log_screen.refresh_data.assert_called_once()
+
 
 # ---------------------------------------------------------------------------
 # TestDashboardScreen
@@ -228,6 +247,99 @@ class TestLogBrowserScreen:
             await pilot.pause()
             loading = app.query_one("#loading")
             assert loading is not None
+
+
+class TestMonitorScreen:
+    """Test the Monitor screen."""
+
+    async def test_refresh_does_not_start_parallel_poll(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test() as pilot:
+            await pilot.press("m")
+            await pilot.pause()
+            monitor_screen = app._screens["monitor"]
+            monitor_screen._state.monitor.is_running = True
+            monitor_screen.run_worker = MagicMock()
+            monitor_screen._poll_lock.acquire()
+            try:
+                monitor_screen.refresh_data()
+            finally:
+                monitor_screen._poll_lock.release()
+
+            monitor_screen.run_worker.assert_not_called()
+
+    async def test_stop_monitoring_cancels_refresh_worker(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test() as pilot:
+            await pilot.press("m")
+            await pilot.pause()
+            monitor_screen = app._screens["monitor"]
+            monitor_screen._state.monitor.is_running = True
+            monitor_worker = MagicMock()
+            refresh_worker = MagicMock()
+            monitor_screen._monitor_worker = monitor_worker
+            monitor_screen._refresh_worker = refresh_worker
+
+            monitor_screen._stop_monitoring()
+
+            monitor_worker.cancel.assert_called_once()
+            refresh_worker.cancel.assert_called_once()
+            assert monitor_screen._monitor_worker is None
+            assert monitor_screen._refresh_worker is None
+            assert monitor_screen._state.monitor.is_running is False
+
+    async def test_poll_once_skips_when_stopped(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test() as pilot:
+            await pilot.press("m")
+            await pilot.pause()
+            monitor_screen = app._screens["monitor"]
+            monitor_screen._state.monitor.is_running = False
+            monitor_screen._poll_for_new_entries = AsyncMock()
+
+            await monitor_screen._poll_once()
+
+            monitor_screen._poll_for_new_entries.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# TestAlertsScreen
+# ---------------------------------------------------------------------------
+
+
+class TestAlertsScreen:
+    """Test the Alerts screen."""
+
+    async def test_refresh_on_alerts_screen_rebuilds_rule_cards_safely(self, mock_app_state):
+        mock_app_state._alert_engine.rules = [
+            AlertRule(name="rule_one"),
+            AlertRule(name="rule_two"),
+        ]
+
+        app = _make_app(mock_app_state)
+        async with app.run_test() as pilot:
+            await pilot.press("a")
+            await pilot.pause()
+            assert len(app.query("#rules-list .rule-card")) == 2
+
+            # Repeated refreshes should not raise DuplicateIds or duplicate rows.
+            await pilot.press("r")
+            await pilot.pause()
+            await pilot.press("r")
+            await pilot.pause()
+            assert len(app.query("#rules-list .rule-card")) == 2
+
+    async def test_reset_rules_rebuilds_rule_cards_safely(self, mock_app_state):
+        mock_app_state._alert_engine.rules = [AlertRule(name="rule_one")]
+
+        app = _make_app(mock_app_state)
+        async with app.run_test() as pilot:
+            await pilot.press("a")
+            await pilot.pause()
+            await pilot.click("#reset-rules")
+            await pilot.pause()
+            # Reset should rebuild to default rules without crashing.
+            assert len(app.query("#rules-list .rule-card")) > 0
 
 
 # ---------------------------------------------------------------------------

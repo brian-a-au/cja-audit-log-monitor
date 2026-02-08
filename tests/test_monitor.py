@@ -136,3 +136,46 @@ class TestAuditLogMonitor:
         # Should return empty list, not raise
         new_entries = monitor._get_new_entries()
         assert new_entries == []
+
+    def test_get_new_entries_fetches_multiple_pages(
+        self,
+        monitor: AuditLogMonitor,
+        mock_client: MagicMock,
+    ) -> None:
+        """Test monitor polling paginates to avoid missing burst events."""
+        pages_requested: list[int] = []
+        responses = [
+            AuditLogResponse(
+                content=[
+                    AuditLogEntry(
+                        id="entry-3",
+                        timestamp=datetime(2024, 1, 15, 10, 2, 0, tzinfo=UTC),
+                    ),
+                    AuditLogEntry(
+                        id="entry-2",
+                        timestamp=datetime(2024, 1, 15, 10, 1, 0, tzinfo=UTC),
+                    ),
+                ],
+                last=False,
+            ),
+            AuditLogResponse(
+                content=[
+                    AuditLogEntry(
+                        id="entry-1",
+                        timestamp=datetime(2024, 1, 15, 10, 0, 0, tzinfo=UTC),
+                    )
+                ],
+                last=True,
+            ),
+        ]
+
+        def get_logs_side_effect(query):
+            pages_requested.append(query.page)
+            return responses.pop(0)
+
+        mock_client.get_logs.side_effect = get_logs_side_effect
+
+        new_entries = monitor._get_new_entries()
+
+        assert pages_requested == [0, 1]
+        assert [entry.id for entry in new_entries] == ["entry-1", "entry-2", "entry-3"]

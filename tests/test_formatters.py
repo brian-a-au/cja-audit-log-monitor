@@ -99,3 +99,15 @@ class TestFormatStatsPanel:
         """Test formatting empty statistics."""
         panel = format_stats_panel({})
         assert panel is not None
+
+    def test_format_stats_with_none_date_range(self) -> None:
+        """Test formatting handles a None date_range value."""
+        stats = {
+            "total_entries": 5,
+            "top_users": [("user@example.com", 5)],
+            "action_counts": {"CREATE": 5},
+            "component_counts": {"PROJECT": 5},
+            "date_range": None,
+        }
+        panel = format_stats_panel(stats)
+        assert panel is not None

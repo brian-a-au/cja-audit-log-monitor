@@ -87,7 +87,7 @@ def load_config(config_path: Path | None = None) -> CJASettings:
 
     # Determine config file path
     if config_path is None:
-        config_path = DEFAULT_CONFIG_FILE
+        config_path = get_config_path()
 
     # Load from YAML config file if it exists
     if config_path.exists():
@@ -103,7 +103,7 @@ def load_config(config_path: Path | None = None) -> CJASettings:
 def save_config(settings: CJASettings, config_path: Path | None = None) -> None:
     """Save configuration to YAML file."""
     if config_path is None:
-        config_path = DEFAULT_CONFIG_FILE
+        config_path = get_config_path()
 
     # Ensure directory exists
     config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -130,7 +130,7 @@ def save_config(settings: CJASettings, config_path: Path | None = None) -> None:
 def create_default_config(config_path: Path | None = None) -> Path:
     """Create a default configuration file."""
     if config_path is None:
-        config_path = DEFAULT_CONFIG_FILE
+        config_path = get_config_path()
 
     config_path.parent.mkdir(parents=True, exist_ok=True)
 

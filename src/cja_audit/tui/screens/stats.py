@@ -2,6 +2,7 @@
 
 from collections.abc import Iterator
 
+from textual.app import ComposeResult
 from textual.containers import Container, Horizontal, Vertical
 from textual.screen import Screen
 from textual.widget import Widget
@@ -32,6 +33,10 @@ class StatsScreen(Screen):
         super().__init__(**kwargs)
         self._state = state
         self._days = 7
+
+    def compose(self) -> ComposeResult:
+        """Compose the screen."""
+        yield from self.compose_content()
 
     def compose_content(self) -> Iterator[Widget]:
         """Yield widgets for embedding in main content area.
@@ -75,7 +80,12 @@ class StatsScreen(Screen):
 
     def on_content_mounted(self) -> None:
         """Called after compose_content widgets are mounted."""
-        self.run_worker(self._load_data(), exclusive=True)
+        self.run_worker(self._load_data(), exclusive=True, thread=True)
+
+    def refresh_data(self) -> None:
+        """Refresh statistics data."""
+        self.query_one("#loading", LoadingIndicator).display = True
+        self.run_worker(self._load_data(), exclusive=True, thread=True)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button presses."""
@@ -87,8 +97,7 @@ class StatsScreen(Screen):
             except ValueError:
                 self._days = 7
 
-            self.query_one("#loading").display = True
-            self.run_worker(self._load_data(), exclusive=True)
+            self.refresh_data()
 
     async def _load_data(self) -> None:
         """Load statistics data."""
@@ -107,12 +116,12 @@ class StatsScreen(Screen):
             daily = get_daily_distribution(entries)
             users = get_user_activity(entries)
 
-            self.call_from_thread(self._update_display, stats, hourly, daily, users)
+            self.app.call_from_thread(self._update_display, stats, hourly, daily, users)
 
         except Exception as e:
-            self.call_from_thread(self._show_error, str(e))
+            self.app.call_from_thread(self._show_error, str(e))
         finally:
-            self.call_from_thread(self._hide_loading)
+            self.app.call_from_thread(self._hide_loading)
 
     def _update_display(
         self,

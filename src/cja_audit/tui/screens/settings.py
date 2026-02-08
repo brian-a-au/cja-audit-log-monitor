@@ -2,13 +2,13 @@
 
 from collections.abc import Iterator
 
+from textual.app import ComposeResult
 from textual.containers import Container, Horizontal, Vertical
 from textual.screen import Screen
 from textual.widget import Widget
 from textual.widgets import Button, LoadingIndicator, Static
 from textual.worker import get_current_worker
 
-from ...config import get_config_path
 from ..state import AppState
 
 
@@ -24,6 +24,10 @@ class SettingsScreen(Screen):
         """
         super().__init__(**kwargs)
         self._state = state
+
+    def compose(self) -> ComposeResult:
+        """Compose the screen."""
+        yield from self.compose_content()
 
     def compose_content(self) -> Iterator[Widget]:
         """Yield widgets for embedding in main content area.
@@ -45,7 +49,7 @@ class SettingsScreen(Screen):
             Static("[bold]API Configuration[/bold]"),
             Horizontal(
                 Static("[bold]Config File:[/bold]", classes="settings-label"),
-                Static(str(get_config_path()), classes="settings-value"),
+                Static(str(self._state.config_path), classes="settings-value"),
                 classes="settings-row",
             ),
             Horizontal(
@@ -138,13 +142,17 @@ class SettingsScreen(Screen):
 
     def on_content_mounted(self) -> None:
         """Called after compose_content widgets are mounted."""
-        self.run_worker(self._check_connection(), exclusive=True)
+        self.run_worker(self._check_connection(), exclusive=True, thread=True)
+
+    def refresh_data(self) -> None:
+        """Refresh connection status."""
+        self.query_one("#loading", LoadingIndicator).display = True
+        self.run_worker(self._check_connection(), exclusive=True, thread=True)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button presses."""
         if event.button.id == "verify-button":
-            self.query_one("#loading").display = True
-            self.run_worker(self._check_connection(), exclusive=True)
+            self.refresh_data()
         elif event.button.id == "refresh-button":
             self._state.refresh_client()
             self.app.notify("Settings refreshed", severity="information")
@@ -159,15 +167,15 @@ class SettingsScreen(Screen):
             if worker.is_cancelled:
                 return
 
-            self.call_from_thread(self._update_connection_status, result)
+            self.app.call_from_thread(self._update_connection_status, result)
 
         except Exception as e:
-            self.call_from_thread(
+            self.app.call_from_thread(
                 self._update_connection_status,
                 {"connected": False, "error": str(e)},
             )
         finally:
-            self.call_from_thread(self._hide_loading)
+            self.app.call_from_thread(self._hide_loading)
 
     def _update_connection_status(self, result: dict) -> None:
         """Update connection status display."""

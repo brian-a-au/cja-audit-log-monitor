@@ -2,6 +2,7 @@
 
 from collections.abc import Iterator
 
+from textual.app import ComposeResult
 from textual.containers import Container, Horizontal, Vertical
 from textual.screen import Screen
 from textual.widget import Widget
@@ -24,6 +25,10 @@ class AlertsScreen(Screen):
         """
         super().__init__(**kwargs)
         self._state = state
+
+    def compose(self) -> ComposeResult:
+        """Compose the screen."""
+        yield from self.compose_content()
 
     def compose_content(self) -> Iterator[Widget]:
         """Yield widgets for embedding in main content area.
@@ -49,6 +54,22 @@ class AlertsScreen(Screen):
             LoadingIndicator(id="loading"),
             id="alerts-container",
         )
+
+    def refresh_data(self) -> None:
+        """Refresh alert rules display."""
+        self.run_worker(
+            self._refresh_rules_list(),
+            group="alerts-refresh",
+            exclusive=True,
+        )
+
+    async def _refresh_rules_list(self) -> None:
+        """Rebuild the alert rules list safely."""
+        rules_list = self.query_one("#rules-list", Vertical)
+        await rules_list.remove_children()
+        rule_cards = [self._create_rule_card(rule) for rule in self._state.alert_engine.rules]
+        if rule_cards:
+            await rules_list.mount(*rule_cards)
 
     def _create_rule_card(self, rule) -> Container:
         """Create a rule card widget.
@@ -102,7 +123,7 @@ class AlertsScreen(Screen):
         """Handle button presses."""
         if event.button.id == "test-rules":
             self.query_one("#loading").display = True
-            self.run_worker(self._test_rules(), exclusive=True)
+            self.run_worker(self._test_rules(), exclusive=True, thread=True)
         elif event.button.id == "reset-rules":
             self._reset_rules()
 
@@ -110,12 +131,7 @@ class AlertsScreen(Screen):
         """Reset rules to defaults."""
         self._state._alert_engine = None  # Force recreation
         self.app.notify("Rules reset to defaults", severity="information")
-
-        # Refresh display
-        rules_list = self.query_one("#rules-list")
-        rules_list.remove_children()
-        for rule in self._state.alert_engine.rules:
-            rules_list.mount(self._create_rule_card(rule))
+        self.refresh_data()
 
     async def _test_rules(self) -> None:
         """Test rules against recent data."""
@@ -129,7 +145,7 @@ class AlertsScreen(Screen):
                 return
 
             if not entries:
-                self.call_from_thread(
+                self.app.call_from_thread(
                     self._show_results,
                     "[dim]No audit logs found to test against[/dim]",
                 )
@@ -141,18 +157,18 @@ class AlertsScreen(Screen):
                 result_lines = [f"[yellow]Found {len(alerts)} alerts:[/yellow]"]
                 for alert in alerts[:10]:
                     result_lines.append("  [red]⚠[/red] Alert triggered")
-                self.call_from_thread(self._show_results, "\n".join(result_lines))
+                self.app.call_from_thread(self._show_results, "\n".join(result_lines))
             else:
-                self.call_from_thread(
+                self.app.call_from_thread(
                     self._show_results,
                     f"[green]No alerts triggered[/green] "
                     f"(tested against {len(entries)} entries)",
                 )
 
         except Exception as e:
-            self.call_from_thread(self._show_error, str(e))
+            self.app.call_from_thread(self._show_error, str(e))
         finally:
-            self.call_from_thread(self._hide_loading)
+            self.app.call_from_thread(self._hide_loading)
 
     def _show_results(self, text: str) -> None:
         """Show test results."""
