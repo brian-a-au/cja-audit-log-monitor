@@ -17,6 +17,13 @@ from .utils import get_user_identifier
 # - $success:    safe
 # - $text-muted: neutral / unknown
 
+# tcss-token resolution rule:
+# - Textual `Static.update` accepts tcss tokens (`[$success]…[/$success]`) natively.
+# - Rich (used by the CLI and by `DataTable.default_cell_formatter`) does NOT.
+# - For consistency and defense-in-depth, every markup string passed to either
+#   path goes through `resolve_tcss_markup()` so callers don't have to remember
+#   which renderer is downstream. The helper is a no-op on hex/named-color markup.
+
 # Hex equivalents for tcss design tokens.
 # Used to translate [$token] markup into Rich-parseable [#hex] markup.
 TCSS_TOKEN_HEX: dict[str, str] = {

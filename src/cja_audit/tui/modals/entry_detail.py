@@ -6,7 +6,7 @@ from textual.app import ComposeResult
 from textual.containers import Container
 from textual.widgets import Static
 
-from ...formatters import format_timestamp, get_action_color, get_action_icon
+from ...formatters import format_timestamp, get_action_color, get_action_icon, resolve_tcss_markup
 from ...models import AuditLogEntry
 from ...utils import get_user_identifier
 
@@ -70,8 +70,10 @@ class EntryDetailPanel(Container):
 
         title = self.query_one("#detail-title", Static)
         title.update(
-            f"[{color}]{icon} {action}[/{color}] · "
-            f"[$text-muted]{entry.component_type or 'unknown'}[/$text-muted]"
+            resolve_tcss_markup(
+                f"[{color}]{icon} {action}[/{color}] · "
+                f"[$text-muted]{entry.component_type or 'unknown'}[/$text-muted]"
+            )
         )
 
         body_lines = [
@@ -93,7 +95,9 @@ class EntryDetailPanel(Container):
             body_lines.append("[$text-muted]changes[/$text-muted]")
             body_lines.append(json.dumps(entry.changes, indent=2, default=str))
 
-        self.query_one("#detail-body", Static).update("\n".join(body_lines))
+        self.query_one("#detail-body", Static).update(
+            resolve_tcss_markup("\n".join(body_lines))
+        )
 
     @staticmethod
     def _row(label: str, value: str) -> str:
