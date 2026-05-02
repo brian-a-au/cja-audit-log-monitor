@@ -12,6 +12,7 @@ instead of mounting the Screen directly.  Workers / on_content_mounted are NOT
 used in the screenshot script; widgets are populated synchronously via helper
 functions after mounting so there is no threading or async complication.
 """
+# cspell:ignore tcss TCSS Signups
 
 import asyncio
 import random
@@ -25,7 +26,6 @@ from textual.widget import Widget
 from textual.widgets import Label, LoadingIndicator, Static
 
 from cja_audit.models import ActionType, AuditLogEntry, AuditLogResponse, ComponentType
-
 
 # ---------------------------------------------------------------------------
 # ScreenContentWidget — the key fix
@@ -213,6 +213,7 @@ def setup_mock_state(app, entries: list[AuditLogEntry]) -> None:
     mock_client.__exit__ = MagicMock(return_value=None)
 
     def mock_get_all_logs(query=None, max_entries=None):
+        del query  # mock signature matches real API; query is intentionally unused
         if max_entries:
             return entries[:max_entries]
         return entries
@@ -487,7 +488,10 @@ def populate_stats_data(app, entries: list[AuditLogEntry]) -> None:
 
         # User ranking
         if users:
-            user_lines = [f"  {i:2}. {u[:40]:40} {c:,} actions" for i, (u, c) in enumerate(users[:10], 1)]
+            user_lines = [
+                f"  {i:2}. {u[:40]:40} {c:,} actions"
+                for i, (u, c) in enumerate(users[:10], 1)
+            ]
             app.query_one("#user-ranking", Static).update("\n".join(user_lines))
         else:
             app.query_one("#user-ranking", Static).update("[dim]No data[/dim]")
