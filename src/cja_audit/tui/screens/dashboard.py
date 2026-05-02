@@ -65,17 +65,17 @@ class DashboardScreen(Screen):
         )
 
         yield Container(
-            Static("[bold]Dashboard[/bold]", id="dashboard-title"),
+            Static("dashboard", id="dashboard-title", classes="section-label"),
             Static(id="connection-status"),
             stats_row,
-            Static("[bold]Action Distribution[/bold]"),
+            Static("ACTION DISTRIBUTION", classes="section-label"),
             Static(id="action-chart", classes="bar-chart"),
-            Static("[bold]Top 5 Active Users (Last 7 Days)[/bold]"),
+            Static("TOP 5 ACTIVE USERS · LAST 7 DAYS", classes="section-label"),
             Static(id="top-users"),
-            Static("[bold]Recent Anomalies[/bold]"),
+            Static("RECENT ANOMALIES", classes="section-label"),
             Static(id="anomalies"),
             Horizontal(
-                Button("Refresh", id="refresh-button", variant="primary"),
+                Button("refresh", id="refresh-button", variant="primary"),
                 Static(id="last-update"),
             ),
             LoadingIndicator(id="loading"),

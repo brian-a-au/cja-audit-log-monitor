@@ -52,13 +52,13 @@ class StatsScreen(Screen):
         )
 
         action_section = Vertical(
-            Static("[bold]Action Distribution[/bold]"),
+            Static("ACTION DISTRIBUTION", classes="section-label"),
             ActionBarChart(id="action-chart"),
             classes="stats-section",
         )
 
         hourly_section = Vertical(
-            Static("[bold]Hourly Activity[/bold]"),
+            Static("HOURLY ACTIVITY", classes="section-label"),
             HourlyChart(id="hourly-chart"),
             classes="stats-section",
         )
@@ -66,13 +66,13 @@ class StatsScreen(Screen):
         charts_row = Horizontal(action_section, hourly_section)
 
         yield Container(
-            Static("[bold]Statistics & Analytics[/bold]", id="stats-title"),
+            Static("statistics", id="stats-title", classes="section-label"),
             controls,
             StatsPanel(id="stats-summary"),
             charts_row,
-            Static("[bold]Daily Activity[/bold]"),
+            Static("DAILY ACTIVITY", classes="section-label"),
             Static(id="daily-chart"),
-            Static("[bold]User Activity Ranking[/bold]"),
+            Static("USER ACTIVITY RANKING", classes="section-label"),
             Static(id="user-ranking"),
             LoadingIndicator(id="loading"),
             id="stats-container",

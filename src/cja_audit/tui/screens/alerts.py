@@ -45,11 +45,11 @@ class AlertsScreen(Screen):
         )
 
         yield Container(
-            Static("[bold]Alert Rules Management[/bold]", id="alerts-title"),
-            Static("[dim]Toggle rules on/off or test against recent data[/dim]"),
+            Static("alert rules", id="alerts-title", classes="section-label"),
+            Static("[$text-muted]toggle rules on/off or test against recent data[/$text-muted]"),
             rules_list,
             buttons,
-            Static("[bold]Test Results[/bold]"),
+            Static("TEST RESULTS", classes="section-label"),
             Static(id="test-results"),
             LoadingIndicator(id="loading"),
             id="alerts-container",

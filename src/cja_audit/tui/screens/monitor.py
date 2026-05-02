@@ -73,9 +73,9 @@ class MonitorScreen(Screen):
         yield Container(
             controls,
             status,
-            Static("[bold]Live Log Stream[/bold]"),
+            Static("LIVE LOG STREAM", classes="section-label"),
             LogTable(id="monitor-log", show_details=False),
-            Static("[bold]Alerts[/bold]"),
+            Static("ALERTS", classes="section-label"),
             AlertSummary(id="alert-summary"),
             LoadingIndicator(id="loading"),
             id="monitor-container",

@@ -39,14 +39,14 @@ class SettingsScreen(Screen):
 
         # Connection section
         connection_section = Vertical(
-            Static("[bold]Connection Status[/bold]"),
+            Static("CONNECTION STATUS", classes="section-label"),
             Static(id="connection-status"),
             classes="settings-section",
         )
 
         # API configuration section
         api_section = Vertical(
-            Static("[bold]API Configuration[/bold]"),
+            Static("API CONFIGURATION", classes="section-label"),
             Horizontal(
                 Static("[bold]Config File:[/bold]", classes="settings-label"),
                 Static(str(self._state.config_path), classes="settings-value"),
@@ -69,7 +69,7 @@ class SettingsScreen(Screen):
         org_display = f"{settings.org_id[:12]}..." if settings.org_id else "(not set)"
         client_display = f"{settings.client_id[:12]}..." if settings.client_id else "(not set)"
         auth_section = Vertical(
-            Static("[bold]Authentication[/bold]"),
+            Static("AUTHENTICATION", classes="section-label"),
             Horizontal(
                 Static("[bold]Organization ID:[/bold]", classes="settings-label"),
                 Static(org_display, classes="settings-value"),
@@ -93,7 +93,7 @@ class SettingsScreen(Screen):
 
         # Defaults section
         defaults_section = Vertical(
-            Static("[bold]Defaults[/bold]"),
+            Static("DEFAULTS", classes="section-label"),
             Horizontal(
                 Static("[bold]Page Size:[/bold]", classes="settings-label"),
                 Static(str(settings.default_page_size), classes="settings-value"),
@@ -114,7 +114,7 @@ class SettingsScreen(Screen):
 
         # Alert rules section
         alerts_section = Vertical(
-            Static("[bold]Alert Rules[/bold]"),
+            Static("ALERT RULES", classes="section-label"),
             Horizontal(
                 Static("[bold]Configured Rules:[/bold]", classes="settings-label"),
                 Static(str(len(settings.alert_rules)), classes="settings-value"),
@@ -129,7 +129,7 @@ class SettingsScreen(Screen):
         )
 
         yield Container(
-            Static("[bold]Configuration[/bold]", id="settings-title"),
+            Static("configuration", id="settings-title", classes="section-label"),
             connection_section,
             api_section,
             auth_section,
