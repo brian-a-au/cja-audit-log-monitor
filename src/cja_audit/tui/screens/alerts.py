@@ -154,14 +154,14 @@ class AlertsScreen(Screen):
             alerts = self._state.alert_engine.check_batch(entries)
 
             if alerts:
-                result_lines = [f"[yellow]Found {len(alerts)} alerts:[/yellow]"]
+                result_lines = [f"[$warning]found {len(alerts)} alerts[/$warning]"]
                 for alert in alerts[:10]:
-                    result_lines.append("  [red]⚠[/red] Alert triggered")
+                    result_lines.append("  [$danger]⚠[/$danger] Alert triggered")
                 self.app.call_from_thread(self._show_results, "\n".join(result_lines))
             else:
                 self.app.call_from_thread(
                     self._show_results,
-                    f"[green]No alerts triggered[/green] "
+                    f"[$success]no alerts triggered[/$success] "
                     f"(tested against {len(entries)} entries)",
                 )
 

@@ -64,7 +64,7 @@ class MonitorScreen(Screen):
         )
 
         status = Horizontal(
-            Static("● Stopped", id="status-indicator"),
+            Static("[$danger]● stopped[/$danger]", id="status-indicator"),
             Static("", id="stats-info"),
             id="monitor-status",
             classes="monitor-stopped",
@@ -139,7 +139,7 @@ class MonitorScreen(Screen):
         status_container = self.query_one("#monitor-status")
         status_container.remove_class("monitor-stopped")
         status_container.add_class("monitor-running")
-        self.query_one("#status-indicator", Static).update("[green]● Running[/green]")
+        self.query_one("#status-indicator", Static).update("[$success]● running[/$success]")
 
         # Clear log table
         self.query_one("#monitor-log", LogTable).clear()
@@ -170,7 +170,7 @@ class MonitorScreen(Screen):
         status_container = self.query_one("#monitor-status")
         status_container.remove_class("monitor-running")
         status_container.add_class("monitor-stopped")
-        self.query_one("#status-indicator", Static).update("[red]● Stopped[/red]")
+        self.query_one("#status-indicator", Static).update("[$danger]● stopped[/$danger]")
 
     async def _monitoring_loop(self) -> None:
         """Main monitoring loop."""

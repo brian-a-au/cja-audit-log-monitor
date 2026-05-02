@@ -83,7 +83,9 @@ class SettingsScreen(Screen):
             Horizontal(
                 Static("[bold]OAuth Configured:[/bold]", classes="settings-label"),
                 Static(
-                    "[green]Yes[/green]" if settings.is_oauth_configured() else "[red]No[/red]",
+                    "[$success]yes[/$success]"
+                    if settings.is_oauth_configured()
+                    else "[$danger]no[/$danger]",
                     classes="settings-value",
                 ),
                 classes="settings-row",
@@ -183,14 +185,14 @@ class SettingsScreen(Screen):
 
         if result.get("connected") and result.get("authenticated"):
             status.update(
-                f"[green]● Connected[/green]\n"
-                f"  Organization: {result.get('org_id', 'Unknown')}\n"
-                f"  API URL: {result.get('api_url', 'Unknown')}\n"
-                f"  Total logs available: {result.get('total_logs_available', 'N/A'):,}"
+                f"[$success]●[/$success] connected\n"
+                f"  organization: {result.get('org_id', 'Unknown')}\n"
+                f"  api url: {result.get('api_url', 'Unknown')}\n"
+                f"  total logs available: {result.get('total_logs_available', 'N/A'):,}"
             )
         else:
             error = result.get("error", "Unknown error")
-            status.update(f"[red]● Disconnected[/red]\n  Error: {error}")
+            status.update(f"[$danger]●[/$danger] disconnected\n  error: {error}")
 
     def _hide_loading(self) -> None:
         """Hide loading indicator."""

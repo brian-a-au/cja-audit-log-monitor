@@ -138,9 +138,9 @@ class DashboardScreen(Screen):
         """Update connection status display."""
         status = self.query_one("#connection-status", Static)
         if connected:
-            status.update(f"[green]● Connected[/green] - {info}")
+            status.update(f"[$success]●[/$success] connected · {info}")
         else:
-            status.update(f"[red]● Disconnected[/red] - {info}")
+            status.update(f"[$danger]●[/$danger] disconnected · {info}")
 
     def _update_stats(self, stats: dict, anomalies: list, entry_count: int) -> None:
         """Update statistics display."""
@@ -162,7 +162,7 @@ class DashboardScreen(Screen):
 
         alert_count = len(anomalies)
         self.query_one("#stat-alerts", Static).update(
-            f"[yellow]{alert_count}[/yellow]" if alert_count > 0 else "0"
+            f"[$warning]{alert_count}[/$warning]" if alert_count > 0 else "0"
         )
 
         # Update action chart
@@ -192,7 +192,7 @@ class DashboardScreen(Screen):
         if anomalies:
             anomaly_lines = []
             for anomaly in anomalies[:5]:
-                anomaly_lines.append(f"  [yellow]⚠[/yellow] {anomaly['description']}")
+                anomaly_lines.append(f"  [$warning]⚠[/$warning] {anomaly['description']}")
             self.query_one("#anomalies", Static).update("\n".join(anomaly_lines))
         else:
             self.query_one("#anomalies", Static).update("[dim]No anomalies detected[/dim]")
@@ -204,7 +204,7 @@ class DashboardScreen(Screen):
 
     def _show_error(self, error: str) -> None:
         """Show error message."""
-        self.query_one("#connection-status", Static).update(f"[red]Error: {error}[/red]")
+        self.query_one("#connection-status", Static).update(f"[$danger]error: {error}[/$danger]")
 
     def _hide_loading(self) -> None:
         """Hide loading indicator."""
