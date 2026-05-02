@@ -11,27 +11,53 @@ from rich.text import Text
 from .models import ActionType, AuditLogEntry
 from .utils import get_user_identifier
 
-# Color mapping for action types
+# Severity color tokens (matching tui/styles.tcss)
+# - $danger:     destructive
+# - $warning:    sensitive
+# - $success:    safe
+# - $text-muted: neutral / unknown
+
 ACTION_COLORS = {
-    ActionType.CREATE.value: "green",
-    ActionType.DELETE.value: "red",
-    ActionType.EDIT.value: "yellow",
-    ActionType.EXPORT.value: "cyan",
-    ActionType.SHARE.value: "blue",
-    ActionType.UNSHARE.value: "magenta",
-    ActionType.APPROVE.value: "green",
-    ActionType.UNAPPROVE.value: "yellow",
-    ActionType.TRANSFER.value: "blue",
-    ActionType.EMBARGO.value: "red",
-    ActionType.REFRESH.value: "cyan",
-    ActionType.ORG_CHANGE.value: "magenta",
-    ActionType.API_REQUEST.value: "dim",
+    ActionType.DELETE.value: "$danger",
+    ActionType.EMBARGO.value: "$danger",
+    ActionType.EXPORT.value: "$warning",
+    ActionType.SHARE.value: "$warning",
+    ActionType.UNSHARE.value: "$warning",
+    ActionType.TRANSFER.value: "$warning",
+    ActionType.CREATE.value: "$success",
+    ActionType.APPROVE.value: "$success",
+    ActionType.EDIT.value: "$text-muted",
+    ActionType.REFRESH.value: "$text-muted",
+    ActionType.API_REQUEST.value: "$text-muted",
+    ActionType.ORG_CHANGE.value: "$text-muted",
+    ActionType.UNAPPROVE.value: "$text-muted",
+}
+
+ACTION_ICONS = {
+    ActionType.DELETE.value: "✕",
+    ActionType.EMBARGO.value: "✕",
+    ActionType.EXPORT.value: "⚠",
+    ActionType.SHARE.value: "⚠",
+    ActionType.UNSHARE.value: "⚠",
+    ActionType.TRANSFER.value: "⚠",
+    ActionType.CREATE.value: "✓",
+    ActionType.APPROVE.value: "✓",
+    ActionType.EDIT.value: "·",
+    ActionType.REFRESH.value: "·",
+    ActionType.API_REQUEST.value: "·",
+    ActionType.ORG_CHANGE.value: "·",
+    ActionType.UNAPPROVE.value: "·",
 }
 
 
 def get_action_color(action: str) -> str:
-    """Get color for an action type."""
-    return ACTION_COLORS.get(action, "white")
+    """Get severity color token for an action type."""
+    return ACTION_COLORS.get(action, "$text-muted")
+
+
+def get_action_icon(action: str) -> str:
+    """Get severity glyph for an action type."""
+    return ACTION_ICONS.get(action, "·")
 
 
 def format_timestamp(dt: datetime | None) -> str:

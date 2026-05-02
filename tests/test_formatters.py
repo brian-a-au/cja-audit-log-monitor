@@ -15,23 +15,66 @@ from cja_audit.models import AuditLogEntry
 
 
 class TestActionColors:
-    """Tests for action color mapping."""
+    """Tests for action severity color mapping (3-tier + neutral)."""
 
-    def test_create_is_green(self) -> None:
-        """Test CREATE action is green."""
-        assert get_action_color("CREATE") == "green"
+    def test_destructive_actions_use_danger(self) -> None:
+        assert get_action_color("DELETE") == "$danger"
+        assert get_action_color("EMBARGO") == "$danger"
 
-    def test_delete_is_red(self) -> None:
-        """Test DELETE action is red."""
-        assert get_action_color("DELETE") == "red"
+    def test_sensitive_actions_use_warning(self) -> None:
+        assert get_action_color("EXPORT") == "$warning"
+        assert get_action_color("SHARE") == "$warning"
+        assert get_action_color("UNSHARE") == "$warning"
+        assert get_action_color("TRANSFER") == "$warning"
 
-    def test_edit_is_yellow(self) -> None:
-        """Test EDIT action is yellow."""
-        assert get_action_color("EDIT") == "yellow"
+    def test_safe_actions_use_success(self) -> None:
+        assert get_action_color("CREATE") == "$success"
+        assert get_action_color("APPROVE") == "$success"
 
-    def test_unknown_is_white(self) -> None:
-        """Test unknown action defaults to white."""
-        assert get_action_color("UNKNOWN") == "white"
+    def test_neutral_actions_use_text_muted(self) -> None:
+        assert get_action_color("EDIT") == "$text-muted"
+        assert get_action_color("REFRESH") == "$text-muted"
+        assert get_action_color("API_REQUEST") == "$text-muted"
+        assert get_action_color("ORG_CHANGE") == "$text-muted"
+        assert get_action_color("UNAPPROVE") == "$text-muted"
+
+    def test_unknown_defaults_to_text_muted(self) -> None:
+        assert get_action_color("UNKNOWN") == "$text-muted"
+
+    def test_action_colors_has_four_distinct_values(self) -> None:
+        from cja_audit.formatters import ACTION_COLORS
+        assert len(set(ACTION_COLORS.values())) == 4
+
+
+class TestActionIcons:
+    """Tests for action severity icons."""
+
+    def test_destructive_actions_use_cross(self) -> None:
+        from cja_audit.formatters import get_action_icon
+        assert get_action_icon("DELETE") == "✕"
+        assert get_action_icon("EMBARGO") == "✕"
+
+    def test_sensitive_actions_use_warning_glyph(self) -> None:
+        from cja_audit.formatters import get_action_icon
+        assert get_action_icon("EXPORT") == "⚠"
+        assert get_action_icon("SHARE") == "⚠"
+        assert get_action_icon("UNSHARE") == "⚠"
+        assert get_action_icon("TRANSFER") == "⚠"
+
+    def test_safe_actions_use_check(self) -> None:
+        from cja_audit.formatters import get_action_icon
+        assert get_action_icon("CREATE") == "✓"
+        assert get_action_icon("APPROVE") == "✓"
+
+    def test_neutral_actions_use_dot(self) -> None:
+        from cja_audit.formatters import get_action_icon
+        assert get_action_icon("EDIT") == "·"
+        assert get_action_icon("REFRESH") == "·"
+        assert get_action_icon("API_REQUEST") == "·"
+
+    def test_unknown_defaults_to_dot(self) -> None:
+        from cja_audit.formatters import get_action_icon
+        assert get_action_icon("UNKNOWN") == "·"
 
 
 class TestFormatTimestamp:
