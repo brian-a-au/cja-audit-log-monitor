@@ -238,7 +238,7 @@ class TestLogBrowserScreen:
             await pilot.pause()
             log_table = app.query_one("LogTable")
             assert log_table.cursor_type == "row"
-            assert log_table.zebra_stripes is True
+            assert log_table.zebra_stripes is False
 
     async def test_loading_indicator_exists(self, mock_app_state):
         app = _make_app(mock_app_state)
