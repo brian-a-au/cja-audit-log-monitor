@@ -171,7 +171,7 @@ class DashboardScreen(Screen):
             max_count = max(actions.values()) if actions else 1
             chart_lines = []
             for action, count in sorted(actions.items(), key=lambda x: -x[1])[:8]:
-                color = ACTION_COLORS.get(action, "white")
+                color = ACTION_COLORS.get(action, "$text-muted")
                 bar_width = int((count / max_count) * 30)
                 bar = "█" * bar_width
                 chart_lines.append(f"[{color}]{action:15}[/{color}] {bar} {count:,}")
