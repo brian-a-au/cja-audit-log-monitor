@@ -74,7 +74,18 @@ ACTION_ICONS = {
 
 
 def get_action_color(action: str) -> str:
-    """Get severity color token for an action type."""
+    """Get the action's severity color as a hex value, suitable for Rich and Textual.
+
+    Rich (used by the CLI) does not understand Textual tcss variables, so we
+    resolve the token to its hex value here. Textual's markup parser also
+    accepts hex, so this works for both consumers.
+    """
+    token = ACTION_COLORS.get(action, "$text-muted")
+    return TCSS_TOKEN_HEX.get(token, token)
+
+
+def get_action_color_token(action: str) -> str:
+    """Get the action's severity as a Textual tcss token (`$danger`, etc.)."""
     return ACTION_COLORS.get(action, "$text-muted")
 
 
@@ -125,8 +136,10 @@ def format_logs_table(
         table.add_column("IP", width=15)
 
     for entry in entries:
-        action_text = Text(entry.action or "-")
-        action_text.stylize(get_action_color(entry.action or ""))
+        action_str = entry.action or "-"
+        icon = get_action_icon(action_str)
+        action_text = Text(f"{icon} {action_str}")
+        action_text.stylize(get_action_color(action_str))
 
         row = [
             format_timestamp(entry.timestamp),
@@ -151,9 +164,10 @@ def format_single_entry(entry: AuditLogEntry) -> Panel:
     """Format a single audit log entry as a detailed panel."""
     action_color = get_action_color(entry.action or "")
 
+    icon = get_action_icon(entry.action or "")
     content = Text()
     content.append("Action: ", style="bold")
-    content.append(f"{entry.action}\n", style=action_color)
+    content.append(f"{icon} {entry.action}\n", style=action_color)
 
     content.append("Timestamp: ", style="bold")
     content.append(f"{format_timestamp(entry.timestamp)}\n")
@@ -259,11 +273,12 @@ def format_action_stats_table(action_stats: dict[str, int]) -> Table:
 
     for action, count in sorted(action_stats.items(), key=lambda x: -x[1]):
         color = get_action_color(action)
+        icon = get_action_icon(action)
         pct = count / total * 100
         bar_width = int(count / max_count * 20)
         bar = "█" * bar_width
 
-        action_text = Text(action, style=color)
+        action_text = Text(f"{icon} {action}", style=color)
         bar_text = Text(f"{bar} {pct:.1f}%", style=color)
 
         table.add_row(action_text, f"{count:,}", bar_text)
@@ -288,7 +303,8 @@ def format_alert(
 
     content.append("Action: ", style="bold")
     action_color = get_action_color(entry.action or "")
-    content.append(f"{entry.action}\n", style=action_color)
+    action_icon = get_action_icon(entry.action or "")
+    content.append(f"{action_icon} {entry.action}\n", style=action_color)
 
     content.append("Component: ", style="bold")
     content.append(f"{entry.component_type} - {entry.component_name or entry.component_id}\n")

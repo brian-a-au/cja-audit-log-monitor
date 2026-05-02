@@ -37,26 +37,18 @@ class LogTable(DataTable):
             self.add_column("description", width=35, key="description")
             self.add_column("ip", width=15, key="ip")
 
-    # Map Textual CSS design tokens → Rich-compatible hex colors (from styles.tcss).
-    _TOKEN_TO_HEX: dict[str, str] = {
-        "$success": "#7fc896",
-        "$warning": "#e8c547",
-        "$danger": "#e07a7a",
-        "$text-muted": "#6e7480",
-    }
-
     def _format_action_cell(self, action: str | None) -> Text:
         """Render `<icon> <action>` with the severity color as a Rich Text object.
 
         Returns a ``rich.text.Text`` so the DataTable bypasses ``Text.from_markup``
-        and never chokes on Textual CSS variable tokens (e.g. ``$success``).
+        and never chokes on markup tokens. ``get_action_color`` returns a hex value
+        that both Rich and Textual understand natively.
         """
         action_str = action or "-"
-        token = get_action_color(action_str)
+        color = get_action_color(action_str)
         icon = get_action_icon(action_str)
-        rich_color = self._TOKEN_TO_HEX.get(token, "#6e7480")
         text = Text(no_wrap=True)
-        text.append(f"{icon} {action_str}", style=rich_color)
+        text.append(f"{icon} {action_str}", style=color)
         return text
 
     def _build_row(self, entry: AuditLogEntry) -> list:
