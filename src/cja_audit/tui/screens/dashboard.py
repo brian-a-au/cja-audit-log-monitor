@@ -11,7 +11,7 @@ from textual.widgets import Button, LoadingIndicator, Static
 from textual.worker import get_current_worker
 
 from ...alerts import analyze_for_anomalies
-from ...formatters import ACTION_COLORS
+from ...formatters import ACTION_COLORS, TCSS_TOKEN_HEX, resolve_tcss_markup
 from ...stats import build_date_range_query, calculate_stats
 from ..state import AppState
 
@@ -138,9 +138,9 @@ class DashboardScreen(Screen):
         """Update connection status display."""
         status = self.query_one("#connection-status", Static)
         if connected:
-            status.update(f"[$success]●[/$success] connected · {info}")
+            status.update(resolve_tcss_markup(f"[$success]●[/$success] connected · {info}"))
         else:
-            status.update(f"[$danger]●[/$danger] disconnected · {info}")
+            status.update(resolve_tcss_markup(f"[$danger]●[/$danger] disconnected · {info}"))
 
     def _update_stats(self, stats: dict, anomalies: list, entry_count: int) -> None:
         """Update statistics display."""
@@ -162,7 +162,7 @@ class DashboardScreen(Screen):
 
         alert_count = len(anomalies)
         self.query_one("#stat-alerts", Static).update(
-            f"[$warning]{alert_count}[/$warning]" if alert_count > 0 else "0"
+            resolve_tcss_markup(f"[$warning]{alert_count}[/$warning]") if alert_count > 0 else "0"
         )
 
         # Update action chart
@@ -171,7 +171,8 @@ class DashboardScreen(Screen):
             max_count = max(actions.values()) if actions else 1
             chart_lines = []
             for action, count in sorted(actions.items(), key=lambda x: -x[1])[:8]:
-                color = ACTION_COLORS.get(action, "$text-muted")
+                token = ACTION_COLORS.get(action, "$text-muted")
+                color = TCSS_TOKEN_HEX.get(token, token)
                 bar_width = int((count / max_count) * 30)
                 bar = "█" * bar_width
                 chart_lines.append(f"[{color}]{action:15}[/{color}] {bar} {count:,}")
@@ -192,7 +193,9 @@ class DashboardScreen(Screen):
         if anomalies:
             anomaly_lines = []
             for anomaly in anomalies[:5]:
-                anomaly_lines.append(f"  [$warning]⚠[/$warning] {anomaly['description']}")
+                anomaly_lines.append(
+                    resolve_tcss_markup(f"  [$warning]⚠[/$warning] {anomaly['description']}")
+                )
             self.query_one("#anomalies", Static).update("\n".join(anomaly_lines))
         else:
             self.query_one("#anomalies", Static).update("[dim]No anomalies detected[/dim]")
@@ -204,7 +207,9 @@ class DashboardScreen(Screen):
 
     def _show_error(self, error: str) -> None:
         """Show error message."""
-        self.query_one("#connection-status", Static).update(f"[$danger]error: {error}[/$danger]")
+        self.query_one("#connection-status", Static).update(
+            resolve_tcss_markup(f"[$danger]error: {error}[/$danger]")
+        )
 
     def _hide_loading(self) -> None:
         """Hide loading indicator."""

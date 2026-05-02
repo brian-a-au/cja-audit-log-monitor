@@ -9,6 +9,7 @@ from textual.widget import Widget
 from textual.widgets import Button, Checkbox, LoadingIndicator, Static
 from textual.worker import get_current_worker
 
+from ...formatters import resolve_tcss_markup
 from ...stats import build_date_range_query
 from ..state import AppState
 
@@ -46,7 +47,11 @@ class AlertsScreen(Screen):
 
         yield Container(
             Static("alert rules", id="alerts-title", classes="section-label"),
-            Static("[$text-muted]toggle rules on/off or test against recent data[/$text-muted]"),
+            Static(
+                resolve_tcss_markup(
+                    "[$text-muted]toggle rules on/off or test against recent data[/$text-muted]"
+                )
+            ),
             rules_list,
             buttons,
             Static("TEST RESULTS", classes="section-label"),
@@ -154,15 +159,21 @@ class AlertsScreen(Screen):
             alerts = self._state.alert_engine.check_batch(entries)
 
             if alerts:
-                result_lines = [f"[$warning]found {len(alerts)} alerts[/$warning]"]
+                result_lines = [
+                    resolve_tcss_markup(f"[$warning]found {len(alerts)} alerts[/$warning]")
+                ]
                 for alert in alerts[:10]:
-                    result_lines.append("  [$danger]⚠[/$danger] Alert triggered")
+                    result_lines.append(
+                        resolve_tcss_markup("  [$danger]⚠[/$danger] Alert triggered")
+                    )
                 self.app.call_from_thread(self._show_results, "\n".join(result_lines))
             else:
                 self.app.call_from_thread(
                     self._show_results,
-                    f"[$success]no alerts triggered[/$success] "
-                    f"(tested against {len(entries)} entries)",
+                    resolve_tcss_markup(
+                        f"[$success]no alerts triggered[/$success] "
+                        f"(tested against {len(entries)} entries)"
+                    ),
                 )
 
         except Exception as e:

@@ -17,6 +17,29 @@ from .utils import get_user_identifier
 # - $success:    safe
 # - $text-muted: neutral / unknown
 
+# Hex equivalents for tcss design tokens.
+# Used to translate [$token] markup into Rich-parseable [#hex] markup.
+TCSS_TOKEN_HEX: dict[str, str] = {
+    "$danger": "#e07a7a",
+    "$warning": "#e8c547",
+    "$success": "#7fc896",
+    "$text-muted": "#6e7480",
+    "$text-strong": "#e8e8e8",
+    "$text": "#c8ccd4",
+    "$primary": "#6db0d6",
+}
+
+
+def resolve_tcss_markup(s: str) -> str:
+    """Replace [$token] / [/$token] with hex equivalents so Rich can parse them."""
+    out = s
+    for token, hex_value in TCSS_TOKEN_HEX.items():
+        out = out.replace(f"[{token}]", f"[{hex_value}]").replace(
+            f"[/{token}]", f"[/{hex_value}]"
+        )
+    return out
+
+
 ACTION_COLORS = {
     ActionType.DELETE.value: "$danger",
     ActionType.EMBARGO.value: "$danger",

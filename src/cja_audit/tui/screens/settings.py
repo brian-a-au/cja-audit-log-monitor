@@ -9,6 +9,7 @@ from textual.widget import Widget
 from textual.widgets import Button, LoadingIndicator, Static
 from textual.worker import get_current_worker
 
+from ...formatters import resolve_tcss_markup
 from ..state import AppState
 
 
@@ -83,9 +84,11 @@ class SettingsScreen(Screen):
             Horizontal(
                 Static("[bold]OAuth Configured:[/bold]", classes="settings-label"),
                 Static(
-                    "[$success]yes[/$success]"
-                    if settings.is_oauth_configured()
-                    else "[$danger]no[/$danger]",
+                    resolve_tcss_markup(
+                        "[$success]yes[/$success]"
+                        if settings.is_oauth_configured()
+                        else "[$danger]no[/$danger]"
+                    ),
                     classes="settings-value",
                 ),
                 classes="settings-row",
@@ -185,14 +188,18 @@ class SettingsScreen(Screen):
 
         if result.get("connected") and result.get("authenticated"):
             status.update(
-                f"[$success]●[/$success] connected\n"
-                f"  organization: {result.get('org_id', 'Unknown')}\n"
-                f"  api url: {result.get('api_url', 'Unknown')}\n"
-                f"  total logs available: {result.get('total_logs_available', 'N/A'):,}"
+                resolve_tcss_markup(
+                    f"[$success]●[/$success] connected\n"
+                    f"  organization: {result.get('org_id', 'Unknown')}\n"
+                    f"  api url: {result.get('api_url', 'Unknown')}\n"
+                    f"  total logs available: {result.get('total_logs_available', 'N/A'):,}"
+                )
             )
         else:
             error = result.get("error", "Unknown error")
-            status.update(f"[$danger]●[/$danger] disconnected\n  error: {error}")
+            status.update(
+                resolve_tcss_markup(f"[$danger]●[/$danger] disconnected\n  error: {error}")
+            )
 
     def _hide_loading(self) -> None:
         """Hide loading indicator."""

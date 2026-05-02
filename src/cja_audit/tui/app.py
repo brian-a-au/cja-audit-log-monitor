@@ -92,17 +92,17 @@ class CJAAuditApp(App):
     CSS_PATH = "styles.tcss"
 
     BINDINGS = [
-        Binding("d", "switch_screen('dashboard')", "Dashboard"),
-        Binding("l", "switch_screen('logs')", "Logs"),
-        Binding("m", "switch_screen('monitor')", "Monitor"),
-        Binding("s", "switch_screen('stats')", "Stats"),
-        Binding("a", "switch_screen('alerts')", "Alerts"),
-        Binding("c", "switch_screen('settings')", "Config"),
-        Binding("r", "refresh", "Refresh"),
-        Binding("e", "export", "Export"),
-        Binding("slash", "focus_search", "Search"),
-        Binding("question_mark", "show_help", "Help"),
-        Binding("q", "quit", "Quit"),
+        Binding("d", "switch_screen('dashboard')", "dashboard"),
+        Binding("l", "switch_screen('logs')", "logs"),
+        Binding("m", "switch_screen('monitor')", "monitor"),
+        Binding("s", "switch_screen('stats')", "stats"),
+        Binding("a", "switch_screen('alerts')", "alerts"),
+        Binding("c", "switch_screen('settings')", "config"),
+        Binding("r", "refresh", "refresh"),
+        Binding("e", "export", "export"),
+        Binding("slash", "focus_search", "search"),
+        Binding("question_mark", "show_help", "help"),
+        Binding("q", "quit", "quit"),
     ]
 
     def __init__(self, config_path: Path | None = None) -> None:
