@@ -33,34 +33,35 @@ class FilterBar(Static):
         pass
 
     def compose(self) -> ComposeResult:
-        """Compose filter bar widgets."""
+        """Compose filter bar widgets — single row, hairline divider only."""
         with Horizontal():
-            yield Input(placeholder="Search...", id="filter-search")
-            yield Input(placeholder="User", id="filter-user")
+            yield Input(placeholder="search", id="filter-search")
+            yield Input(placeholder="user", id="filter-user")
             yield Select(
                 [(a.value, a.value) for a in ActionType],
-                prompt="Action",
+                prompt="action",
                 allow_blank=True,
                 id="filter-action",
             )
             yield Select(
                 [(c.value, c.value) for c in ComponentType],
-                prompt="Component",
+                prompt="component",
                 allow_blank=True,
                 id="filter-component",
             )
-            yield Button("Apply", id="filter-apply", variant="primary")
-            yield Button("Reset", id="filter-reset")
+            yield Button("reset", id="filter-reset")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle filter button presses."""
-        if event.button.id == "filter-apply":
-            self._emit_filter_changed()
-        elif event.button.id == "filter-reset":
+        if event.button.id == "filter-reset":
             self._reset_filters()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         """Handle Enter key in input fields."""
+        self._emit_filter_changed()
+
+    def on_select_changed(self, event: Select.Changed) -> None:
+        """Auto-apply when the action or component dropdown changes."""
         self._emit_filter_changed()
 
     def _emit_filter_changed(self) -> None:
