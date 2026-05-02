@@ -34,6 +34,10 @@ Screen {
 #status-row .status-dot-down  { color: $danger; }
 
 /* ---- Footer (toad treatment) ---- */
+/* Textual 7.5+ renders each binding as a FooterKey widget with component
+ * classes `footer-key--key` and `footer-key--description`. The default theme
+ * colors the key chip amber; override to steel-blue to match the rest of the
+ * design vocabulary. */
 Footer {
     dock: bottom;
     height: 1;
@@ -41,21 +45,24 @@ Footer {
     color: $text-muted;
 }
 
-Footer > .footer--key {
+FooterKey {
+    background: $background;
+}
+
+FooterKey > .footer-key--key {
     color: $primary;
     background: $background;
     text-style: none;
 }
 
-Footer > .footer--description {
+FooterKey > .footer-key--description {
     color: $text-muted;
     background: $background;
 }
 
-Footer > .footer--highlight,
-Footer > .footer--highlight-key {
+FooterKey:hover {
     background: $background;
-    color: $text;
+    color: $primary;
 }
 
 /* ---- Sidebar ---- */
