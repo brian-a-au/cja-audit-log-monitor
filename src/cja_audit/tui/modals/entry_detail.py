@@ -99,7 +99,3 @@ class EntryDetailPanel(Container):
     def _row(label: str, value: str) -> str:
         return f"[$text-muted]{label:<14}[/$text-muted] {value}"
 
-
-# Backwards-compatibility alias so any consumer that still imports the old name
-# (notably tests in Task 11 which will be rewritten) doesn't crash on import.
-EntryDetailModal = EntryDetailPanel

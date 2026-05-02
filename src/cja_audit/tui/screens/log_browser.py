@@ -4,12 +4,14 @@ from collections.abc import Iterator
 
 from textual.app import ComposeResult
 from textual.containers import Container, Horizontal
+from textual.css.query import NoMatches
 from textual.screen import Screen
 from textual.widget import Widget
 from textual.widgets import Button, Label, LoadingIndicator, Static
 from textual.worker import get_current_worker
 
 from ...models import ActionType, ComponentType
+from ..modals import EntryDetailPanel
 from ..state import AppState
 from ..widgets import FilterBar, LogTable
 
@@ -40,8 +42,6 @@ class LogBrowserScreen(Screen):
 
     def compose_content(self) -> Iterator[Widget]:
         """Yield widgets for embedding in main content area."""
-        from ..modals import EntryDetailPanel
-
         pagination = Horizontal(
             Button("◀ prev", id="prev-page"),
             Label("page 1 of 1", id="page-info"),
@@ -168,8 +168,6 @@ class LogBrowserScreen(Screen):
 
     def action_view_details(self) -> None:
         """Toggle the entry detail side panel for the selected row."""
-        from ..modals import EntryDetailPanel
-
         table = self.query_one("#log-table", LogTable)
         entry = table.get_selected_entry()
         panel = self.query_one("#entry-detail-panel", EntryDetailPanel)
@@ -184,11 +182,9 @@ class LogBrowserScreen(Screen):
 
     def on_data_table_row_highlighted(self, event) -> None:
         """If the panel is visible, update its content as the cursor moves."""
-        from ..modals import EntryDetailPanel
-
         try:
             panel = self.query_one("#entry-detail-panel", EntryDetailPanel)
-        except Exception:
+        except NoMatches:
             return
         if not panel.is_visible():
             return
@@ -199,11 +195,9 @@ class LogBrowserScreen(Screen):
 
     def action_dismiss_details(self) -> None:
         """Hide the entry detail side panel if visible."""
-        from ..modals import EntryDetailPanel
-
         try:
             panel = self.query_one("#entry-detail-panel", EntryDetailPanel)
-        except Exception:
+        except NoMatches:
             return
         if panel.is_visible():
             panel.hide()
