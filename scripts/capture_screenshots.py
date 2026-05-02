@@ -230,7 +230,7 @@ def populate_dashboard_data(app, entries: list[AuditLogEntry]):
     from textual.widgets import Static
 
     from cja_audit.alerts import analyze_for_anomalies
-    from cja_audit.formatters import ACTION_COLORS
+    from cja_audit.formatters import ACTION_COLORS, resolve_tcss_markup
     from cja_audit.stats import calculate_stats
 
     stats = calculate_stats(entries)
@@ -252,7 +252,7 @@ def populate_dashboard_data(app, entries: list[AuditLogEntry]):
 
         # Update connection status
         app.query_one("#connection-status", Static).update(
-            "[green]● Connected[/green] - ABC123DEF@AdobeOrg"
+            resolve_tcss_markup("[$success]●[/$success] connected · ABC123DEF@AdobeOrg")
         )
 
         # Update action chart
@@ -261,11 +261,13 @@ def populate_dashboard_data(app, entries: list[AuditLogEntry]):
             max_count = max(actions.values()) if actions else 1
             chart_lines = []
             for action, count in sorted(actions.items(), key=lambda x: -x[1])[:8]:
-                color = ACTION_COLORS.get(action, "white")
+                color = ACTION_COLORS.get(action, "$text-muted")
                 bar_width = int((count / max_count) * 30)
                 bar = "█" * bar_width
                 chart_lines.append(f"[{color}]{action:15}[/{color}] {bar} {count:,}")
-            app.query_one("#action-chart", Static).update("\n".join(chart_lines))
+            app.query_one("#action-chart", Static).update(
+                resolve_tcss_markup("\n".join(chart_lines))
+            )
 
         # Update top users
         if top_users:
@@ -278,14 +280,18 @@ def populate_dashboard_data(app, entries: list[AuditLogEntry]):
         if anomalies:
             anomaly_lines = []
             for anomaly in anomalies[:5]:
-                anomaly_lines.append(f"  [yellow]⚠[/yellow] {anomaly['description']}")
-            app.query_one("#anomalies", Static).update("\n".join(anomaly_lines))
+                anomaly_lines.append(f"  [$warning]⚠[/$warning] {anomaly['description']}")
+            app.query_one("#anomalies", Static).update(
+                resolve_tcss_markup("\n".join(anomaly_lines))
+            )
         else:
-            app.query_one("#anomalies", Static).update("[dim]No anomalies detected[/dim]")
+            app.query_one("#anomalies", Static).update("[$text-muted]No anomalies detected[/$text-muted]")
 
         # Update last update time
         app.query_one("#last-update", Static).update(
-            f"[dim]Last updated: {datetime.now(UTC).strftime('%H:%M:%S')}[/dim]"
+            resolve_tcss_markup(
+                f"[$text-muted]Last updated: {datetime.now(UTC).strftime('%H:%M:%S')}[/$text-muted]"
+            )
         )
 
         # Hide loading indicator
