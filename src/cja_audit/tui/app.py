@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+from textual import events
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical
@@ -201,15 +202,21 @@ class CJAAuditApp(App):
 
         self._current_screen = screen_name
 
-    async def on_click(self, event) -> None:
-        """Handle clicks on sidebar nav items."""
+    async def on_click(self, event: events.Click) -> None:
+        """Handle clicks on sidebar nav items.
+
+        Walks ancestors so clicks on any child element of a nav item still
+        navigate, not just clicks on the leaf Static itself.
+        """
         widget = event.widget
         if widget is None:
             return
-        widget_id = getattr(widget, "id", None)
-        if widget_id and widget_id.startswith("nav-"):
-            screen_name = widget_id.replace("nav-", "")
-            await self._show_screen(screen_name)
+        for candidate in widget.ancestors_with_self:
+            candidate_id = getattr(candidate, "id", None)
+            if candidate_id and candidate_id.startswith("nav-"):
+                screen_name = candidate_id.replace("nav-", "")
+                await self._show_screen(screen_name)
+                return
 
     def action_switch_screen(self, screen_name: str) -> None:
         """Switch to a different screen."""
