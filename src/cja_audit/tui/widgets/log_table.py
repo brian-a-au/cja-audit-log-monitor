@@ -1,5 +1,6 @@
 """Custom DataTable widget for audit log entries."""
 
+from rich.text import Text
 from textual.widgets import DataTable
 from textual.widgets.data_table import RowKey
 
@@ -36,12 +37,27 @@ class LogTable(DataTable):
             self.add_column("description", width=35, key="description")
             self.add_column("ip", width=15, key="ip")
 
-    def _format_action_cell(self, action: str | None) -> str:
-        """Render `<icon> <action>` with the severity color."""
+    # Map Textual CSS design tokens → Rich-compatible hex colors (from styles.tcss).
+    _TOKEN_TO_HEX: dict[str, str] = {
+        "$success": "#7fc896",
+        "$warning": "#e8c547",
+        "$danger": "#e07a7a",
+        "$text-muted": "#6e7480",
+    }
+
+    def _format_action_cell(self, action: str | None) -> Text:
+        """Render `<icon> <action>` with the severity color as a Rich Text object.
+
+        Returns a ``rich.text.Text`` so the DataTable bypasses ``Text.from_markup``
+        and never chokes on Textual CSS variable tokens (e.g. ``$success``).
+        """
         action_str = action or "-"
-        color = get_action_color(action_str)
+        token = get_action_color(action_str)
         icon = get_action_icon(action_str)
-        return f"[{color}]{icon} {action_str}[/{color}]"
+        rich_color = self._TOKEN_TO_HEX.get(token, "#6e7480")
+        text = Text(no_wrap=True)
+        text.append(f"{icon} {action_str}", style=rich_color)
+        return text
 
     def _build_row(self, entry: AuditLogEntry) -> list:
         row_data = [
