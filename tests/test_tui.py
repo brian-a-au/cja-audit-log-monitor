@@ -66,11 +66,11 @@ class TestAppLifecycle:
             await pilot.pause()
             assert app._current_screen == "dashboard"
 
-    async def test_sidebar_has_six_nav_buttons(self, mock_app_state):
+    async def test_sidebar_has_six_nav_items(self, mock_app_state):
         app = _make_app(mock_app_state)
         async with app.run_test() as _pilot:
-            sidebar_buttons = app.query("#sidebar Button")
-            assert len(sidebar_buttons) == 6
+            nav_items = app.query("#sidebar .nav-item")
+            assert len(nav_items) == 6
 
     async def test_main_content_mounts_active_screen_widget(self, mock_app_state):
         app = _make_app(mock_app_state)
@@ -123,17 +123,17 @@ class TestNavigation:
             await pilot.pause()
             assert app._current_screen == "dashboard"
 
-    async def test_nav_button_updates_active_class(self, mock_app_state):
+    async def test_nav_item_updates_active_class(self, mock_app_state):
         app = _make_app(mock_app_state)
         async with app.run_test() as pilot:
             await pilot.press("l")
             await pilot.pause()
-            logs_btn = app.query_one("#nav-logs", Button)
-            assert "active" in logs_btn.classes
-            dash_btn = app.query_one("#nav-dashboard", Button)
-            assert "active" not in dash_btn.classes
+            logs_item = app.query_one("#nav-logs", Static)
+            assert "active" in logs_item.classes
+            dash_item = app.query_one("#nav-dashboard", Static)
+            assert "active" not in dash_item.classes
 
-    async def test_sidebar_button_click_navigates(self, mock_app_state):
+    async def test_sidebar_item_click_navigates(self, mock_app_state):
         app = _make_app(mock_app_state)
         async with app.run_test() as pilot:
             await pilot.pause()
