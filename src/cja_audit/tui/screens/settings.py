@@ -117,6 +117,35 @@ class SettingsScreen(Screen):
             classes="settings-section",
         )
 
+        # Notifications section
+        notif = settings.notifications
+        slack_state = "configured" if notif.slack_webhook_url else "not configured"
+        webhook_count = len(notif.webhooks)
+        notifications_section = Vertical(
+            Static("NOTIFICATIONS", classes="section-label"),
+            Horizontal(
+                Static("[bold]Slack:[/bold]", classes="settings-label"),
+                Static(slack_state, classes="settings-value"),
+                classes="settings-row",
+            ),
+            Horizontal(
+                Static("[bold]Webhooks:[/bold]", classes="settings-label"),
+                Static(f"{webhook_count} configured", classes="settings-value"),
+                classes="settings-row",
+            ),
+            Horizontal(
+                Static("[bold]Notify on alerts:[/bold]", classes="settings-label"),
+                Static("yes" if notif.notify_on_alerts else "no", classes="settings-value"),
+                classes="settings-row",
+            ),
+            Horizontal(
+                Static("[bold]Notify on anomalies:[/bold]", classes="settings-label"),
+                Static("yes" if notif.notify_on_anomalies else "no", classes="settings-value"),
+                classes="settings-row",
+            ),
+            classes="settings-section",
+        )
+
         # Alert rules section
         alerts_section = Vertical(
             Static("ALERT RULES", classes="section-label"),
@@ -139,6 +168,7 @@ class SettingsScreen(Screen):
             api_section,
             auth_section,
             defaults_section,
+            notifications_section,
             alerts_section,
             buttons,
             LoadingIndicator(id="loading"),

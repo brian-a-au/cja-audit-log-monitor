@@ -465,6 +465,51 @@ class TestSettingsScreen:
             btn = app.query_one("#verify-button", Button)
             assert btn is not None
 
+    def test_settings_screen_renders_notifications_section(self):
+        """Settings screen includes a Notifications section showing channel presence."""
+        from unittest.mock import MagicMock
+
+        from cja_audit.models import NotificationConfig, WebhookConfig
+        from cja_audit.tui.screens.settings import SettingsScreen
+
+        state = MagicMock()
+        state.settings.notifications = NotificationConfig(
+            slack_webhook_url="https://hooks.slack.com/x",
+            webhooks=[WebhookConfig(url="https://h1.example.com")],
+        )
+        state.settings.org_id = "test@AdobeOrg"
+        state.settings.client_id = "abc"
+        state.settings.is_oauth_configured.return_value = True
+        state.settings.api_base_url = "https://cja.adobe.io"
+        state.settings.ims_base_url = "https://ims-na1.adobelogin.com"
+        state.settings.default_page_size = 100
+        state.settings.default_days = 7
+        state.settings.monitor_interval = 60
+        state.settings.alert_rules = []
+        state.config_path = "/tmp/config"
+
+        screen = SettingsScreen(state=state)
+        # Iterate compose_content to ensure no exception is raised when building the widget tree
+        widgets = list(screen.compose_content())
+
+        # Walk the pending widget tree and collect rendered text from all Static nodes
+        def collect_text(node):
+            from textual.widgets import Static
+
+            parts = []
+            if isinstance(node, Static):
+                parts.append(str(node.render()))
+            for child in getattr(node, "_pending_children", []):
+                parts.extend(collect_text(child))
+            return parts
+
+        all_text = " ".join(t for w in widgets for t in collect_text(w))
+        # The new section should reference NOTIFICATIONS as a heading
+        assert "NOTIFICATIONS" in all_text or "Notifications" in all_text
+        # Slack should show "configured" (not the URL itself)
+        assert "configured" in all_text
+        assert "hooks.slack.com" not in all_text
+
 
 # ---------------------------------------------------------------------------
 # TestModals
