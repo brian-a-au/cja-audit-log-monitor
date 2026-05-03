@@ -108,7 +108,3 @@ Setup, scripting, and reference material live under [`docs/`](docs/):
 | Action types, component types, upstream API | [docs/reference.md](docs/reference.md) |
 | Tests, lint, project layout | [docs/development.md](docs/development.md) |
 | Per-screen TUI guides | [docs/screens/](docs/screens/) |
-
-## License
-
-MIT
