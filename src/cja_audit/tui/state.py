@@ -1,5 +1,6 @@
 """Application state management for the TUI."""
 
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -9,6 +10,9 @@ from ..auth import TokenManager
 from ..client import AuditLogsClient
 from ..config import CJASettings, get_config_path, load_config
 from ..models import ActionType, AuditLogEntry, AuditLogQuery, ComponentType
+from ..notifications import NotificationManager
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -73,6 +77,7 @@ class AppState:
         self._client: AuditLogsClient | None = None
         self._token_manager: TokenManager | None = None
         self._alert_engine: AlertEngine | None = None
+        self._notification_manager: NotificationManager | None = None
 
         # Data state
         self.entries: list[AuditLogEntry] = []
@@ -119,6 +124,13 @@ class AppState:
         if self._alert_engine is None:
             self._alert_engine = AlertEngine(self.settings.alert_rules or None)
         return self._alert_engine
+
+    @property
+    def notification_manager(self) -> NotificationManager:
+        """Get notification manager, creating if necessary."""
+        if self._notification_manager is None:
+            self._notification_manager = NotificationManager(self.settings.notifications)
+        return self._notification_manager
 
     def refresh_client(self) -> None:
         """Refresh the API client connection."""
@@ -175,7 +187,7 @@ class AppState:
         return self.entries, self.total_entries
 
     def check_alerts(self, entries: list[AuditLogEntry]) -> list[FiredAlert]:
-        """Check entries against alert rules.
+        """Check entries against alert rules and dispatch to notification channels.
 
         Args:
             entries: List of audit log entries to check.
@@ -185,8 +197,18 @@ class AppState:
         """
         fired = self.alert_engine.check_batch(entries)
         self.recent_alerts.extend(fired)
-        # Keep only last 50 alerts
         self.recent_alerts = self.recent_alerts[-50:]
+
+        # Best-effort dispatch: never let a notification bug block alert display
+        nm = self.notification_manager
+        if nm.is_configured():
+            for fa in fired:
+                try:
+                    nm.notify_alert(fa.rule_name, fa.message, fa.entry)
+                except Exception:
+                    logger.exception(
+                        "Notification dispatch failed for rule %s", fa.rule_name
+                    )
         return fired
 
     def close(self) -> None:
@@ -194,3 +216,6 @@ class AppState:
         if self._client:
             self._client.close()
             self._client = None
+        if self._notification_manager:
+            self._notification_manager.close()
+            self._notification_manager = None

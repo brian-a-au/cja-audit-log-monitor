@@ -5,8 +5,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from textual.widgets import Button, Static
 
+from cja_audit.alerts import FiredAlert
 from cja_audit.models import AlertRule
+from cja_audit.notifications import NotificationManager
 from cja_audit.tui.app import CJAAuditApp, HelpScreen
+from cja_audit.tui.state import AppState
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -45,6 +48,68 @@ def _patch_screen_workers():
     yield
     for p in patchers:
         p.stop()
+
+
+# ---------------------------------------------------------------------------
+# TestNotificationDispatch
+# ---------------------------------------------------------------------------
+
+
+class TestNotificationDispatch:
+    """Tests for AppState notification_manager wiring and dispatch."""
+
+    def test_notification_manager_lazy_property(self, tmp_path):
+        """notification_manager is constructed once and reused."""
+        state = AppState(config_path=tmp_path / "config.yaml")
+        nm1 = state.notification_manager
+        nm2 = state.notification_manager
+        assert isinstance(nm1, NotificationManager)
+        assert nm1 is nm2
+
+    def test_check_alerts_dispatches_when_configured(self, sample_audit_entry):
+        """state.check_alerts calls notify_alert per FiredAlert when channels configured."""
+        state = AppState()
+        fake_nm = MagicMock()
+        fake_nm.is_configured.return_value = True
+        fake_nm.pop_first_failure.return_value = None
+        state._notification_manager = fake_nm
+
+        fa = FiredAlert(rule_name="r", message="m", entry=sample_audit_entry, panel=MagicMock())
+        state._alert_engine = MagicMock()
+        state._alert_engine.check_batch.return_value = [fa]
+
+        state.check_alerts([sample_audit_entry])
+        fake_nm.notify_alert.assert_called_once_with("r", "m", sample_audit_entry)
+
+    def test_check_alerts_skips_dispatch_when_unconfigured(self, sample_audit_entry):
+        """state.check_alerts does NOT call notify_alert when no channels configured."""
+        state = AppState()
+        fake_nm = MagicMock()
+        fake_nm.is_configured.return_value = False
+        state._notification_manager = fake_nm
+
+        fa = FiredAlert(rule_name="r", message="m", entry=sample_audit_entry, panel=MagicMock())
+        state._alert_engine = MagicMock()
+        state._alert_engine.check_batch.return_value = [fa]
+
+        state.check_alerts([sample_audit_entry])
+        fake_nm.notify_alert.assert_not_called()
+
+    def test_check_alerts_suppresses_dispatch_exceptions(self, sample_audit_entry):
+        """An exception inside notify_alert does NOT prevent check_alerts from returning."""
+        state = AppState()
+        fake_nm = MagicMock()
+        fake_nm.is_configured.return_value = True
+        fake_nm.notify_alert.side_effect = RuntimeError("boom")
+        fake_nm.pop_first_failure.return_value = None
+        state._notification_manager = fake_nm
+
+        fa = FiredAlert(rule_name="r", message="m", entry=sample_audit_entry, panel=MagicMock())
+        state._alert_engine = MagicMock()
+        state._alert_engine.check_batch.return_value = [fa]
+
+        fired = state.check_alerts([sample_audit_entry])
+        assert len(fired) == 1  # check_alerts still returns despite the exception
 
 
 # ---------------------------------------------------------------------------
