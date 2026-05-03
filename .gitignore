@@ -39,6 +39,8 @@ config.json
 *.pem
 private.key
 credentials/
+.cja/
+.cja-audit/
 
 # Testing
 .pytest_cache/
