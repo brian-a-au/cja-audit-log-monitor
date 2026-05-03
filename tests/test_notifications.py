@@ -261,3 +261,14 @@ class TestFailureWarning:
         warning = manager.pop_first_failure()
         assert warning is not None
         assert "hook.example.com" in warning
+
+    def test_anomaly_path_tracks_slack_failure(self, httpx_mock):
+        """notify_anomaly's Slack path participates in failure tracking."""
+        config = NotificationConfig(slack_webhook_url="https://hooks.slack.com/x")
+        manager = NotificationManager(config)
+        httpx_mock.add_response(url="https://hooks.slack.com/x", status_code=500)
+
+        manager.notify_anomaly({"type": "test", "description": "test anomaly"})
+        warning = manager.pop_first_failure()
+        assert warning is not None
+        assert "slack" in warning.lower()

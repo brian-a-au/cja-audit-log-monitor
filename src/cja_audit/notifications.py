@@ -348,9 +348,11 @@ class NotificationManager:
                     headers={"Content-Type": "application/json"},
                 )
                 response.raise_for_status()
+                self._mark_success("slack")
                 sent += 1
             except httpx.HTTPError as e:
                 logger.error("Failed to send Slack anomaly notification: %s", e)
+                self._mark_failure("slack", "slack")
 
         return sent
 
