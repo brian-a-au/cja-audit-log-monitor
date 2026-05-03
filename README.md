@@ -109,58 +109,95 @@ pip install -e .
 
 ## Configuration
 
-### 1. Set up Adobe Developer Console
+Authentication uses **OAuth Server-to-Server** (Adobe's current standard). Setup is a one-time process in the Adobe Developer Console.
 
-1. Go to [Adobe Developer Console](https://developer.adobe.com/console)
-2. Verify you're in the correct organization (top-right dropdown)
-3. Create a new project or use an existing one
-4. Add the **Customer Journey Analytics API** (select OAuth Server-to-Server)
-5. **Important:** Also add the **Experience Platform API** (required even for CJA-only usage)
-6. Both APIs share the same OAuth credentials
+### Prerequisites
 
-### 2. Configure Environment Variables
+- [ ] Adobe Experience Cloud account with CJA access
+- [ ] [Adobe Developer Console](https://developer.adobe.com/console/) access (System Administrator or Developer role)
+- [ ] Service account assigned to appropriate CJA and AEP product profiles in [Admin Console](https://adminconsole.adobe.com/)
+
+### 1. Create the Developer Console project
+
+1. Open [Adobe Developer Console](https://developer.adobe.com/console/) and confirm the correct organization is selected (top-right dropdown).
+2. Click **Create new project** and name it descriptively (e.g. `CJA Audit Log Monitor`).
+3. **Add the Customer Journey Analytics API:**
+   - Click **Add API** → search for **Customer Journey Analytics** → **Next**
+   - Select **OAuth Server-to-Server** authentication → **Next**
+   - Choose a product profile with access to your Data Views → **Save configured API**
+4. **Add the Experience Platform API** (required even if you only use CJA — without it, CJA tokens won't authenticate):
+   - Click **Add API** → search for **Experience Platform API** → **Next**
+   - Select **OAuth Server-to-Server** → **Next**
+   - Choose a product profile → **Save configured API**
+
+Your project should now show **two APIs** sharing the same OAuth credentials.
+
+### 2. Collect credentials
+
+From the project's **OAuth Server-to-Server** credentials page:
+
+| Variable | Where to find it | Example |
+|---|---|---|
+| `ORG_ID` | Project Overview → Organization ID | `ABC123DEF456@AdobeOrg` |
+| `CLIENT_ID` | Credentials → Client ID | `1234567890abcdef…` |
+| `SECRET` | Credentials → **Retrieve client secret** | `p8e-XXX…` |
+| `SCOPES` | Credentials → Scopes (copy as shown) | `openid,AdobeID,read_organizations,additional_info.projectedProductContext` |
+
+> **Copy `SCOPES` exactly as Developer Console displays them.** Adding, removing, or reordering scopes causes `invalid_scope` errors.
+
+### 3. Configure the tool
 
 ```bash
 cp .env.example .env
+# Edit .env with the four values above
 ```
 
-Edit `.env` with your credentials from Developer Console:
+`.env` is gitignored. Never commit credentials.
 
-```bash
-ORG_ID=your_org_id@AdobeOrg
-CLIENT_ID=your_client_id
-SECRET=your_client_secret
-SCOPES=openid,AdobeID,read_organizations,additional_info.projectedProductContext
-```
-
-**Note:** Copy SCOPES exactly from Developer Console > OAuth Server-to-Server > Scopes.
-
-### 3. (Optional) Create Config File
+### 4. (Optional) Create a config file for alert rules
 
 ```bash
 cja-audit cli init
 ```
 
-This creates `~/.cja-audit/config.yaml` with default settings for alert rules and preferences.
+Writes `~/.cja-audit/config.yaml` with default alert rules and preferences. Environment variables always take precedence over the config file.
+
+### 5. Verify
+
+```bash
+cja-audit cli verify
+```
+
+Expected: `Connected` with your organization ID. If it fails, see Troubleshooting below.
 
 ## Troubleshooting
 
-### Common OAuth Errors
+### OAuth errors
 
-| Error | Cause | Solution |
-|-------|-------|----------|
-| `invalid_client` | Wrong CLIENT_ID or SECRET | Re-copy credentials from Developer Console |
-| `invalid_scope` | SCOPES don't match console | Copy SCOPES exactly from Developer Console |
-| `403 Forbidden` | Missing API or permissions | Add both CJA API and Experience Platform API to project; check product profile assignments |
-| `401 Unauthorized` | Expired or regenerated credentials | Re-retrieve SECRET from Developer Console |
+| Error | Likely cause | Fix |
+|---|---|---|
+| `invalid_client` | Client ID or Secret wrong/expired | Re-retrieve from Developer Console; check for whitespace |
+| `invalid_scope` | `SCOPES` differs from the Developer Console string | Re-copy verbatim from OAuth Server-to-Server → Scopes |
+| `unauthorized_client` | OAuth Server-to-Server not enabled for the credential | Confirm the credential type in Developer Console |
+| `401 Unauthorized` | Token expired or credentials regenerated | Re-retrieve the client secret |
+| `403 Forbidden` | Missing AEP API association, or product profile not assigned | Add Experience Platform API to the project; verify Admin Console product-profile assignments |
 
-### Checklist
+After permission changes in Admin Console, allow **5–10 minutes** for propagation before retrying.
 
-- [ ] ORG_ID ends with `@AdobeOrg`
-- [ ] Both CJA API and Experience Platform API added to project
-- [ ] OAuth Server-to-Server authentication selected (not JWT)
-- [ ] SCOPES copied exactly from Developer Console
-- [ ] Service account assigned to product profiles in Admin Console
+### Setup checklist
+
+- [ ] `ORG_ID` ends with `@AdobeOrg`
+- [ ] Both **Customer Journey Analytics** and **Experience Platform API** added to the project
+- [ ] OAuth Server-to-Server credential created
+- [ ] `SCOPES` copied verbatim from the Developer Console
+- [ ] Service account assigned to CJA product profile with Data View read access
+- [ ] Service account assigned to an AEP product profile (required even for CJA-only use)
+
+### Security
+
+- Never commit `.env`, `config.json`, or any credential file. The repo's `.gitignore` already covers these.
+- Rotate the client secret periodically via Developer Console.
+- Use the minimum product-profile permissions required.
 
 ## CLI Mode
 
