@@ -30,6 +30,7 @@ from .formatters import (
 )
 from .models import ActionType, AuditLogQuery, ComponentType
 from .monitor import AuditLogMonitor
+from .notifications import NotificationManager
 from .stats import build_date_range_query, calculate_stats, generate_report
 
 console = Console()
@@ -678,14 +679,25 @@ def monitor(
             rule_count = len(alert_engine.rules)
             console.print(f"[dim]Alert detection enabled with {rule_count} rules[/dim]")
 
-        monitor_instance = AuditLogMonitor(
-            client,
-            console=console,
-            interval=interval,
-            alert_engine=alert_engine,
-        )
+        with NotificationManager(settings.notifications) as nm:
+            if nm.is_configured():
+                channel_summary = []
+                if settings.notifications.slack_webhook_url:
+                    channel_summary.append("Slack")
+                if settings.notifications.webhooks:
+                    channel_summary.append(f"{len(settings.notifications.webhooks)} webhook(s)")
+                console.print(
+                    f"[dim]Notification channels: {', '.join(channel_summary)}[/dim]"
+                )
 
-        monitor_instance.start(duration=duration)
+            monitor_instance = AuditLogMonitor(
+                client,
+                console=console,
+                interval=interval,
+                alert_engine=alert_engine,
+                notification_manager=nm,
+            )
+            monitor_instance.start(duration=duration)
 
     except AuthenticationError as e:
         console.print(f"[red]Authentication error:[/red] {e}")
@@ -919,56 +931,58 @@ def tail(
         if alerts:
             alert_engine = AlertEngine(settings.alert_rules or None)
 
-        monitor_instance = AuditLogMonitor(
-            client,
-            console=console,
-            interval=interval,
-            alert_engine=alert_engine,
-        )
+        with NotificationManager(settings.notifications) as nm:
+            monitor_instance = AuditLogMonitor(
+                client,
+                console=console,
+                interval=interval,
+                alert_engine=alert_engine,
+                notification_manager=nm,
+            )
 
-        # Set up filters
-        actions_filter = parse_actions(action) if action else None
-        action_values = {item.value for item in actions_filter} if actions_filter else None
+            # Set up filters
+            actions_filter = parse_actions(action) if action else None
+            action_values = {item.value for item in actions_filter} if actions_filter else None
 
-        # Override get_new_entries to apply filters
-        original_get_new = monitor_instance._get_new_entries
+            # Override get_new_entries to apply filters
+            original_get_new = monitor_instance._get_new_entries
 
-        def filtered_get_new() -> list:
-            entries = original_get_new()
-            filtered = entries
+            def filtered_get_new() -> list:
+                entries = original_get_new()
+                filtered = entries
 
+                if user:
+                    from .utils import get_user_identifier
+                    filtered = [
+                        e for e in filtered
+                        if e.user_id == user or e.user_email == user
+                        or get_user_identifier(e) == user
+                    ]
+
+                if component_id:
+                    filtered = [e for e in filtered if e.component_id == component_id]
+
+                if action_values:
+                    filtered = [e for e in filtered if e.action in action_values]
+
+                return filtered
+
+            monitor_instance._get_new_entries = filtered_get_new  # type: ignore
+
+            filters_desc = []
             if user:
-                from .utils import get_user_identifier
-                filtered = [
-                    e for e in filtered
-                    if e.user_id == user or e.user_email == user
-                    or get_user_identifier(e) == user
-                ]
-
+                filters_desc.append(f"user={user}")
             if component_id:
-                filtered = [e for e in filtered if e.component_id == component_id]
+                filters_desc.append(f"component={component_id}")
+            if action:
+                filters_desc.append(f"actions={','.join(action)}")
 
-            if action_values:
-                filtered = [e for e in filtered if e.action in action_values]
+            filter_str = f" [dim]({', '.join(filters_desc)})[/dim]" if filters_desc else ""
 
-            return filtered
+            console.print(f"[green]Tailing audit logs{filter_str}[/green]")
+            console.print(f"[dim]Polling every {interval}s, Ctrl+C to stop[/dim]\n")
 
-        monitor_instance._get_new_entries = filtered_get_new  # type: ignore
-
-        filters_desc = []
-        if user:
-            filters_desc.append(f"user={user}")
-        if component_id:
-            filters_desc.append(f"component={component_id}")
-        if action:
-            filters_desc.append(f"actions={','.join(action)}")
-
-        filter_str = f" [dim]({', '.join(filters_desc)})[/dim]" if filters_desc else ""
-
-        console.print(f"[green]Tailing audit logs{filter_str}[/green]")
-        console.print(f"[dim]Polling every {interval}s, Ctrl+C to stop[/dim]\n")
-
-        monitor_instance.start()
+            monitor_instance.start()
 
     except AuthenticationError as e:
         console.print(f"[red]Authentication error:[/red] {e}")

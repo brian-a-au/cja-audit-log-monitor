@@ -13,6 +13,7 @@ from .alerts import AlertEngine
 from .client import AuditLogsClient
 from .formatters import get_action_color
 from .models import AuditLogEntry, AuditLogQuery
+from .notifications import NotificationManager
 from .utils import get_user_identifier
 
 logger = logging.getLogger(__name__)
@@ -30,6 +31,7 @@ class AuditLogMonitor:
         console: Console | None = None,
         interval: int = 60,
         alert_engine: AlertEngine | None = None,
+        notification_manager: NotificationManager | None = None,
     ) -> None:
         """Initialize the monitor.
 
@@ -38,11 +40,13 @@ class AuditLogMonitor:
             console: Rich console for output.
             interval: Polling interval in seconds.
             alert_engine: Optional alert engine for suspicious activity detection.
+            notification_manager: Optional notification manager for external delivery.
         """
         self.client = client
         self.console = console or Console()
         self.interval = interval
         self.alert_engine = alert_engine
+        self.notification_manager = notification_manager
         self._running = False
         self._last_seen_id: str | None = None
         self._last_seen_timestamp: datetime | None = None
@@ -132,15 +136,25 @@ class AuditLogMonitor:
 
     def _handle_entry(self, entry: AuditLogEntry) -> None:
         """Handle a new audit log entry."""
-        # Check alerts
         if self.alert_engine:
             for fa in self.alert_engine.check_entry(entry):
                 self.console.print(fa.panel)
+                if self.notification_manager and self.notification_manager.is_configured():
+                    try:
+                        self.notification_manager.notify_alert(
+                            fa.rule_name, fa.message, fa.entry
+                        )
+                    except Exception:
+                        logger.exception(
+                            "Notification dispatch failed for rule %s", fa.rule_name
+                        )
+            if self.notification_manager:
+                warning = self.notification_manager.pop_first_failure()
+                if warning:
+                    self.console.print(f"[yellow]{warning}[/yellow]")
 
-        # Display entry
         self._display_entry(entry)
 
-        # Call custom callback
         if self._on_new_entry:
             self._on_new_entry(entry)
 

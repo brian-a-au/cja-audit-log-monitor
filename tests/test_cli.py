@@ -584,6 +584,37 @@ class TestTailCommand:
         )
         assert result.exit_code == 0
 
+    def test_tail_command_constructs_notification_manager(
+        self, monkeypatch
+    ) -> None:
+        """`cja-audit cli tail` opens NotificationManager as a `with` block."""
+        runner = CliRunner()
+        fake_nm = MagicMock()
+        fake_nm.__enter__ = MagicMock(return_value=fake_nm)
+        fake_nm.__exit__ = MagicMock(return_value=False)
+        fake_nm.is_configured.return_value = False
+
+        fake_settings = MagicMock()
+        fake_settings.notifications = MagicMock()
+        fake_settings.alert_rules = []
+        fake_settings.notifications.slack_webhook_url = None
+        fake_settings.notifications.webhooks = []
+
+        with patch("cja_audit.cli.get_client") as gc, \
+             patch("cja_audit.cli.NotificationManager", return_value=fake_nm), \
+             patch("cja_audit.cli.AuditLogMonitor") as mon_cls:
+            gc.return_value = (MagicMock(), fake_settings)
+            mon = MagicMock()
+            mon_cls.return_value = mon
+
+            # Make start() exit immediately so the test doesn't hang
+            mon.start.side_effect = KeyboardInterrupt()
+
+            runner.invoke(main, ["cli", "tail", "--no-alerts"])
+
+        fake_nm.__enter__.assert_called_once()
+        fake_nm.__exit__.assert_called_once()
+
 
 class TestTuiCommand:
     """Tests for TUI command."""
@@ -593,3 +624,38 @@ class TestTuiCommand:
         result = runner.invoke(main, ["tui", "--help"])
         assert result.exit_code == 0
         assert "Launch the TUI interface" in result.output
+
+
+class TestMonitorCommand:
+    """Tests for monitor command NotificationManager wiring."""
+
+    def test_monitor_command_constructs_notification_manager(
+        self, monkeypatch
+    ) -> None:
+        """`cja-audit cli monitor` opens NotificationManager as a `with` block."""
+        runner = CliRunner()
+        fake_nm = MagicMock()
+        fake_nm.__enter__ = MagicMock(return_value=fake_nm)
+        fake_nm.__exit__ = MagicMock(return_value=False)
+        fake_nm.is_configured.return_value = False
+
+        fake_settings = MagicMock()
+        fake_settings.notifications = MagicMock()
+        fake_settings.alert_rules = []
+        fake_settings.notifications.slack_webhook_url = None
+        fake_settings.notifications.webhooks = []
+
+        with patch("cja_audit.cli.get_client") as gc, \
+             patch("cja_audit.cli.NotificationManager", return_value=fake_nm), \
+             patch("cja_audit.cli.AuditLogMonitor") as mon_cls:
+            gc.return_value = (MagicMock(), fake_settings)
+            mon = MagicMock()
+            mon_cls.return_value = mon
+
+            # Make start() exit immediately so the test doesn't hang
+            mon.start.side_effect = KeyboardInterrupt()
+
+            runner.invoke(main, ["cli", "monitor", "--no-alerts"])
+
+        fake_nm.__enter__.assert_called_once()
+        fake_nm.__exit__.assert_called_once()

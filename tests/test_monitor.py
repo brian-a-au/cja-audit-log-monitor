@@ -179,3 +179,61 @@ class TestAuditLogMonitor:
 
         assert pages_requested == [0, 1]
         assert [entry.id for entry in new_entries] == ["entry-1", "entry-2", "entry-3"]
+
+    def test_handle_entry_dispatches_to_notification_manager(
+        self, sample_audit_entry
+    ) -> None:
+        """AuditLogMonitor._handle_entry calls notify_alert for each FiredAlert."""
+        from cja_audit.alerts import FiredAlert
+
+        fa = FiredAlert(rule_name="r", message="m", entry=sample_audit_entry, panel=MagicMock())
+        fake_engine = MagicMock()
+        fake_engine.check_entry.return_value = [fa]
+        fake_nm = MagicMock()
+        fake_nm.is_configured.return_value = True
+        fake_nm.pop_first_failure.return_value = None
+
+        client = MagicMock()
+        monitor = AuditLogMonitor(
+            client=client,
+            alert_engine=fake_engine,
+            notification_manager=fake_nm,
+        )
+
+        monitor._handle_entry(sample_audit_entry)
+        fake_nm.notify_alert.assert_called_once_with("r", "m", sample_audit_entry)
+
+    def test_handle_entry_works_without_notification_manager(
+        self, sample_audit_entry
+    ) -> None:
+        """AuditLogMonitor._handle_entry behavior unchanged when notification_manager is None."""
+        from cja_audit.alerts import FiredAlert
+
+        fa = FiredAlert(rule_name="r", message="m", entry=sample_audit_entry, panel=MagicMock())
+        fake_engine = MagicMock()
+        fake_engine.check_entry.return_value = [fa]
+        client = MagicMock()
+        monitor = AuditLogMonitor(client=client, alert_engine=fake_engine)
+        monitor._handle_entry(sample_audit_entry)  # must not raise
+
+    def test_handle_entry_suppresses_dispatch_exceptions(
+        self, sample_audit_entry
+    ) -> None:
+        """An exception inside notify_alert does NOT prevent _handle_entry from completing."""
+        from cja_audit.alerts import FiredAlert
+
+        fa = FiredAlert(rule_name="r", message="m", entry=sample_audit_entry, panel=MagicMock())
+        fake_engine = MagicMock()
+        fake_engine.check_entry.return_value = [fa]
+        fake_nm = MagicMock()
+        fake_nm.is_configured.return_value = True
+        fake_nm.notify_alert.side_effect = RuntimeError("boom")
+        fake_nm.pop_first_failure.return_value = None
+        client = MagicMock()
+        monitor = AuditLogMonitor(
+            client=client,
+            alert_engine=fake_engine,
+            notification_manager=fake_nm,
+        )
+        # Must not raise
+        monitor._handle_entry(sample_audit_entry)
