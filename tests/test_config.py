@@ -178,3 +178,21 @@ class TestCreateDefaultConfig:
             result = create_default_config(config_path)
 
             assert result == config_path
+
+    def test_default_config_template_includes_notifications_block(self, tmp_path: Path) -> None:
+        """create_default_config writes a commented notifications: example."""
+        config_file = tmp_path / "config.yaml"
+        create_default_config(config_file)
+        text = config_file.read_text()
+
+        assert "# notifications:" in text
+        assert "slack_webhook_url" in text
+        assert "webhooks:" in text
+
+
+def test_settings_no_top_level_slack_field() -> None:
+    """The dead top-level slack_webhook_url field has been removed."""
+    s = CJASettings()
+    assert not hasattr(s, "slack_webhook_url"), (
+        "Top-level slack_webhook_url is dead — use settings.notifications.slack_webhook_url"
+    )
