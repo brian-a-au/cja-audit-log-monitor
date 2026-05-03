@@ -147,6 +147,8 @@ From the project's **OAuth Server-to-Server** credentials page:
 
 > **Copy `SCOPES` exactly as Developer Console displays them.** Adding, removing, or reordering scopes causes `invalid_scope` errors.
 
+> **Important:** Keep these credentials secure. Never commit them to version control.
+
 ### 3. Configure the tool
 
 ```bash
