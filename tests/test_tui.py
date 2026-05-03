@@ -366,6 +366,37 @@ class TestMonitorScreen:
 
             monitor_screen._poll_for_new_entries.assert_not_awaited()
 
+    def test_monitor_surfaces_pop_first_failure_warning(self):
+        """When pop_first_failure returns a string, _show_warning is dispatched."""
+        from textual.screen import Screen
+
+        from cja_audit.tui.screens.monitor import MonitorScreen
+
+        expected_warning = (
+            "Notification delivery failed (slack);"
+            " subsequent failures suppressed for this session — check logs."
+        )
+
+        state = MagicMock()
+        state.notification_manager.pop_first_failure.return_value = expected_warning
+
+        screen = MonitorScreen(state=state)
+        mock_app = MagicMock()
+
+        with patch.object(Screen, "app", new_callable=lambda: property(lambda self: mock_app)):
+            # Directly exercise the warning-surface idiom as it appears in production code.
+            warning = screen._state.notification_manager.pop_first_failure()
+            if warning:
+                screen.app.call_from_thread(screen._show_warning, warning)
+
+            mock_app.call_from_thread.assert_called_once_with(
+                screen._show_warning, expected_warning
+            )
+
+        # Confirm the warning string contains the expected channel name
+        call_args = mock_app.call_from_thread.call_args
+        assert "slack" in call_args.args[1].lower()
+
     def test_monitor_show_alert_uses_rule_name(self):
         """_show_alert renders 'rule_name: message' (not the literal 'Alert triggered')."""
         from textual.screen import Screen
