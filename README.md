@@ -132,6 +132,8 @@ Authentication uses **OAuth Server-to-Server** (Adobe's current standard). Setup
 
 Your project should now show **two APIs** sharing the same OAuth credentials.
 
+> **Tip:** Copy your scopes *after* adding both the CJA and AEP APIs. The Developer Console aggregates scopes from all APIs in your project, so copying before both are added may give you an incomplete set.
+
 ### 2. Collect credentials
 
 From the project's **OAuth Server-to-Server** credentials page:
