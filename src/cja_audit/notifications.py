@@ -29,6 +29,8 @@ class NotificationManager:
         """
         self.config = config or NotificationConfig()
         self._client: httpx.Client | None = None
+        self._failure_warned: dict[str, bool] = {}
+        self._pending_warnings: list[str] = []
 
     @property
     def client(self) -> httpx.Client:
@@ -48,6 +50,19 @@ class NotificationManager:
 
     def __exit__(self, *args: Any) -> None:
         self.close()
+
+    def _mark_failure(self, channel_key: str, label: str) -> None:
+        """Record a delivery failure; queue a warning if it's the first this session."""
+        if not self._failure_warned.get(channel_key):
+            self._failure_warned[channel_key] = True
+            self._pending_warnings.append(
+                f"Notification delivery failed ({label}); "
+                f"subsequent failures suppressed for this session — check logs."
+            )
+
+    def _mark_success(self, channel_key: str) -> None:
+        """Clear failure flag so the next failure surfaces again."""
+        self._failure_warned.pop(channel_key, None)
 
     def _build_alert_payload(
         self,
@@ -202,10 +217,12 @@ class NotificationManager:
             )
             response.raise_for_status()
             logger.info("Webhook notification sent to %s", webhook.url)
+            self._mark_success(webhook.url)
             return True
 
         except httpx.HTTPError as e:
             logger.error("Failed to send webhook to %s: %s", webhook.url, e)
+            self._mark_failure(webhook.url, webhook.url)
             return False
 
     def send_slack(
@@ -237,10 +254,12 @@ class NotificationManager:
             )
             response.raise_for_status()
             logger.info("Slack notification sent")
+            self._mark_success("slack")
             return True
 
         except httpx.HTTPError as e:
             logger.error("Failed to send Slack notification: %s", e)
+            self._mark_failure("slack", "slack")
             return False
 
     def notify_alert(
@@ -334,6 +353,17 @@ class NotificationManager:
                 logger.error("Failed to send Slack anomaly notification: %s", e)
 
         return sent
+
+    def pop_first_failure(self) -> str | None:
+        """Return and consume the next pending failure warning, or None.
+
+        Returns:
+            Warning string the first time per-session per-channel a failure occurred,
+            otherwise None. Call after each notify_alert / notify_anomaly batch.
+        """
+        if self._pending_warnings:
+            return self._pending_warnings.pop(0)
+        return None
 
     def is_configured(self) -> bool:
         """Check if any notification channels are configured.
