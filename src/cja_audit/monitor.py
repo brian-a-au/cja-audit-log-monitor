@@ -134,9 +134,8 @@ class AuditLogMonitor:
         """Handle a new audit log entry."""
         # Check alerts
         if self.alert_engine:
-            alerts = self.alert_engine.check_entry(entry)
-            for alert in alerts:
-                self.console.print(alert)
+            for fa in self.alert_engine.check_entry(entry):
+                self.console.print(fa.panel)
 
         # Display entry
         self._display_entry(entry)

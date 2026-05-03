@@ -1068,12 +1068,12 @@ def alerts_test(ctx: click.Context, days: int) -> None:
             return
 
         # Check all entries
-        alert_panels = engine.check_batch(entries)
+        fired = engine.check_batch(entries)
 
-        if alert_panels:
-            console.print(f"[yellow bold]Found {len(alert_panels)} alerts:[/yellow bold]\n")
-            for panel in alert_panels:
-                console.print(panel)
+        if fired:
+            console.print(f"[yellow bold]Found {len(fired)} alerts:[/yellow bold]\n")
+            for fa in fired:
+                console.print(fa.panel)
         else:
             console.print("[green]No alerts triggered.[/green]")
 

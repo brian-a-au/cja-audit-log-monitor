@@ -3,16 +3,12 @@
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
 
-from ..alerts import AlertEngine
+from ..alerts import AlertEngine, FiredAlert
 from ..auth import TokenManager
 from ..client import AuditLogsClient
 from ..config import CJASettings, get_config_path, load_config
 from ..models import ActionType, AuditLogEntry, AuditLogQuery, ComponentType
-
-if TYPE_CHECKING:
-    from rich.panel import Panel
 
 
 @dataclass
@@ -90,7 +86,7 @@ class AppState:
         self.monitor = MonitorState()
 
         # Alerts
-        self.recent_alerts: list[Panel] = []
+        self.recent_alerts: list[FiredAlert] = []
 
         # Connection state
         self.is_connected: bool = False
@@ -178,20 +174,20 @@ class AppState:
         self.last_refresh = datetime.now()
         return self.entries, self.total_entries
 
-    def check_alerts(self, entries: list[AuditLogEntry]) -> list["Panel"]:
+    def check_alerts(self, entries: list[AuditLogEntry]) -> list[FiredAlert]:
         """Check entries against alert rules.
 
         Args:
             entries: List of audit log entries to check.
 
         Returns:
-            List of triggered alert panels.
+            List of FiredAlert objects for triggered rules.
         """
-        alerts = self.alert_engine.check_batch(entries)
-        self.recent_alerts.extend(alerts)
+        fired = self.alert_engine.check_batch(entries)
+        self.recent_alerts.extend(fired)
         # Keep only last 50 alerts
         self.recent_alerts = self.recent_alerts[-50:]
-        return alerts
+        return fired
 
     def close(self) -> None:
         """Clean up resources."""
