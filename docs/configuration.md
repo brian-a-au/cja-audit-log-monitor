@@ -51,13 +51,13 @@ cp .env.example .env
 
 `.env` is gitignored. Never commit credentials.
 
-## 4. (Optional) Create a config file for alert rules
+## 4. (Optional) Create a config file for alert rules and notification channels
 
 ```bash
 uv run cja-audit cli init
 ```
 
-Writes `~/.cja-audit/config.yaml` with default alert rules and preferences. Environment variables always take precedence over the config file. See [Alert Rules](alert-rules.md) for the schema.
+Writes `~/.cja-audit/config.yaml` with default alert rules and a commented `notifications:` example block (Slack + webhooks). Environment variables always take precedence over the config file. See [Alert Rules](alert-rules.md) for rule schema and [Delivery channels](alert-rules.md#delivery-channels) for notification config.
 
 ## 5. Verify
 

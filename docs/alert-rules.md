@@ -60,3 +60,36 @@ Or open the [Alerts screen](screens/alerts.md) in the TUI and click `Test Rules`
 - **Toggle, don't delete** — the [Alerts screen](screens/alerts.md) lets you enable/disable rules per session without touching YAML, useful during planned change windows where one rule would otherwise be noisy.
 - **Off-hours rules need timezone awareness** — by default, "off-hours" thresholds are evaluated against UTC timestamps; tune `threshold_count` accordingly if your org concentrates in a single business region.
 - **Start with the bundled defaults** — they're tuned to surface real signal (bulk deletes, sensitive exports, anomalous volume) without flooding the alert summary.
+
+## Delivery channels
+
+Fired alerts can optionally be delivered to external channels via the `notifications:` block in `~/.cja-audit/config.yaml`.
+
+```yaml
+notifications:
+  slack_webhook_url: https://hooks.slack.com/services/XXX/YYY/ZZZ
+  notify_on_alerts: true
+  notify_on_anomalies: true   # config-honored; anomaly delivery not implemented in this scope
+  webhooks:
+    - url: https://example.com/webhook
+      enabled: true
+      method: POST
+      headers:
+        Authorization: Bearer your-token
+      timeout: 30
+      include_entry_details: true
+```
+
+| Field | Purpose |
+|---|---|
+| `slack_webhook_url` | Slack incoming webhook URL. One per org. |
+| `notify_on_alerts` | Master toggle for rule-based alert delivery. Default `true`. |
+| `notify_on_anomalies` | Reserved — anomaly delivery is not wired in the current scope. Default `true`. |
+| `webhooks[].url` | Webhook target. Multiple supported. |
+| `webhooks[].enabled` | Per-webhook toggle. Default `true`. |
+| `webhooks[].method` | HTTP method. Default `POST`. |
+| `webhooks[].headers` | Custom headers (e.g. `Authorization`). |
+| `webhooks[].timeout` | Request timeout in seconds. Default `30`. |
+| `webhooks[].include_entry_details` | Include the audit entry in the payload. Default `true`. |
+
+Both the [Real-Time Monitor screen](screens/monitor.md) and the CLI's `cja-audit cli monitor` / `tail` dispatch to all configured channels when a rule fires. The first delivery failure per channel per session surfaces a one-time warning; subsequent failures are suppressed until the channel recovers (logs always record every failure).

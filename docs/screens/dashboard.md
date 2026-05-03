@@ -10,7 +10,7 @@ The Dashboard is the home screen of the TUI — your at-a-glance situational vie
 - **Stat cards**: total entries pulled, the date range covered, count of active users, and a count of recent anomalies (highlighted in warning color when non-zero).
 - **Action distribution chart**: a horizontal bar chart of the top eight action types (CREATE / EDIT / DELETE / SHARE / EXPORT / etc.), color-coded to match the rest of the TUI.
 - **Top 5 active users**: the most active accounts in the last 7 days with their action counts.
-- **Recent anomalies**: up to five auto-detected unusual patterns (bulk deletes, off-hours activity, exports) flagged from the same window.
+- **Recent anomalies**: up to five auto-detected unusual patterns (bulk deletes, off-hours activity, exports) flagged from the same window. Anomalies surface in the TUI only — they aren't dispatched to Slack/webhooks. External delivery is wired for rule-based alerts (see [Real-Time Monitor](monitor.md) and [Alert Rules](../alert-rules.md#delivery-channels)).
 - **Last updated** timestamp and a `refresh` button.
 
 ## What you can do
