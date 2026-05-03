@@ -4,16 +4,25 @@ A powerful TUI (Text User Interface) application for monitoring and analyzing Ad
 
 ## Quick Start
 
-```bash
-# Install
-uv pip install -e .
+> Prefix commands with `uv run` (e.g. `uv run cja-audit`), or activate the venv first (`source .venv/bin/activate`) and run them directly.
 
-# Configure credentials
+```bash
+# 1. Clone
+git clone https://github.com/brian-a-au/cja_audit_log_monitor
+cd cja_audit_log_monitor
+
+# 2. Install uv (skip if you already have it)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# 3. Sync the project (creates .venv/ and installs all dependencies)
+uv sync --all-extras
+
+# 4. Configure credentials
 cp .env.example .env
 # Edit .env with your Adobe credentials
 
-# Launch the TUI
-cja-audit
+# 5. Launch the TUI
+uv run cja-audit
 ```
 
 That's it! The interactive TUI will launch with a dashboard showing your audit log activity.
@@ -88,24 +97,36 @@ View connection status, API configuration, and application settings.
 
 ## Installation
 
-### Using uv (Recommended)
+### 1. Clone the repository
 
 ```bash
-# Clone or navigate to the project directory
+git clone https://github.com/brian-a-au/cja_audit_log_monitor
 cd cja_audit_log_monitor
-
-# Install in development mode
-uv pip install -e .
-
-# Or run directly without installing
-uv run cja-audit
 ```
 
-### Using pip
+### 2. Install uv
+
+[`uv`](https://docs.astral.sh/uv/) is the project's package and environment manager. Pick whichever path is convenient:
 
 ```bash
-pip install -e .
+# macOS / Linux (recommended)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Or via pip on any platform
+pip install uv
 ```
+
+### 3. Sync the project
+
+```bash
+# Runtime only
+uv sync
+
+# Or include dev tools (pytest, ruff)
+uv sync --all-extras
+```
+
+This creates `.venv/` and installs all locked dependencies from `uv.lock`. Run commands with `uv run cja-audit ...` or activate the venv (`source .venv/bin/activate`) and call `cja-audit` directly.
 
 ## Configuration
 
@@ -338,13 +359,13 @@ alert_rules:
 
 ```bash
 # Install with dev dependencies
-uv pip install -e ".[dev]"
+uv sync --all-extras
 
 # Run tests
-pytest
+uv run pytest
 
 # Run linting
-ruff check src tests
+uv run ruff check src tests
 ```
 
 ## API Reference
