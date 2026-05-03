@@ -11,6 +11,7 @@ from textual.widget import Widget
 from textual.widgets import Button, Input, Label, LoadingIndicator, Static
 from textual.worker import Worker
 
+from ...formatters import resolve_tcss_markup
 from ...models import AuditLogQuery
 from ..state import AppState
 from ..widgets import AlertSummary, LogTable
@@ -64,7 +65,7 @@ class MonitorScreen(Screen):
         )
 
         status = Horizontal(
-            Static("● Stopped", id="status-indicator"),
+            Static(resolve_tcss_markup("[$danger]● stopped[/$danger]"), id="status-indicator"),
             Static("", id="stats-info"),
             id="monitor-status",
             classes="monitor-stopped",
@@ -73,9 +74,9 @@ class MonitorScreen(Screen):
         yield Container(
             controls,
             status,
-            Static("[bold]Live Log Stream[/bold]"),
+            Static("LIVE LOG STREAM", classes="section-label"),
             LogTable(id="monitor-log", show_details=False),
-            Static("[bold]Alerts[/bold]"),
+            Static("ALERTS", classes="section-label"),
             AlertSummary(id="alert-summary"),
             LoadingIndicator(id="loading"),
             id="monitor-container",
@@ -139,7 +140,9 @@ class MonitorScreen(Screen):
         status_container = self.query_one("#monitor-status")
         status_container.remove_class("monitor-stopped")
         status_container.add_class("monitor-running")
-        self.query_one("#status-indicator", Static).update("[green]● Running[/green]")
+        self.query_one("#status-indicator", Static).update(
+            resolve_tcss_markup("[$success]● running[/$success]")
+        )
 
         # Clear log table
         self.query_one("#monitor-log", LogTable).clear()
@@ -170,7 +173,9 @@ class MonitorScreen(Screen):
         status_container = self.query_one("#monitor-status")
         status_container.remove_class("monitor-running")
         status_container.add_class("monitor-stopped")
-        self.query_one("#status-indicator", Static).update("[red]● Stopped[/red]")
+        self.query_one("#status-indicator", Static).update(
+            resolve_tcss_markup("[$danger]● stopped[/$danger]")
+        )
 
     async def _monitoring_loop(self) -> None:
         """Main monitoring loop."""

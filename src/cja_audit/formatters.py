@@ -11,27 +11,94 @@ from rich.text import Text
 from .models import ActionType, AuditLogEntry
 from .utils import get_user_identifier
 
-# Color mapping for action types
+# Severity color tokens (matching tui/styles.tcss)
+# - $danger:     destructive
+# - $warning:    sensitive
+# - $success:    safe
+# - $text-muted: neutral / unknown
+
+# tcss-token resolution rule:
+# - Textual `Static.update` accepts tcss tokens (`[$success]…[/$success]`) natively.
+# - Rich (used by the CLI and by `DataTable.default_cell_formatter`) does NOT.
+# - For consistency and defense-in-depth, every markup string passed to either
+#   path goes through `resolve_tcss_markup()` so callers don't have to remember
+#   which renderer is downstream. The helper is a no-op on hex/named-color markup.
+
+# Hex equivalents for tcss design tokens.
+# Used to translate [$token] markup into Rich-parseable [#hex] markup.
+TCSS_TOKEN_HEX: dict[str, str] = {
+    "$danger": "#e07a7a",
+    "$warning": "#e8c547",
+    "$success": "#7fc896",
+    "$text-muted": "#6e7480",
+    "$text-strong": "#e8e8e8",
+    "$text": "#c8ccd4",
+    "$primary": "#6db0d6",
+}
+
+
+def resolve_tcss_markup(s: str) -> str:
+    """Replace [$token] / [/$token] with hex equivalents so Rich can parse them."""
+    out = s
+    for token, hex_value in TCSS_TOKEN_HEX.items():
+        out = out.replace(f"[{token}]", f"[{hex_value}]").replace(
+            f"[/{token}]", f"[/{hex_value}]"
+        )
+    return out
+
+
 ACTION_COLORS = {
-    ActionType.CREATE.value: "green",
-    ActionType.DELETE.value: "red",
-    ActionType.EDIT.value: "yellow",
-    ActionType.EXPORT.value: "cyan",
-    ActionType.SHARE.value: "blue",
-    ActionType.UNSHARE.value: "magenta",
-    ActionType.APPROVE.value: "green",
-    ActionType.UNAPPROVE.value: "yellow",
-    ActionType.TRANSFER.value: "blue",
-    ActionType.EMBARGO.value: "red",
-    ActionType.REFRESH.value: "cyan",
-    ActionType.ORG_CHANGE.value: "magenta",
-    ActionType.API_REQUEST.value: "dim",
+    ActionType.DELETE.value: "$danger",
+    ActionType.EMBARGO.value: "$danger",
+    ActionType.EXPORT.value: "$warning",
+    ActionType.SHARE.value: "$warning",
+    ActionType.UNSHARE.value: "$warning",
+    ActionType.TRANSFER.value: "$warning",
+    ActionType.CREATE.value: "$success",
+    ActionType.APPROVE.value: "$success",
+    ActionType.EDIT.value: "$text-muted",
+    ActionType.REFRESH.value: "$text-muted",
+    ActionType.API_REQUEST.value: "$text-muted",
+    ActionType.ORG_CHANGE.value: "$text-muted",
+    ActionType.UNAPPROVE.value: "$text-muted",
+}
+
+ACTION_ICONS = {
+    ActionType.DELETE.value: "✕",
+    ActionType.EMBARGO.value: "✕",
+    ActionType.EXPORT.value: "⚠",
+    ActionType.SHARE.value: "⚠",
+    ActionType.UNSHARE.value: "⚠",
+    ActionType.TRANSFER.value: "⚠",
+    ActionType.CREATE.value: "✓",
+    ActionType.APPROVE.value: "✓",
+    ActionType.EDIT.value: "·",
+    ActionType.REFRESH.value: "·",
+    ActionType.API_REQUEST.value: "·",
+    ActionType.ORG_CHANGE.value: "·",
+    ActionType.UNAPPROVE.value: "·",
 }
 
 
 def get_action_color(action: str) -> str:
-    """Get color for an action type."""
-    return ACTION_COLORS.get(action, "white")
+    """Get the action's severity color as a hex value, suitable for Rich and Textual.
+
+    Rich (used by the CLI) does not understand Textual tcss variables, so we
+    resolve the token to its hex value here. Textual's markup parser also
+    accepts hex, so this works for both consumers.
+    """
+    token = ACTION_COLORS.get(action, "$text-muted")
+    return TCSS_TOKEN_HEX.get(token, token)
+
+
+def get_action_color_token(action: str) -> str:
+    """Get the action's severity as a Textual tcss token (`$danger`, etc.)."""
+    return ACTION_COLORS.get(action, "$text-muted")
+
+
+def get_action_icon(action: str) -> str:
+    """Get severity glyph for an action type."""
+    return ACTION_ICONS.get(action, "·")
 
 
 def format_timestamp(dt: datetime | None) -> str:
@@ -76,8 +143,10 @@ def format_logs_table(
         table.add_column("IP", width=15)
 
     for entry in entries:
-        action_text = Text(entry.action or "-")
-        action_text.stylize(get_action_color(entry.action or ""))
+        action_str = entry.action or "-"
+        icon = get_action_icon(action_str)
+        action_text = Text(f"{icon} {action_str}")
+        action_text.stylize(get_action_color(action_str))
 
         row = [
             format_timestamp(entry.timestamp),
@@ -102,9 +171,10 @@ def format_single_entry(entry: AuditLogEntry) -> Panel:
     """Format a single audit log entry as a detailed panel."""
     action_color = get_action_color(entry.action or "")
 
+    icon = get_action_icon(entry.action or "")
     content = Text()
     content.append("Action: ", style="bold")
-    content.append(f"{entry.action}\n", style=action_color)
+    content.append(f"{icon} {entry.action}\n", style=action_color)
 
     content.append("Timestamp: ", style="bold")
     content.append(f"{format_timestamp(entry.timestamp)}\n")
@@ -210,11 +280,12 @@ def format_action_stats_table(action_stats: dict[str, int]) -> Table:
 
     for action, count in sorted(action_stats.items(), key=lambda x: -x[1]):
         color = get_action_color(action)
+        icon = get_action_icon(action)
         pct = count / total * 100
         bar_width = int(count / max_count * 20)
         bar = "█" * bar_width
 
-        action_text = Text(action, style=color)
+        action_text = Text(f"{icon} {action}", style=color)
         bar_text = Text(f"{bar} {pct:.1f}%", style=color)
 
         table.add_row(action_text, f"{count:,}", bar_text)
@@ -239,7 +310,8 @@ def format_alert(
 
     content.append("Action: ", style="bold")
     action_color = get_action_color(entry.action or "")
-    content.append(f"{entry.action}\n", style=action_color)
+    action_icon = get_action_icon(entry.action or "")
+    content.append(f"{action_icon} {entry.action}\n", style=action_color)
 
     content.append("Component: ", style="bold")
     content.append(f"{entry.component_type} - {entry.component_name or entry.component_id}\n")

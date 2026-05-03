@@ -4,13 +4,14 @@ from collections.abc import Iterator
 
 from textual.app import ComposeResult
 from textual.containers import Container, Horizontal
+from textual.css.query import NoMatches
 from textual.screen import Screen
 from textual.widget import Widget
 from textual.widgets import Button, Label, LoadingIndicator, Static
 from textual.worker import get_current_worker
 
 from ...models import ActionType, ComponentType
-from ..modals import EntryDetailModal
+from ..modals import EntryDetailPanel
 from ..state import AppState
 from ..widgets import FilterBar, LogTable
 
@@ -19,9 +20,10 @@ class LogBrowserScreen(Screen):
     """Screen for browsing and filtering audit logs."""
 
     BINDINGS = [
-        ("enter", "view_details", "View Details"),
-        ("n", "next_page", "Next Page"),
-        ("p", "prev_page", "Prev Page"),
+        ("enter", "view_details", "details"),
+        ("escape", "dismiss_details", "close details"),
+        ("n", "next_page", "next page"),
+        ("p", "prev_page", "prev page"),
     ]
 
     def __init__(self, state: AppState, **kwargs) -> None:
@@ -39,22 +41,25 @@ class LogBrowserScreen(Screen):
         yield from self.compose_content()
 
     def compose_content(self) -> Iterator[Widget]:
-        """Yield widgets for embedding in main content area.
-
-        Yields:
-            Widgets for the log browser content.
-        """
+        """Yield widgets for embedding in main content area."""
         pagination = Horizontal(
-            Button("◀ Prev", id="prev-page"),
-            Label("Page 1 of 1", id="page-info"),
-            Button("Next ▶", id="next-page"),
+            Button("◀ prev", id="prev-page"),
+            Label("page 1 of 1", id="page-info"),
+            Button("next ▶", id="next-page"),
             Static("", id="entry-count"),
             id="pagination",
         )
 
+        # The table sits side-by-side with the (initially hidden) detail panel.
+        table_and_panel = Horizontal(
+            LogTable(id="log-table", show_details=False),
+            EntryDetailPanel(id="entry-detail-panel"),
+            id="log-table-and-panel",
+        )
+
         yield Container(
             FilterBar(id="filter-bar"),
-            LogTable(id="log-table", show_details=False),
+            table_and_panel,
             pagination,
             LoadingIndicator(id="loading"),
             id="log-browser-container",
@@ -162,14 +167,37 @@ class LogBrowserScreen(Screen):
             self.refresh_data()
 
     def action_view_details(self) -> None:
-        """View details of selected entry."""
+        """Toggle the entry detail side panel for the selected row."""
         table = self.query_one("#log-table", LogTable)
         entry = table.get_selected_entry()
+        panel = self.query_one("#entry-detail-panel", EntryDetailPanel)
         if entry:
-            self.app.push_screen(EntryDetailModal(entry))
+            panel.toggle(entry)
         else:
             self.app.notify("No entry selected", severity="warning")
 
     def on_data_table_row_selected(self, event) -> None:
         """Handle DataTable row selection (Enter key)."""
         self.action_view_details()
+
+    def on_data_table_row_highlighted(self, event) -> None:
+        """If the panel is visible, update its content as the cursor moves."""
+        try:
+            panel = self.query_one("#entry-detail-panel", EntryDetailPanel)
+        except NoMatches:
+            return
+        if not panel.is_visible():
+            return
+        table = self.query_one("#log-table", LogTable)
+        entry = table.get_selected_entry()
+        if entry is not None:
+            panel.show_entry(entry)
+
+    def action_dismiss_details(self) -> None:
+        """Hide the entry detail side panel if visible."""
+        try:
+            panel = self.query_one("#entry-detail-panel", EntryDetailPanel)
+        except NoMatches:
+            return
+        if panel.is_visible():
+            panel.hide()

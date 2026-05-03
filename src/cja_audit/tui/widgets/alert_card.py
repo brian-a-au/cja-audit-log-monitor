@@ -2,7 +2,7 @@
 
 from textual.widgets import Static
 
-from ...formatters import format_timestamp
+from ...formatters import format_timestamp, resolve_tcss_markup
 from ...models import AuditLogEntry
 from ...utils import get_user_identifier
 
@@ -25,7 +25,7 @@ class AlertCard(Static):
             entry: Optional related audit log entry.
             **kwargs: Additional arguments for Static.
         """
-        content = f"[bold red]⚠ {alert_name}[/bold red]\n{message}"
+        content = resolve_tcss_markup(f"[$danger]⚠ {alert_name}[/$danger]\n{message}")
         if entry:
             content += (
                 f"\nTime: {format_timestamp(entry.timestamp)}"
@@ -70,5 +70,5 @@ class AlertSummary(Static):
 
         lines = [f"[bold]Recent Alerts ({len(self._alerts)})[/bold]"]
         for name, message in reversed(self._alerts):
-            lines.append(f"  [red]⚠[/red] {name}: {message[:50]}...")
+            lines.append(resolve_tcss_markup(f"  [$danger]⚠[/$danger] {name}: {message[:50]}..."))
         self.update("\n".join(lines))

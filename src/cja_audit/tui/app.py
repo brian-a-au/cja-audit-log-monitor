@@ -2,12 +2,13 @@
 
 from pathlib import Path
 
+from textual import events
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical
 from textual.message import Message
 from textual.screen import Screen
-from textual.widgets import Button, Footer, Header, Static
+from textual.widgets import Footer, Static
 
 from .state import AppState
 
@@ -91,17 +92,17 @@ class CJAAuditApp(App):
     CSS_PATH = "styles.tcss"
 
     BINDINGS = [
-        Binding("d", "switch_screen('dashboard')", "Dashboard"),
-        Binding("l", "switch_screen('logs')", "Logs"),
-        Binding("m", "switch_screen('monitor')", "Monitor"),
-        Binding("s", "switch_screen('stats')", "Stats"),
-        Binding("a", "switch_screen('alerts')", "Alerts"),
-        Binding("c", "switch_screen('settings')", "Config"),
-        Binding("r", "refresh", "Refresh"),
-        Binding("e", "export", "Export"),
-        Binding("slash", "focus_search", "Search"),
-        Binding("question_mark", "show_help", "Help"),
-        Binding("q", "quit", "Quit"),
+        Binding("d", "switch_screen('dashboard')", "dashboard"),
+        Binding("l", "switch_screen('logs')", "logs"),
+        Binding("m", "switch_screen('monitor')", "monitor"),
+        Binding("s", "switch_screen('stats')", "stats"),
+        Binding("a", "switch_screen('alerts')", "alerts"),
+        Binding("c", "switch_screen('settings')", "config"),
+        Binding("r", "refresh", "refresh"),
+        Binding("e", "export", "export"),
+        Binding("slash", "focus_search", "search"),
+        Binding("question_mark", "show_help", "help"),
+        Binding("q", "quit", "quit"),
     ]
 
     def __init__(self, config_path: Path | None = None) -> None:
@@ -115,22 +116,41 @@ class CJAAuditApp(App):
         self._current_screen = "dashboard"
         self._screens: dict[str, Screen] = {}
 
+    NAV_LABELS = {
+        "nav-dashboard": "dashboard",
+        "nav-logs": "logs",
+        "nav-monitor": "monitor",
+        "nav-stats": "stats",
+        "nav-alerts": "alerts",
+        "nav-settings": "config",
+    }
+
     def compose(self) -> ComposeResult:
         """Create child widgets for the app."""
-        yield Header()
+        yield Static(self._status_row_text(), id="status-row")
         yield Horizontal(
             Vertical(
-                Button("Dashboard", id="nav-dashboard", classes="active"),
-                Button("Logs", id="nav-logs"),
-                Button("Monitor", id="nav-monitor"),
-                Button("Stats", id="nav-stats"),
-                Button("Alerts", id="nav-alerts"),
-                Button("Config", id="nav-settings"),
+                Static("NAVIGATE", classes="nav-section-label"),
+                Static("▸ dashboard", id="nav-dashboard", classes="nav-item active"),
+                Static("  logs", id="nav-logs", classes="nav-item"),
+                Static("  monitor", id="nav-monitor", classes="nav-item"),
+                Static("  stats", id="nav-stats", classes="nav-item"),
+                Static("  alerts", id="nav-alerts", classes="nav-item"),
+                Static("  config", id="nav-settings", classes="nav-item"),
                 id="sidebar",
             ),
             Container(id="main-content"),
         )
         yield Footer()
+
+    def _status_row_text(self) -> str:
+        """Build the top status row content."""
+        org = self.state.settings.org_id or "—"
+        return (
+            "cja-audit · "
+            "[$success]●[/$success] connected · "
+            f"[$text-muted]org {org}[/$text-muted]"
+        )
 
     async def on_mount(self) -> None:
         """Handle application mount."""
@@ -164,11 +184,14 @@ class CJAAuditApp(App):
         content = self.query_one("#main-content", Container)
         await content.remove_children()
 
-        # Update navigation button states
-        for button in self.query("#sidebar Button"):
-            button.remove_class("active")
-            if button.id == f"nav-{screen_name}":
-                button.add_class("active")
+        # Update navigation item states (the displayed label may differ from
+        # the screen id — e.g. nav-settings shows "config").
+        for item in self.query("#sidebar .nav-item"):
+            label = self.NAV_LABELS.get(item.id, "")
+            is_active = item.id == f"nav-{screen_name}"
+            item.set_class(is_active, "active")
+            prefix = "▸ " if is_active else "  "
+            item.update(f"{prefix}{label}")
 
         # Mount the screen widget directly so its event handlers and queries work.
         screen = self._screens.get(screen_name)
@@ -179,12 +202,21 @@ class CJAAuditApp(App):
 
         self._current_screen = screen_name
 
-    async def on_button_pressed(self, event: Button.Pressed) -> None:
-        """Handle navigation button presses."""
-        button_id = event.button.id
-        if button_id and button_id.startswith("nav-"):
-            screen_name = button_id.replace("nav-", "")
-            await self._show_screen(screen_name)
+    async def on_click(self, event: events.Click) -> None:
+        """Handle clicks on sidebar nav items.
+
+        Walks ancestors so clicks on any child element of a nav item still
+        navigate, not just clicks on the leaf Static itself.
+        """
+        widget = event.widget
+        if widget is None:
+            return
+        for candidate in widget.ancestors_with_self:
+            candidate_id = getattr(candidate, "id", None)
+            if candidate_id and candidate_id.startswith("nav-"):
+                screen_name = candidate_id.replace("nav-", "")
+                await self._show_screen(screen_name)
+                return
 
     def action_switch_screen(self, screen_name: str) -> None:
         """Switch to a different screen."""

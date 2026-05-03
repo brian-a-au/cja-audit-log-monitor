@@ -9,6 +9,7 @@ from textual.widget import Widget
 from textual.widgets import Button, LoadingIndicator, Static
 from textual.worker import get_current_worker
 
+from ...formatters import resolve_tcss_markup
 from ..state import AppState
 
 
@@ -39,14 +40,14 @@ class SettingsScreen(Screen):
 
         # Connection section
         connection_section = Vertical(
-            Static("[bold]Connection Status[/bold]"),
+            Static("CONNECTION STATUS", classes="section-label"),
             Static(id="connection-status"),
             classes="settings-section",
         )
 
         # API configuration section
         api_section = Vertical(
-            Static("[bold]API Configuration[/bold]"),
+            Static("API CONFIGURATION", classes="section-label"),
             Horizontal(
                 Static("[bold]Config File:[/bold]", classes="settings-label"),
                 Static(str(self._state.config_path), classes="settings-value"),
@@ -69,7 +70,7 @@ class SettingsScreen(Screen):
         org_display = f"{settings.org_id[:12]}..." if settings.org_id else "(not set)"
         client_display = f"{settings.client_id[:12]}..." if settings.client_id else "(not set)"
         auth_section = Vertical(
-            Static("[bold]Authentication[/bold]"),
+            Static("AUTHENTICATION", classes="section-label"),
             Horizontal(
                 Static("[bold]Organization ID:[/bold]", classes="settings-label"),
                 Static(org_display, classes="settings-value"),
@@ -83,7 +84,11 @@ class SettingsScreen(Screen):
             Horizontal(
                 Static("[bold]OAuth Configured:[/bold]", classes="settings-label"),
                 Static(
-                    "[green]Yes[/green]" if settings.is_oauth_configured() else "[red]No[/red]",
+                    resolve_tcss_markup(
+                        "[$success]yes[/$success]"
+                        if settings.is_oauth_configured()
+                        else "[$danger]no[/$danger]"
+                    ),
                     classes="settings-value",
                 ),
                 classes="settings-row",
@@ -93,7 +98,7 @@ class SettingsScreen(Screen):
 
         # Defaults section
         defaults_section = Vertical(
-            Static("[bold]Defaults[/bold]"),
+            Static("DEFAULTS", classes="section-label"),
             Horizontal(
                 Static("[bold]Page Size:[/bold]", classes="settings-label"),
                 Static(str(settings.default_page_size), classes="settings-value"),
@@ -114,7 +119,7 @@ class SettingsScreen(Screen):
 
         # Alert rules section
         alerts_section = Vertical(
-            Static("[bold]Alert Rules[/bold]"),
+            Static("ALERT RULES", classes="section-label"),
             Horizontal(
                 Static("[bold]Configured Rules:[/bold]", classes="settings-label"),
                 Static(str(len(settings.alert_rules)), classes="settings-value"),
@@ -129,7 +134,7 @@ class SettingsScreen(Screen):
         )
 
         yield Container(
-            Static("[bold]Configuration[/bold]", id="settings-title"),
+            Static("configuration", id="settings-title", classes="section-label"),
             connection_section,
             api_section,
             auth_section,
@@ -183,14 +188,18 @@ class SettingsScreen(Screen):
 
         if result.get("connected") and result.get("authenticated"):
             status.update(
-                f"[green]● Connected[/green]\n"
-                f"  Organization: {result.get('org_id', 'Unknown')}\n"
-                f"  API URL: {result.get('api_url', 'Unknown')}\n"
-                f"  Total logs available: {result.get('total_logs_available', 'N/A'):,}"
+                resolve_tcss_markup(
+                    f"[$success]●[/$success] connected\n"
+                    f"  organization: {result.get('org_id', 'Unknown')}\n"
+                    f"  api url: {result.get('api_url', 'Unknown')}\n"
+                    f"  total logs available: {result.get('total_logs_available', 'N/A'):,}"
+                )
             )
         else:
             error = result.get("error", "Unknown error")
-            status.update(f"[red]● Disconnected[/red]\n  Error: {error}")
+            status.update(
+                resolve_tcss_markup(f"[$danger]●[/$danger] disconnected\n  error: {error}")
+            )
 
     def _hide_loading(self) -> None:
         """Hide loading indicator."""
