@@ -237,3 +237,32 @@ class TestAuditLogMonitor:
         )
         # Must not raise
         monitor._handle_entry(sample_audit_entry)
+
+    def test_handle_entry_prints_pop_first_failure_warning(self, sample_audit_entry) -> None:
+        """When pop_first_failure returns a string, console.print emits a yellow-tagged warning."""
+        from cja_audit.alerts import FiredAlert
+
+        fa = FiredAlert(rule_name="r", message="m", entry=sample_audit_entry, panel=MagicMock())
+        fake_engine = MagicMock()
+        fake_engine.check_entry.return_value = [fa]
+        fake_nm = MagicMock()
+        fake_nm.is_configured.return_value = True
+        fake_nm.pop_first_failure.return_value = (
+            "Notification delivery failed (slack);"
+            " subsequent failures suppressed for this session — check logs."
+        )
+
+        fake_console = MagicMock()
+        client = MagicMock()
+        monitor = AuditLogMonitor(
+            client=client,
+            console=fake_console,
+            alert_engine=fake_engine,
+            notification_manager=fake_nm,
+        )
+
+        monitor._handle_entry(sample_audit_entry)
+
+        # Expect console.print called with a [yellow]...[/yellow] formatted warning
+        warning_calls = [c for c in fake_console.print.call_args_list if "yellow" in str(c)]
+        assert warning_calls, "Expected console.print to emit a yellow-tagged warning"
