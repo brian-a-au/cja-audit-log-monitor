@@ -366,6 +366,31 @@ class TestMonitorScreen:
 
             monitor_screen._poll_for_new_entries.assert_not_awaited()
 
+    def test_monitor_show_alert_uses_rule_name(self):
+        """_show_alert renders 'rule_name: message' (not the literal 'Alert triggered')."""
+        from textual.screen import Screen
+
+        from cja_audit.tui.screens.monitor import MonitorScreen
+
+        state = MagicMock()
+        screen = MonitorScreen(state=state)
+        mock_app = MagicMock()
+        alert_summary = MagicMock()
+        screen.query_one = MagicMock(return_value=alert_summary)
+
+        with patch.object(Screen, "app", new_callable=lambda: property(lambda self: mock_app)):
+            screen._show_alert("bulk_delete", "Multiple delete operations: 5 events in 60 minutes")
+
+        # Toast text contains both rule_name and message
+        notify_args = mock_app.notify.call_args
+        assert "bulk_delete" in notify_args.args[0]
+        assert "Multiple delete operations" in notify_args.args[0]
+
+        # alert_summary.add_alert() was called with rule_name and message
+        alert_summary.add_alert.assert_called_once_with(
+            "bulk_delete", "Multiple delete operations: 5 events in 60 minutes"
+        )
+
 
 # ---------------------------------------------------------------------------
 # TestAlertsScreen

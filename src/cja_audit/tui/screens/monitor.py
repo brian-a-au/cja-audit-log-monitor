@@ -289,11 +289,16 @@ class MonitorScreen(Screen):
             self._state.monitor.entries_since_start += len(new_entries)
 
             # Check for alerts
-            alerts = self._state.check_alerts(new_entries)
-            if alerts:
-                self._state.monitor.alerts_triggered += len(alerts)
-                for alert in alerts:
-                    self.app.call_from_thread(self._show_alert, "Alert triggered")
+            fired = self._state.check_alerts(new_entries)
+            if fired:
+                self._state.monitor.alerts_triggered += len(fired)
+                for fa in fired:
+                    self.app.call_from_thread(self._show_alert, fa.rule_name, fa.message)
+
+            # Surface a one-time-per-session warning if any channel just failed
+            warning = self._state.notification_manager.pop_first_failure()
+            if warning:
+                self.app.call_from_thread(self._show_warning, warning)
 
             # Add entries to table (in reverse order so newest is at top)
             for entry in reversed(new_entries):
@@ -322,8 +327,9 @@ class MonitorScreen(Screen):
         """Show warning message."""
         self.app.notify(warning, severity="warning")
 
-    def _show_alert(self, message: str) -> None:
+    def _show_alert(self, rule_name: str, message: str) -> None:
         """Show alert notification."""
-        self.app.notify(message, severity="warning")
+        text = f"{rule_name}: {message}"
+        self.app.notify(text, severity="warning")
         alert_summary = self.query_one("#alert-summary", AlertSummary)
-        alert_summary.add_alert("Alert", message)
+        alert_summary.add_alert(rule_name, message)
