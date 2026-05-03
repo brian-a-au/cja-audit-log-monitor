@@ -5,8 +5,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from textual.widgets import Button, Static
 
+from cja_audit.alerts import FiredAlert
 from cja_audit.models import AlertRule
+from cja_audit.notifications import NotificationManager
 from cja_audit.tui.app import CJAAuditApp, HelpScreen
+from cja_audit.tui.state import AppState
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -45,6 +48,68 @@ def _patch_screen_workers():
     yield
     for p in patchers:
         p.stop()
+
+
+# ---------------------------------------------------------------------------
+# TestNotificationDispatch
+# ---------------------------------------------------------------------------
+
+
+class TestNotificationDispatch:
+    """Tests for AppState notification_manager wiring and dispatch."""
+
+    def test_notification_manager_lazy_property(self, tmp_path):
+        """notification_manager is constructed once and reused."""
+        state = AppState(config_path=tmp_path / "config.yaml")
+        nm1 = state.notification_manager
+        nm2 = state.notification_manager
+        assert isinstance(nm1, NotificationManager)
+        assert nm1 is nm2
+
+    def test_check_alerts_dispatches_when_configured(self, sample_audit_entry):
+        """state.check_alerts calls notify_alert per FiredAlert when channels configured."""
+        state = AppState()
+        fake_nm = MagicMock()
+        fake_nm.is_configured.return_value = True
+        fake_nm.pop_first_failure.return_value = None
+        state._notification_manager = fake_nm
+
+        fa = FiredAlert(rule_name="r", message="m", entry=sample_audit_entry, panel=MagicMock())
+        state._alert_engine = MagicMock()
+        state._alert_engine.check_batch.return_value = [fa]
+
+        state.check_alerts([sample_audit_entry])
+        fake_nm.notify_alert.assert_called_once_with("r", "m", sample_audit_entry)
+
+    def test_check_alerts_skips_dispatch_when_unconfigured(self, sample_audit_entry):
+        """state.check_alerts does NOT call notify_alert when no channels configured."""
+        state = AppState()
+        fake_nm = MagicMock()
+        fake_nm.is_configured.return_value = False
+        state._notification_manager = fake_nm
+
+        fa = FiredAlert(rule_name="r", message="m", entry=sample_audit_entry, panel=MagicMock())
+        state._alert_engine = MagicMock()
+        state._alert_engine.check_batch.return_value = [fa]
+
+        state.check_alerts([sample_audit_entry])
+        fake_nm.notify_alert.assert_not_called()
+
+    def test_check_alerts_suppresses_dispatch_exceptions(self, sample_audit_entry):
+        """An exception inside notify_alert does NOT prevent check_alerts from returning."""
+        state = AppState()
+        fake_nm = MagicMock()
+        fake_nm.is_configured.return_value = True
+        fake_nm.notify_alert.side_effect = RuntimeError("boom")
+        fake_nm.pop_first_failure.return_value = None
+        state._notification_manager = fake_nm
+
+        fa = FiredAlert(rule_name="r", message="m", entry=sample_audit_entry, panel=MagicMock())
+        state._alert_engine = MagicMock()
+        state._alert_engine.check_batch.return_value = [fa]
+
+        fired = state.check_alerts([sample_audit_entry])
+        assert len(fired) == 1  # check_alerts still returns despite the exception
 
 
 # ---------------------------------------------------------------------------
@@ -301,6 +366,31 @@ class TestMonitorScreen:
 
             monitor_screen._poll_for_new_entries.assert_not_awaited()
 
+    def test_monitor_show_alert_uses_rule_name(self):
+        """_show_alert renders 'rule_name: message' (not the literal 'Alert triggered')."""
+        from textual.screen import Screen
+
+        from cja_audit.tui.screens.monitor import MonitorScreen
+
+        state = MagicMock()
+        screen = MonitorScreen(state=state)
+        mock_app = MagicMock()
+        alert_summary = MagicMock()
+        screen.query_one = MagicMock(return_value=alert_summary)
+
+        with patch.object(Screen, "app", new_callable=lambda: property(lambda self: mock_app)):
+            screen._show_alert("bulk_delete", "Multiple delete operations: 5 events in 60 minutes")
+
+        # Toast text contains both rule_name and message
+        notify_args = mock_app.notify.call_args
+        assert "bulk_delete" in notify_args.args[0]
+        assert "Multiple delete operations" in notify_args.args[0]
+
+        # alert_summary.add_alert() was called with rule_name and message
+        alert_summary.add_alert.assert_called_once_with(
+            "bulk_delete", "Multiple delete operations: 5 events in 60 minutes"
+        )
+
 
 # ---------------------------------------------------------------------------
 # TestAlertsScreen
@@ -374,6 +464,51 @@ class TestSettingsScreen:
             await pilot.pause()
             btn = app.query_one("#verify-button", Button)
             assert btn is not None
+
+    def test_settings_screen_renders_notifications_section(self):
+        """Settings screen includes a Notifications section showing channel presence."""
+        from unittest.mock import MagicMock
+
+        from cja_audit.models import NotificationConfig, WebhookConfig
+        from cja_audit.tui.screens.settings import SettingsScreen
+
+        state = MagicMock()
+        state.settings.notifications = NotificationConfig(
+            slack_webhook_url="https://hooks.slack.com/x",
+            webhooks=[WebhookConfig(url="https://h1.example.com")],
+        )
+        state.settings.org_id = "test@AdobeOrg"
+        state.settings.client_id = "abc"
+        state.settings.is_oauth_configured.return_value = True
+        state.settings.api_base_url = "https://cja.adobe.io"
+        state.settings.ims_base_url = "https://ims-na1.adobelogin.com"
+        state.settings.default_page_size = 100
+        state.settings.default_days = 7
+        state.settings.monitor_interval = 60
+        state.settings.alert_rules = []
+        state.config_path = "/tmp/config"
+
+        screen = SettingsScreen(state=state)
+        # Iterate compose_content to ensure no exception is raised when building the widget tree
+        widgets = list(screen.compose_content())
+
+        # Walk the pending widget tree and collect rendered text from all Static nodes
+        def collect_text(node):
+            from textual.widgets import Static
+
+            parts = []
+            if isinstance(node, Static):
+                parts.append(str(node.render()))
+            for child in getattr(node, "_pending_children", []):
+                parts.extend(collect_text(child))
+            return parts
+
+        all_text = " ".join(t for w in widgets for t in collect_text(w))
+        # The new section should reference NOTIFICATIONS as a heading
+        assert "NOTIFICATIONS" in all_text or "Notifications" in all_text
+        # Slack should show "configured" (not the URL itself)
+        assert "configured" in all_text
+        assert "hooks.slack.com" not in all_text
 
 
 # ---------------------------------------------------------------------------

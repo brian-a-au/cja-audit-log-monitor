@@ -54,6 +54,8 @@ cja-audit cli monitor [--interval N] [--duration N] [--no-alerts]
 cja-audit cli tail [--user EMAIL] [--action TYPE] [--interval N]
 ```
 
+> When `~/.cja-audit/config.yaml` defines a `notifications:` block (Slack and/or webhooks), each fired alert is also delivered to those channels. See [Alert Rules → Delivery channels](alert-rules.md#delivery-channels).
+
 ## Export commands
 
 ```bash

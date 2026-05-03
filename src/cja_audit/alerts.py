@@ -2,6 +2,7 @@
 
 import logging
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -12,6 +13,16 @@ from .models import ActionType, AlertRule, AuditLogEntry, ComponentType
 from .utils import get_user_identifier
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class FiredAlert:
+    """A triggered alert with all data needed for display + delivery."""
+
+    rule_name: str
+    message: str
+    entry: AuditLogEntry
+    panel: Panel
 
 
 # Default alert rules
@@ -179,16 +190,16 @@ class AlertEngine:
 
         return True
 
-    def check_entry(self, entry: AuditLogEntry) -> list[Panel]:
+    def check_entry(self, entry: AuditLogEntry) -> list[FiredAlert]:
         """Check an audit log entry against all rules.
 
         Args:
             entry: Audit log entry to check.
 
         Returns:
-            List of alert panels for triggered alerts.
+            List of FiredAlert objects for triggered rules.
         """
-        alerts: list[Panel] = []
+        fired: list[FiredAlert] = []
         timestamp = entry.timestamp or datetime.now(UTC)
 
         for rule in self.rules:
@@ -211,8 +222,13 @@ class AlertEngine:
                     f"{rule.description or rule.name}: "
                     f"{event_count} events in {rule.threshold_window_minutes} minutes"
                 )
-                alert = format_alert(entry, rule.name, message)
-                alerts.append(alert)
+                panel = format_alert(entry, rule.name, message)
+                fired.append(FiredAlert(
+                    rule_name=rule.name,
+                    message=message,
+                    entry=entry,
+                    panel=panel,
+                ))
 
                 # Log alert
                 logger.warning(
@@ -225,22 +241,21 @@ class AlertEngine:
                 # Clear history to avoid repeated alerts
                 self._event_history[rule.name] = []
 
-        return alerts
+        return fired
 
-    def check_batch(self, entries: list[AuditLogEntry]) -> list[Panel]:
+    def check_batch(self, entries: list[AuditLogEntry]) -> list[FiredAlert]:
         """Check a batch of entries against all rules.
 
         Args:
             entries: List of audit log entries.
 
         Returns:
-            List of alert panels for triggered alerts.
+            List of FiredAlert objects for triggered rules.
         """
-        all_alerts: list[Panel] = []
+        all_fired: list[FiredAlert] = []
         for entry in entries:
-            alerts = self.check_entry(entry)
-            all_alerts.extend(alerts)
-        return all_alerts
+            all_fired.extend(self.check_entry(entry))
+        return all_fired
 
     def get_rule_status(self) -> list[dict[str, Any]]:
         """Get status of all rules.

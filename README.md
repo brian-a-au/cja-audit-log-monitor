@@ -8,7 +8,7 @@ A powerful TUI (Text User Interface) application for monitoring and analyzing Ad
 - **Real-Time Updates**: Monitor audit logs as they happen with configurable polling
 - **Smart Filtering**: Search by user, action type, component, and text
 - **Visual Analytics**: Bar charts for action distribution and activity patterns
-- **Alert Detection**: Configurable rules for bulk deletes, exports, and suspicious patterns
+- **Alert Detection & Delivery**: Configurable rules for bulk deletes, exports, and suspicious patterns; optional Slack/webhook delivery
 - **Export Options**: Save filtered logs to JSON, CSV, or TSV
 - **Connection Status**: Live API connection monitoring
 

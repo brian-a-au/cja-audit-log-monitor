@@ -11,6 +11,7 @@ The Settings screen is a read-only view of the active configuration plus a one-c
 - **Authentication**: organization ID (truncated), client ID (truncated), and an `OAuth Configured` yes/no indicator. Secrets are never displayed.
 - **Defaults**: the page size, default look-back days, and monitor polling interval that the rest of the TUI uses.
 - **Alert rules**: the count of rules currently configured (full detail lives on the Alerts screen).
+- **Notifications**: presence indicators for the `notifications:` block — Slack (`configured` / `not configured`), webhook count, and the `notify_on_alerts` / `notify_on_anomalies` toggle states. No URLs or secrets shown — safe to screen-share.
 - **Action buttons**: `Verify Connection` and `Refresh Settings`.
 
 ## What you can do

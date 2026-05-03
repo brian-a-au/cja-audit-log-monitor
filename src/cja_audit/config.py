@@ -55,7 +55,6 @@ class CJASettings(BaseSettings):
 
     # Notification settings
     notifications: NotificationConfig = Field(default_factory=NotificationConfig)
-    slack_webhook_url: str = Field(default="", description="Slack webhook URL for alerts")
 
     @field_validator("org_id")
     @classmethod
@@ -168,6 +167,20 @@ scopes: openid,AdobeID,read_organizations,additional_info.projectedProductContex
 #       - EXPORT
 #     threshold_count: 1
 #     threshold_window_minutes: 1440
+
+# Notification channels (uncomment to enable delivery to Slack and/or webhooks)
+# notifications:
+#   slack_webhook_url: https://hooks.slack.com/services/XXX/YYY/ZZZ
+#   notify_on_alerts: true
+#   notify_on_anomalies: true
+#   webhooks:
+#     - url: https://example.com/webhook
+#       enabled: true
+#       method: POST
+#       headers:
+#         Authorization: Bearer your-token
+#       timeout: 30
+#       include_entry_details: true
 """
 
     with open(config_path, "w") as f:

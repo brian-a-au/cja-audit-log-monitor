@@ -202,3 +202,73 @@ class TestNotificationConfig:
         assert config.slack_webhook_url is None
         assert config.notify_on_alerts is True
         assert config.notify_on_anomalies is True
+
+
+class TestFailureWarning:
+    """Tests for one-time-per-channel failure warnings."""
+
+    def test_first_slack_failure_returns_warning(self, httpx_mock):
+        """First Slack failure surfaces a warning string."""
+        config = NotificationConfig(slack_webhook_url="https://hooks.slack.com/x")
+        manager = NotificationManager(config)
+        httpx_mock.add_response(url="https://hooks.slack.com/x", status_code=500)
+
+        manager.send_slack("rule", "msg")
+        warning = manager.pop_first_failure()
+        assert warning is not None
+        assert "slack" in warning.lower()
+
+    def test_second_slack_failure_returns_none(self, httpx_mock):
+        """Second Slack failure during the same session is suppressed."""
+        config = NotificationConfig(slack_webhook_url="https://hooks.slack.com/x")
+        manager = NotificationManager(config)
+        httpx_mock.add_response(url="https://hooks.slack.com/x", status_code=500)
+        httpx_mock.add_response(url="https://hooks.slack.com/x", status_code=500)
+
+        manager.send_slack("rule", "msg")
+        manager.pop_first_failure()  # consumes the first warning
+        manager.send_slack("rule", "msg")
+        assert manager.pop_first_failure() is None
+
+    def test_recovery_clears_flag(self, httpx_mock):
+        """A successful send clears the warned flag so next failure surfaces again."""
+        config = NotificationConfig(slack_webhook_url="https://hooks.slack.com/x")
+        manager = NotificationManager(config)
+        httpx_mock.add_response(url="https://hooks.slack.com/x", status_code=500)
+        httpx_mock.add_response(url="https://hooks.slack.com/x", status_code=200)
+        httpx_mock.add_response(url="https://hooks.slack.com/x", status_code=500)
+
+        manager.send_slack("rule", "msg")
+        manager.pop_first_failure()  # consume
+        manager.send_slack("rule", "msg")  # success → clears flag
+        manager.send_slack("rule", "msg")  # fails again
+        assert manager.pop_first_failure() is not None
+
+    def test_per_channel_isolation(self, httpx_mock):
+        """Slack failure flag does not affect webhook failure tracking."""
+        webhook = WebhookConfig(url="https://hook.example.com/h")
+        config = NotificationConfig(
+            slack_webhook_url="https://hooks.slack.com/x",
+            webhooks=[webhook],
+        )
+        manager = NotificationManager(config)
+        httpx_mock.add_response(url="https://hooks.slack.com/x", status_code=500)
+        httpx_mock.add_response(url="https://hook.example.com/h", status_code=500)
+
+        manager.send_slack("rule", "msg")
+        manager.pop_first_failure()  # consume Slack warning
+        manager.send_webhook(webhook, {"x": 1})
+        warning = manager.pop_first_failure()
+        assert warning is not None
+        assert "hook.example.com" in warning
+
+    def test_anomaly_path_tracks_slack_failure(self, httpx_mock):
+        """notify_anomaly's Slack path participates in failure tracking."""
+        config = NotificationConfig(slack_webhook_url="https://hooks.slack.com/x")
+        manager = NotificationManager(config)
+        httpx_mock.add_response(url="https://hooks.slack.com/x", status_code=500)
+
+        manager.notify_anomaly({"type": "test", "description": "test anomaly"})
+        warning = manager.pop_first_failure()
+        assert warning is not None
+        assert "slack" in warning.lower()

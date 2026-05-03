@@ -30,3 +30,4 @@ The Alert Rules screen lets you toggle, inspect, and test the rules that detect 
 - **Confidence check**: a clean `no alerts triggered` over 24h of normal traffic is the signal that your thresholds aren't too aggressive.
 - **Rules live in YAML**: enabling/disabling in the TUI is session-scoped; permanent changes belong in `~/.cja-audit/config.yaml` (see [Alert Rules](../alert-rules.md) for the schema).
 - **Same engine everywhere**: rules edited here are exactly what the CLI's `cja-audit cli alerts test` and `cja-audit cli monitor` use — no drift between interactive and scripted use.
+- **External delivery available**: when `~/.cja-audit/config.yaml` defines a `notifications:` block (Slack and/or webhooks), each fired rule is delivered to those channels in addition to the in-TUI summary. See [Delivery channels](../alert-rules.md#delivery-channels).

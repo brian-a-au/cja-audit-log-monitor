@@ -3,8 +3,9 @@
 from datetime import UTC, datetime
 
 import pytest
+from rich.panel import Panel
 
-from cja_audit.alerts import DEFAULT_ALERT_RULES, AlertEngine, analyze_for_anomalies
+from cja_audit.alerts import DEFAULT_ALERT_RULES, AlertEngine, FiredAlert, analyze_for_anomalies
 from cja_audit.models import ActionType, AlertRule, AuditLogEntry, ComponentType
 
 
@@ -193,6 +194,35 @@ class TestAlertEngine:
         entry = AuditLogEntry(action="DELETE", timestamp=datetime.now(UTC))
         alerts = engine.check_entry(entry)
         assert len(alerts) == 0
+
+    def test_check_entry_returns_fired_alert_with_metadata(self) -> None:
+        """check_entry returns FiredAlert with rule_name, message, entry, and panel."""
+        rule = AlertRule(
+            name="test_rule",
+            description="Test rule",
+            actions=[ActionType.DELETE],
+            threshold_count=1,
+            threshold_window_minutes=60,
+        )
+        engine = AlertEngine([rule])
+
+        entry = AuditLogEntry(
+            id="e1",
+            action=ActionType.DELETE.value,
+            component_type=ComponentType.PROJECT.value,
+            component_id="c1",
+            user_email="u@example.com",
+            timestamp=datetime.now(UTC),
+        )
+
+        fired = engine.check_entry(entry)
+        assert len(fired) == 1
+        fa = fired[0]
+        assert isinstance(fa, FiredAlert)
+        assert fa.rule_name == "test_rule"
+        assert "Test rule" in fa.message
+        assert fa.entry is entry
+        assert isinstance(fa.panel, Panel)
 
 
 class TestAnalyzeForAnomalies:

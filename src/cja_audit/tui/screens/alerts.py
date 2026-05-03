@@ -156,15 +156,15 @@ class AlertsScreen(Screen):
                 )
                 return
 
-            alerts = self._state.alert_engine.check_batch(entries)
+            fired = self._state.alert_engine.check_batch(entries)
 
-            if alerts:
+            if fired:
                 result_lines = [
-                    resolve_tcss_markup(f"[$warning]found {len(alerts)} alerts[/$warning]")
+                    resolve_tcss_markup(f"[$warning]found {len(fired)} alerts[/$warning]")
                 ]
-                for alert in alerts[:10]:
+                for fa in fired[:10]:
                     result_lines.append(
-                        resolve_tcss_markup("  [$danger]⚠[/$danger] Alert triggered")
+                        resolve_tcss_markup(f"  [$danger]⚠[/$danger] {fa.rule_name}: {fa.message}")
                     )
                 self.app.call_from_thread(self._show_results, "\n".join(result_lines))
             else:
