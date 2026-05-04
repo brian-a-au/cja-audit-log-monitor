@@ -10,6 +10,7 @@ from pathlib import Path
 import click
 from rich.console import Console
 from rich.logging import RichHandler
+from rich.markup import escape
 
 from . import __version__
 from .alerts import AlertEngine, analyze_for_anomalies
@@ -758,7 +759,7 @@ def anomalies(
             dedup = AnomalyDedupFilter()
             stop_event = threading.Event()
             if watch:
-                _install_anomalies_sigint(stop_event)
+                _install_anomalies_signal_handlers(stop_event)
 
             while True:
                 try:
@@ -784,7 +785,7 @@ def anomalies(
         console.print("\n[yellow]Anomaly scan stopped.[/yellow]")
 
 
-def _install_anomalies_sigint(stop_event: threading.Event) -> None:
+def _install_anomalies_signal_handlers(stop_event: threading.Event) -> None:
     """Install SIGINT and SIGTERM handlers that set stop_event for the watch-loop.
 
     Replaces any prior handlers for the duration of the process. SIGTERM is
@@ -818,13 +819,19 @@ def _run_anomalies_cycle(
     end = datetime.now(UTC)
     start = end - timedelta(hours=lookback)
     query = AuditLogQuery(start_date=start, end_date=end)
+    # Wrap in list() so analyze_for_anomalies (which calls len()) works against
+    # any iterable-of-entries the client/mock returns.
     entries = list(client.get_all_logs(query))
 
     raw_anomalies = analyze_for_anomalies(entries)
     new_anomalies = dedup.suppress_seen(raw_anomalies)
 
     for anomaly in new_anomalies:
-        console.print(f"[yellow]•[/yellow] {anomaly['description']}")
+        # Escape the description: it's user-derived (component names, user
+        # identifiers) and may contain `[` characters that would otherwise
+        # be parsed as Rich markup.
+        description = anomaly.get("description", anomaly.get("type", "anomaly"))
+        console.print(f"[yellow]•[/yellow] {escape(description)}")
         try:
             nm.notify_anomaly(anomaly)
         except Exception:

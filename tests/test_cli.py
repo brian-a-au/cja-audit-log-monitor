@@ -831,9 +831,13 @@ class TestAnomaliesCommand:
 
         result = runner.invoke(main, ["cli", "anomalies"])
         assert result.exit_code == 0
-        # notify_anomaly is invoked regardless; the manager short-circuits internally
-        # when is_configured() == False. The test verifies clean exit and call shape.
+        # The CLI calls notify_anomaly even when the manager is unconfigured;
+        # short-circuiting happens inside the real manager (gated on
+        # notify_on_anomalies in NotificationConfig). Here both is_configured()
+        # and notify_anomaly are mocked, so this test only asserts the CLI's
+        # call shape: dispatch attempted once, failure-drain queried once.
         assert nm_instance.notify_anomaly.call_count == 1
+        assert nm_instance.pop_first_failure.call_count >= 1
 
     @patch("cja_audit.cli.NotificationManager")
     @patch("cja_audit.cli.analyze_for_anomalies")
@@ -1004,7 +1008,12 @@ class TestAnomaliesCommand:
         mock_nm_cls: MagicMock,
         runner: CliRunner,
     ) -> None:
-        """First failure surfaces a warning to console; subsequent cycles silent."""
+        """Whatever pop_first_failure returns is printed to console as a warning.
+
+        This test mocks pop_first_failure's side_effect directly — it verifies the
+        CLI's drain-and-print loop, not end-to-end Slack-failure → warning wiring.
+        The wiring is symmetric to the alert path tested in test_notifications.py.
+        """
         from cja_audit.config import CJASettings
         from cja_audit.models import NotificationConfig
 
@@ -1130,18 +1139,18 @@ class TestAnomaliesCommand:
         assert result.exit_code == 1
         assert "API error" in result.output
 
-    def test_install_anomalies_sigint_registers_sigterm_too(self) -> None:
+    def test_install_signal_handlers_registers_both_sigint_and_sigterm(self) -> None:
         """SIGTERM gets the same handler as SIGINT for systemd compatibility."""
         import signal as signal_mod
         from threading import Event
 
-        from cja_audit.cli import _install_anomalies_sigint
+        from cja_audit.cli import _install_anomalies_signal_handlers
 
         prior_int = signal_mod.signal(signal_mod.SIGINT, signal_mod.SIG_DFL)
         prior_term = signal_mod.signal(signal_mod.SIGTERM, signal_mod.SIG_DFL)
         try:
             stop = Event()
-            _install_anomalies_sigint(stop)
+            _install_anomalies_signal_handlers(stop)
 
             sigint_handler = signal_mod.getsignal(signal_mod.SIGINT)
             sigterm_handler = signal_mod.getsignal(signal_mod.SIGTERM)
