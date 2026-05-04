@@ -37,6 +37,15 @@ After permission changes in Admin Console, allow **5–10 minutes** for propagat
 | Alert fires in TUI but nothing reaches Slack/webhook | `notify_on_alerts: false` set, or `notifications:` block missing | Set `notify_on_alerts: true` and confirm at least one of `slack_webhook_url` / `webhooks[]` is populated |
 | Slow polling cycles when Slack is slow | Default 30 s webhook timeout > 5 s polling interval | Either raise the polling interval or lower per-webhook `timeout` |
 
+**Anomaly delivery silently disabled.** If `cja-audit cli anomalies` runs but
+nothing reaches Slack/webhook, check that `notify_on_anomalies: true` is set
+in your `notifications:` block. The default is `false`.
+
+**Anomaly delivery shares the alert failure-warning channel.** A failing Slack
+URL surfaces one warning per session — whether triggered from `cli monitor` or
+`cli anomalies`. Subsequent failures on the same channel are suppressed until
+the next successful send to that channel.
+
 ## Where to look first
 
 If something is off and you don't know which screen to suspect, open the [Settings screen](screens/settings.md) inside the TUI and click **Verify Connection** — a red status with an error string is almost always more actionable than a silent empty result elsewhere.

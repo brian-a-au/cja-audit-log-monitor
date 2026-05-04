@@ -59,6 +59,9 @@ uv run cja-audit cli init
 
 Writes `~/.cja-audit/config.yaml` with default alert rules and a commented `notifications:` example block (Slack + webhooks). Environment variables always take precedence over the config file. See [Alert Rules](alert-rules.md) for rule schema and [Delivery channels](alert-rules.md#delivery-channels) for notification config.
 
+> The default for `notify_on_anomalies` is `false` (opt-in). Set to `true` to
+> enable delivery via `cja-audit cli anomalies`.
+
 ## 5. Verify
 
 ```bash
