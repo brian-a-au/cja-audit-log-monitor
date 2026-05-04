@@ -787,8 +787,10 @@ def _run_anomalies_cycle(
         try:
             nm.notify_anomaly(anomaly)
         except Exception:
+            # Network failures are surfaced via pop_first_failure; this catches
+            # unexpected programming errors so one bad anomaly doesn't kill the cycle.
             logging.getLogger(__name__).exception(
-                "notify_anomaly raised; continuing"
+                "notify_anomaly raised unexpectedly; continuing"
             )
 
     while True:

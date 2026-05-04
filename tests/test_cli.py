@@ -664,9 +664,13 @@ class TestMonitorCommand:
 class TestAnomaliesCommand:
     """Tests for the new `cja-audit cli anomalies` command."""
 
+    @patch("cja_audit.cli.NotificationManager")
     @patch("cja_audit.cli.get_client")
     def test_oneshot_no_entries_prints_nothing_to_dispatch(
-        self, mock_get_client: MagicMock, runner: CliRunner
+        self,
+        mock_get_client: MagicMock,
+        mock_nm_cls: MagicMock,
+        runner: CliRunner,
     ) -> None:
         """Empty entries → no anomalies → no dispatch."""
         from cja_audit.config import CJASettings
@@ -683,8 +687,17 @@ class TestAnomaliesCommand:
         )
         mock_get_client.return_value = (client, settings)
 
+        nm_instance = MagicMock()
+        nm_instance.__enter__ = MagicMock(return_value=nm_instance)
+        nm_instance.__exit__ = MagicMock(return_value=False)
+        nm_instance.is_configured = MagicMock(return_value=False)
+        nm_instance.notify_anomaly = MagicMock(return_value=0)
+        nm_instance.pop_first_failure = MagicMock(return_value=None)
+        mock_nm_cls.return_value = nm_instance
+
         result = runner.invoke(main, ["cli", "anomalies"])
         assert result.exit_code == 0
+        assert nm_instance.notify_anomaly.call_count == 0
 
     @patch("cja_audit.cli.NotificationManager")
     @patch("cja_audit.cli.analyze_for_anomalies")
@@ -818,5 +831,6 @@ class TestAnomaliesCommand:
 
         result = runner.invoke(main, ["cli", "anomalies"])
         assert result.exit_code == 0
-        # notify_anomaly is called regardless; the manager itself short-circuits
-        # internally. The test verifies no exception and clean exit.
+        # notify_anomaly is invoked regardless; the manager short-circuits internally
+        # when is_configured() == False. The test verifies clean exit and call shape.
+        assert nm_instance.notify_anomaly.call_count == 1
