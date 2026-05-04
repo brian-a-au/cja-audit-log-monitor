@@ -172,7 +172,7 @@ scopes: openid,AdobeID,read_organizations,additional_info.projectedProductContex
 # notifications:
 #   slack_webhook_url: https://hooks.slack.com/services/XXX/YYY/ZZZ
 #   notify_on_alerts: true
-#   notify_on_anomalies: true
+#   notify_on_anomalies: true   # opt-in; fires from `cja-audit cli anomalies`
 #   webhooks:
 #     - url: https://example.com/webhook
 #       enabled: true
