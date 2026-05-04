@@ -761,7 +761,14 @@ def anomalies(
                 _install_anomalies_sigint(stop_event)
 
             while True:
-                _run_anomalies_cycle(client, nm, dedup, lookback)
+                try:
+                    _run_anomalies_cycle(client, nm, dedup, lookback)
+                except APIError as e:
+                    if not watch:
+                        raise
+                    # In --watch mode, transient upstream errors must not kill
+                    # the daemon. Log and continue to the next cycle.
+                    console.print(f"[yellow]API error this cycle:[/yellow] {e}")
                 if not watch or stop_event.is_set():
                     break
                 if stop_event.wait(timeout=interval):
@@ -778,24 +785,27 @@ def anomalies(
 
 
 def _install_anomalies_sigint(stop_event: threading.Event) -> None:
-    """Install a SIGINT handler that sets stop_event for the watch-loop.
+    """Install SIGINT and SIGTERM handlers that set stop_event for the watch-loop.
 
-    Replaces any prior SIGINT handler for the duration of the process. Intended
-    for one-shot CLI invocations where the watch loop owns the process lifetime;
-    not safe to call from longer-lived embedders.
+    Replaces any prior handlers for the duration of the process. SIGTERM is
+    handled the same as SIGINT so systemd's default `KillSignal=SIGTERM` shuts
+    the daemon down cleanly. Intended for one-shot CLI invocations where the
+    watch loop owns the process lifetime; not safe to call from longer-lived
+    embedders.
     """
     import signal
 
     def _handler(signum, frame):  # noqa: ARG001
         stop_event.set()
 
-    try:
-        signal.signal(signal.SIGINT, _handler)
-    except ValueError:
-        # signal.signal raises if not in main thread (e.g., under CliRunner).
-        # In that case the loop relies on Event.wait()'s timeout cycling and
-        # tests patch wait() directly.
-        pass
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            signal.signal(sig, _handler)
+        except ValueError:
+            # signal.signal raises if not in main thread (e.g., under CliRunner).
+            # In that case the loop relies on Event.wait()'s timeout cycling and
+            # tests patch wait() directly.
+            pass
 
 
 def _run_anomalies_cycle(

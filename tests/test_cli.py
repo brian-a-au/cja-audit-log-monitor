@@ -1042,3 +1042,114 @@ class TestAnomaliesCommand:
         result = runner.invoke(main, ["cli", "anomalies"])
         assert result.exit_code == 0
         assert "Notification delivery failed (slack)" in result.output
+
+    @patch("cja_audit.cli.NotificationManager")
+    @patch("cja_audit.cli._run_anomalies_cycle")
+    @patch("cja_audit.cli.get_client")
+    def test_watch_survives_transient_api_error(
+        self,
+        mock_get_client: MagicMock,
+        mock_cycle: MagicMock,
+        mock_nm_cls: MagicMock,
+        runner: CliRunner,
+    ) -> None:
+        """In --watch mode, an APIError on one cycle is logged; loop continues."""
+        from cja_audit.client import APIError
+        from cja_audit.config import CJASettings
+        from cja_audit.models import NotificationConfig
+
+        client = MagicMock()
+        client.__enter__ = MagicMock(return_value=client)
+        client.__exit__ = MagicMock(return_value=False)
+
+        settings = CJASettings(
+            org_id="x@AdobeOrg", client_id="cid", client_secret="cs", scopes="openid",
+            notifications=NotificationConfig(),
+        )
+        mock_get_client.return_value = (client, settings)
+
+        nm_instance = MagicMock()
+        nm_instance.__enter__ = MagicMock(return_value=nm_instance)
+        nm_instance.__exit__ = MagicMock(return_value=False)
+        nm_instance.is_configured = MagicMock(return_value=False)
+        mock_nm_cls.return_value = nm_instance
+
+        # Cycle 1 raises APIError; cycle 2 succeeds. Loop must survive.
+        mock_cycle.side_effect = [APIError("upstream blip"), None]
+
+        from threading import Event
+        call_count = {"n": 0}
+
+        def fake_wait(self, timeout=None):  # noqa: ARG001
+            call_count["n"] += 1
+            return call_count["n"] >= 2
+
+        with patch.object(Event, "wait", fake_wait):
+            result = runner.invoke(
+                main, ["cli", "anomalies", "--watch", "--interval", "1"]
+            )
+
+        assert result.exit_code == 0
+        assert mock_cycle.call_count == 2
+        assert "API error this cycle" in result.output
+
+    @patch("cja_audit.cli.NotificationManager")
+    @patch("cja_audit.cli._run_anomalies_cycle")
+    @patch("cja_audit.cli.get_client")
+    def test_oneshot_apierror_exits_nonzero(
+        self,
+        mock_get_client: MagicMock,
+        mock_cycle: MagicMock,
+        mock_nm_cls: MagicMock,
+        runner: CliRunner,
+    ) -> None:
+        """One-shot mode preserves exit-1 on APIError (no watch loop to survive)."""
+        from cja_audit.client import APIError
+        from cja_audit.config import CJASettings
+        from cja_audit.models import NotificationConfig
+
+        client = MagicMock()
+        client.__enter__ = MagicMock(return_value=client)
+        client.__exit__ = MagicMock(return_value=False)
+
+        settings = CJASettings(
+            org_id="x@AdobeOrg", client_id="cid", client_secret="cs", scopes="openid",
+            notifications=NotificationConfig(),
+        )
+        mock_get_client.return_value = (client, settings)
+
+        nm_instance = MagicMock()
+        nm_instance.__enter__ = MagicMock(return_value=nm_instance)
+        nm_instance.__exit__ = MagicMock(return_value=False)
+        nm_instance.is_configured = MagicMock(return_value=False)
+        mock_nm_cls.return_value = nm_instance
+
+        mock_cycle.side_effect = APIError("upstream down")
+
+        result = runner.invoke(main, ["cli", "anomalies"])
+        assert result.exit_code == 1
+        assert "API error" in result.output
+
+    def test_install_anomalies_sigint_registers_sigterm_too(self) -> None:
+        """SIGTERM gets the same handler as SIGINT for systemd compatibility."""
+        import signal as signal_mod
+        from threading import Event
+
+        from cja_audit.cli import _install_anomalies_sigint
+
+        prior_int = signal_mod.signal(signal_mod.SIGINT, signal_mod.SIG_DFL)
+        prior_term = signal_mod.signal(signal_mod.SIGTERM, signal_mod.SIG_DFL)
+        try:
+            stop = Event()
+            _install_anomalies_sigint(stop)
+
+            sigint_handler = signal_mod.getsignal(signal_mod.SIGINT)
+            sigterm_handler = signal_mod.getsignal(signal_mod.SIGTERM)
+            assert callable(sigint_handler)
+            assert callable(sigterm_handler)
+
+            sigterm_handler(signal_mod.SIGTERM, None)
+            assert stop.is_set()
+        finally:
+            signal_mod.signal(signal_mod.SIGINT, prior_int)
+            signal_mod.signal(signal_mod.SIGTERM, prior_term)
