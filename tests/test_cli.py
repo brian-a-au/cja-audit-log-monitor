@@ -876,14 +876,14 @@ class TestAnomaliesCommand:
                    "action_count": 50, "average": 10.0, "description": "..."}
         mock_analyze.return_value = [anomaly]
 
-        # Stop the loop after the second cycle by making stop.wait return True
-        # (simulating SIGINT). Patch threading.Event class used inside cli.py.
+        # Allow exactly two cycles: fake_wait returns False once (continue) then
+        # True (stop). This proves cycle 2 ran AND dedup suppressed re-dispatch.
         from threading import Event
         call_count = {"n": 0}
 
         def fake_wait(self, timeout=None):  # noqa: ARG001
             call_count["n"] += 1
-            return True  # signal stop on first wait
+            return call_count["n"] >= 2
 
         with patch.object(Event, "wait", fake_wait):
             result = runner.invoke(
@@ -891,9 +891,9 @@ class TestAnomaliesCommand:
             )
 
         assert result.exit_code == 0
-        # Cycle 1: dispatched. Cycle 2: dedup suppresses → no second dispatch.
-        # Implementation note: with fake_wait returning True after first cycle,
-        # we should see exactly 1 dispatch total.
+        # Two cycles ran (analyze called twice); dedup suppressed the second
+        # dispatch so notify_anomaly was called only once.
+        assert mock_analyze.call_count == 2
         assert nm_instance.notify_anomaly.call_count == 1
 
     @patch("cja_audit.cli.NotificationManager")
