@@ -2,6 +2,7 @@
 
 import logging
 import sys
+import threading
 from datetime import UTC, datetime, timedelta
 from itertools import chain, islice
 from pathlib import Path
@@ -755,7 +756,15 @@ def anomalies(
                 )
 
             dedup = AnomalyDedupFilter()
-            _run_anomalies_cycle(client, nm, dedup, lookback)
+            stop_event = threading.Event()
+            _install_anomalies_sigint(stop_event)
+
+            while True:
+                _run_anomalies_cycle(client, nm, dedup, lookback)
+                if not watch or stop_event.is_set():
+                    break
+                if stop_event.wait(timeout=interval):
+                    break
 
     except AuthenticationError as e:
         console.print(f"[red]Authentication error:[/red] {e}")
@@ -765,6 +774,22 @@ def anomalies(
         sys.exit(1)
     except KeyboardInterrupt:
         console.print("\n[yellow]Anomaly scan stopped.[/yellow]")
+
+
+def _install_anomalies_sigint(stop_event: "threading.Event") -> None:
+    """Install a SIGINT handler that sets stop_event. Idempotent within a session."""
+    import signal
+
+    def _handler(signum, frame):  # noqa: ARG001
+        stop_event.set()
+
+    try:
+        signal.signal(signal.SIGINT, _handler)
+    except ValueError:
+        # signal.signal raises if not in main thread (e.g., under CliRunner).
+        # In that case the loop relies on Event.wait()'s timeout cycling and
+        # tests patch wait() directly.
+        pass
 
 
 def _run_anomalies_cycle(

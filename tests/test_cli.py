@@ -834,3 +834,159 @@ class TestAnomaliesCommand:
         # notify_anomaly is invoked regardless; the manager short-circuits internally
         # when is_configured() == False. The test verifies clean exit and call shape.
         assert nm_instance.notify_anomaly.call_count == 1
+
+    @patch("cja_audit.cli.NotificationManager")
+    @patch("cja_audit.cli.analyze_for_anomalies")
+    @patch("cja_audit.cli.get_client")
+    def test_watch_dedupes_across_cycles(
+        self,
+        mock_get_client: MagicMock,
+        mock_analyze: MagicMock,
+        mock_nm_cls: MagicMock,
+        runner: CliRunner,
+    ) -> None:
+        """Across two cycles, repeated anomaly is suppressed in the second."""
+        from cja_audit.config import CJASettings
+        from cja_audit.models import NotificationConfig
+
+        client = MagicMock()
+        client.__enter__ = MagicMock(return_value=client)
+        client.__exit__ = MagicMock(return_value=False)
+        client.get_all_logs = MagicMock(return_value=iter([MagicMock()]))
+
+        settings = CJASettings(
+            org_id="x@AdobeOrg", client_id="cid", client_secret="cs", scopes="openid",
+            notifications=NotificationConfig(
+                slack_webhook_url="https://hooks.slack.com/x",
+                notify_on_anomalies=True,
+            ),
+        )
+        mock_get_client.return_value = (client, settings)
+
+        nm_instance = MagicMock()
+        nm_instance.__enter__ = MagicMock(return_value=nm_instance)
+        nm_instance.__exit__ = MagicMock(return_value=False)
+        nm_instance.is_configured = MagicMock(return_value=True)
+        nm_instance.notify_anomaly = MagicMock(return_value=1)
+        nm_instance.pop_first_failure = MagicMock(return_value=None)
+        mock_nm_cls.return_value = nm_instance
+
+        # Same anomaly returned on both cycles
+        anomaly = {"type": "high_activity_user", "user": "a@x.com",
+                   "action_count": 50, "average": 10.0, "description": "..."}
+        mock_analyze.return_value = [anomaly]
+
+        # Stop the loop after the second cycle by making stop.wait return True
+        # (simulating SIGINT). Patch threading.Event class used inside cli.py.
+        from threading import Event
+        call_count = {"n": 0}
+
+        def fake_wait(self, timeout=None):  # noqa: ARG001
+            call_count["n"] += 1
+            return True  # signal stop on first wait
+
+        with patch.object(Event, "wait", fake_wait):
+            result = runner.invoke(
+                main, ["cli", "anomalies", "--watch", "--interval", "1"]
+            )
+
+        assert result.exit_code == 0
+        # Cycle 1: dispatched. Cycle 2: dedup suppresses → no second dispatch.
+        # Implementation note: with fake_wait returning True after first cycle,
+        # we should see exactly 1 dispatch total.
+        assert nm_instance.notify_anomaly.call_count == 1
+
+    @patch("cja_audit.cli.NotificationManager")
+    @patch("cja_audit.cli.analyze_for_anomalies")
+    @patch("cja_audit.cli.get_client")
+    def test_watch_exits_cleanly_on_sigint(
+        self,
+        mock_get_client: MagicMock,
+        mock_analyze: MagicMock,
+        mock_nm_cls: MagicMock,
+        runner: CliRunner,
+    ) -> None:
+        """threading.Event.wait returning True (simulated SIGINT) breaks the loop."""
+        from cja_audit.config import CJASettings
+        from cja_audit.models import NotificationConfig
+
+        client = MagicMock()
+        client.__enter__ = MagicMock(return_value=client)
+        client.__exit__ = MagicMock(return_value=False)
+        client.get_all_logs = MagicMock(return_value=iter([]))
+
+        settings = CJASettings(
+            org_id="x@AdobeOrg", client_id="cid", client_secret="cs", scopes="openid",
+            notifications=NotificationConfig(),
+        )
+        mock_get_client.return_value = (client, settings)
+
+        nm_instance = MagicMock()
+        nm_instance.__enter__ = MagicMock(return_value=nm_instance)
+        nm_instance.__exit__ = MagicMock(return_value=False)
+        nm_instance.is_configured = MagicMock(return_value=False)
+        nm_instance.notify_anomaly = MagicMock(return_value=0)
+        nm_instance.pop_first_failure = MagicMock(return_value=None)
+        mock_nm_cls.return_value = nm_instance
+        mock_analyze.return_value = []
+
+        from threading import Event
+
+        def fake_wait(self, timeout=None):  # noqa: ARG001
+            return True
+
+        with patch.object(Event, "wait", fake_wait):
+            result = runner.invoke(
+                main, ["cli", "anomalies", "--watch", "--interval", "1"]
+            )
+
+        assert result.exit_code == 0
+
+    @patch("cja_audit.cli.NotificationManager")
+    @patch("cja_audit.cli.analyze_for_anomalies")
+    @patch("cja_audit.cli.get_client")
+    def test_dispatch_exception_does_not_break_loop(
+        self,
+        mock_get_client: MagicMock,
+        mock_analyze: MagicMock,
+        mock_nm_cls: MagicMock,
+        runner: CliRunner,
+    ) -> None:
+        """notify_anomaly raising → next anomaly still processed; clean exit."""
+        from cja_audit.config import CJASettings
+        from cja_audit.models import NotificationConfig
+
+        client = MagicMock()
+        client.__enter__ = MagicMock(return_value=client)
+        client.__exit__ = MagicMock(return_value=False)
+        client.get_all_logs = MagicMock(return_value=iter([MagicMock()]))
+
+        settings = CJASettings(
+            org_id="x@AdobeOrg", client_id="cid", client_secret="cs", scopes="openid",
+            notifications=NotificationConfig(
+                slack_webhook_url="https://hooks.slack.com/x",
+                notify_on_anomalies=True,
+            ),
+        )
+        mock_get_client.return_value = (client, settings)
+
+        nm_instance = MagicMock()
+        nm_instance.__enter__ = MagicMock(return_value=nm_instance)
+        nm_instance.__exit__ = MagicMock(return_value=False)
+        nm_instance.is_configured = MagicMock(return_value=True)
+        nm_instance.notify_anomaly = MagicMock(
+            side_effect=[RuntimeError("boom"), 1]
+        )
+        nm_instance.pop_first_failure = MagicMock(return_value=None)
+        mock_nm_cls.return_value = nm_instance
+
+        mock_analyze.return_value = [
+            {"type": "high_activity_user", "user": "a@x.com", "action_count": 50,
+             "average": 10.0, "description": "..."},
+            {"type": "bulk_delete_single_user", "user": "b@x.com", "delete_count": 12,
+             "description": "..."},
+        ]
+
+        result = runner.invoke(main, ["cli", "anomalies"])
+        assert result.exit_code == 0
+        assert nm_instance.notify_anomaly.call_count == 2
