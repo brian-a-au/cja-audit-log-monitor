@@ -374,3 +374,55 @@ class NotificationManager:
             True if at least one channel is configured.
         """
         return bool(self.config.webhooks) or bool(self.config.slack_webhook_url)
+
+
+def _today_iso() -> str:
+    """Return today's local date as YYYY-MM-DD. Module-level for test patching."""
+    from datetime import date
+    return date.today().isoformat()
+
+
+class AnomalyDedupFilter:
+    """In-memory, per-session anomaly dedup by stable fingerprint.
+
+    Fingerprint composition: SHA-256 over (today's date, anomaly type, all
+    scalar identifying fields except description and known quantitative fields).
+    Quantitative fields are excluded so a recurring anomaly whose count grew
+    between poll cycles still dedupes.
+    """
+
+    _EXCLUDED_FIELDS = frozenset({
+        "description", "action_count", "delete_count", "average",
+    })
+
+    def __init__(self) -> None:
+        self._seen: set[str] = set()
+
+    def fingerprint(self, anomaly: dict[str, Any]) -> str:
+        """Return a stable 16-char hex fingerprint for the anomaly."""
+        import hashlib
+        items = sorted(
+            (str(k), str(v))
+            for k, v in anomaly.items()
+            if k not in self._EXCLUDED_FIELDS
+        )
+        serialized = _today_iso() + "|" + "|".join(f"{k}={v}" for k, v in items)
+        return hashlib.sha256(serialized.encode("utf-8")).hexdigest()[:16]
+
+    def suppress_seen(
+        self, anomalies: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """Return only anomalies whose fingerprint is new this session.
+
+        Adds returned items' fingerprints to the seen set as a side effect.
+        Total: any dict shape is acceptable; missing fields fingerprint to a
+        stable value.
+        """
+        out: list[dict[str, Any]] = []
+        for anomaly in anomalies:
+            fp = self.fingerprint(anomaly)
+            if fp in self._seen:
+                continue
+            self._seen.add(fp)
+            out.append(anomaly)
+        return out
