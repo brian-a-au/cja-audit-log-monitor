@@ -993,3 +993,53 @@ class TestAnomaliesCommand:
         result = runner.invoke(main, ["cli", "anomalies"])
         assert result.exit_code == 0
         assert nm_instance.notify_anomaly.call_count == 2
+
+    @patch("cja_audit.cli.NotificationManager")
+    @patch("cja_audit.cli.analyze_for_anomalies")
+    @patch("cja_audit.cli.get_client")
+    def test_pop_first_failure_drained_to_console(
+        self,
+        mock_get_client: MagicMock,
+        mock_analyze: MagicMock,
+        mock_nm_cls: MagicMock,
+        runner: CliRunner,
+    ) -> None:
+        """First failure surfaces a warning to console; subsequent cycles silent."""
+        from cja_audit.config import CJASettings
+        from cja_audit.models import NotificationConfig
+
+        client = MagicMock()
+        client.__enter__ = MagicMock(return_value=client)
+        client.__exit__ = MagicMock(return_value=False)
+        client.get_all_logs = MagicMock(return_value=iter([MagicMock()]))
+
+        settings = CJASettings(
+            org_id="x@AdobeOrg", client_id="cid", client_secret="cs", scopes="openid",
+            notifications=NotificationConfig(
+                slack_webhook_url="https://hooks.slack.com/x",
+                notify_on_anomalies=True,
+            ),
+        )
+        mock_get_client.return_value = (client, settings)
+
+        nm_instance = MagicMock()
+        nm_instance.__enter__ = MagicMock(return_value=nm_instance)
+        nm_instance.__exit__ = MagicMock(return_value=False)
+        nm_instance.is_configured = MagicMock(return_value=True)
+        nm_instance.notify_anomaly = MagicMock(return_value=0)
+        nm_instance.pop_first_failure = MagicMock(
+            side_effect=[
+                "Notification delivery failed (slack); subsequent failures suppressed for this session — check logs.",
+                None,
+            ]
+        )
+        mock_nm_cls.return_value = nm_instance
+
+        mock_analyze.return_value = [
+            {"type": "high_activity_user", "user": "a@x.com", "action_count": 50,
+             "average": 10.0, "description": "..."},
+        ]
+
+        result = runner.invoke(main, ["cli", "anomalies"])
+        assert result.exit_code == 0
+        assert "Notification delivery failed (slack)" in result.output
