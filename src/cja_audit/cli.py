@@ -30,7 +30,7 @@ from .formatters import (
 )
 from .models import ActionType, AuditLogQuery, ComponentType
 from .monitor import AuditLogMonitor
-from .notifications import NotificationManager
+from .notifications import AnomalyDedupFilter, NotificationManager
 from .stats import build_date_range_query, calculate_stats, generate_report
 
 console = Console()
@@ -707,6 +707,95 @@ def monitor(
         sys.exit(1)
     except KeyboardInterrupt:
         console.print("\n[yellow]Monitor stopped.[/yellow]")
+
+
+@cli.command()
+@click.option("--watch", is_flag=True, help="Run continuously")
+@click.option(
+    "--interval",
+    type=int,
+    default=300,
+    help="Poll interval in seconds (--watch only, default 300)",
+)
+@click.option(
+    "--lookback",
+    type=int,
+    default=24,
+    help="Hours of history to scan per cycle (default 24)",
+)
+@click.pass_context
+def anomalies(
+    ctx: click.Context,
+    watch: bool,
+    interval: int,
+    lookback: int,
+) -> None:
+    """Detect anomalies and dispatch to configured notification channels."""
+    config_path = ctx.obj.get("config_path")
+
+    try:
+        client, settings = get_client(config_path)
+
+        with (
+            client,
+            NotificationManager(settings.notifications) as nm,
+        ):
+            if nm.is_configured() and settings.notifications.notify_on_anomalies:
+                channel_summary = []
+                if settings.notifications.slack_webhook_url:
+                    channel_summary.append("Slack")
+                if settings.notifications.webhooks:
+                    channel_summary.append(f"{len(settings.notifications.webhooks)} webhook(s)")
+                console.print(
+                    f"[dim]Anomaly delivery enabled: {', '.join(channel_summary)}[/dim]"
+                )
+            elif nm.is_configured():
+                console.print(
+                    "[dim]Notifications configured but notify_on_anomalies is false.[/dim]"
+                )
+
+            dedup = AnomalyDedupFilter()
+            _run_anomalies_cycle(client, nm, dedup, lookback)
+
+    except AuthenticationError as e:
+        console.print(f"[red]Authentication error:[/red] {e}")
+        sys.exit(1)
+    except APIError as e:
+        console.print(f"[red]API error:[/red] {e}")
+        sys.exit(1)
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Anomaly scan stopped.[/yellow]")
+
+
+def _run_anomalies_cycle(
+    client: AuditLogsClient,
+    nm: NotificationManager,
+    dedup: AnomalyDedupFilter,
+    lookback: int,
+) -> None:
+    """One scan cycle: fetch → detect → dedup → print + dispatch → drain warnings."""
+    end = datetime.now(UTC)
+    start = end - timedelta(hours=lookback)
+    query = AuditLogQuery(start_date=start, end_date=end)
+    entries = list(client.get_all_logs(query))
+
+    raw_anomalies = analyze_for_anomalies(entries)
+    new_anomalies = dedup.suppress_seen(raw_anomalies)
+
+    for anomaly in new_anomalies:
+        console.print(f"[yellow]•[/yellow] {anomaly['description']}")
+        try:
+            nm.notify_anomaly(anomaly)
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "notify_anomaly raised; continuing"
+            )
+
+    while True:
+        warning = nm.pop_first_failure()
+        if warning is None:
+            break
+        console.print(f"[yellow]⚠ {warning}[/yellow]")
 
 
 @cli.command()

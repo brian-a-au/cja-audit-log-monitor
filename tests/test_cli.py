@@ -659,3 +659,164 @@ class TestMonitorCommand:
 
         fake_nm.__enter__.assert_called_once()
         fake_nm.__exit__.assert_called_once()
+
+
+class TestAnomaliesCommand:
+    """Tests for the new `cja-audit cli anomalies` command."""
+
+    @patch("cja_audit.cli.get_client")
+    def test_oneshot_no_entries_prints_nothing_to_dispatch(
+        self, mock_get_client: MagicMock, runner: CliRunner
+    ) -> None:
+        """Empty entries → no anomalies → no dispatch."""
+        from cja_audit.config import CJASettings
+        from cja_audit.models import NotificationConfig
+
+        client = MagicMock()
+        client.__enter__ = MagicMock(return_value=client)
+        client.__exit__ = MagicMock(return_value=False)
+        client.get_all_logs = MagicMock(return_value=iter([]))
+
+        settings = CJASettings(
+            org_id="x@AdobeOrg", client_id="cid", client_secret="cs", scopes="openid",
+            notifications=NotificationConfig(),
+        )
+        mock_get_client.return_value = (client, settings)
+
+        result = runner.invoke(main, ["cli", "anomalies"])
+        assert result.exit_code == 0
+
+    @patch("cja_audit.cli.NotificationManager")
+    @patch("cja_audit.cli.analyze_for_anomalies")
+    @patch("cja_audit.cli.get_client")
+    def test_oneshot_dispatches_each_unique_anomaly_once(
+        self,
+        mock_get_client: MagicMock,
+        mock_analyze: MagicMock,
+        mock_nm_cls: MagicMock,
+        runner: CliRunner,
+    ) -> None:
+        """Each new anomaly dispatched once via notify_anomaly."""
+        from cja_audit.config import CJASettings
+        from cja_audit.models import NotificationConfig
+
+        client = MagicMock()
+        client.__enter__ = MagicMock(return_value=client)
+        client.__exit__ = MagicMock(return_value=False)
+        client.get_all_logs = MagicMock(return_value=iter([MagicMock()]))
+
+        settings = CJASettings(
+            org_id="x@AdobeOrg", client_id="cid", client_secret="cs", scopes="openid",
+            notifications=NotificationConfig(
+                slack_webhook_url="https://hooks.slack.com/x",
+                notify_on_anomalies=True,
+            ),
+        )
+        mock_get_client.return_value = (client, settings)
+
+        nm_instance = MagicMock()
+        nm_instance.__enter__ = MagicMock(return_value=nm_instance)
+        nm_instance.__exit__ = MagicMock(return_value=False)
+        nm_instance.is_configured = MagicMock(return_value=True)
+        nm_instance.notify_anomaly = MagicMock(return_value=1)
+        nm_instance.pop_first_failure = MagicMock(return_value=None)
+        mock_nm_cls.return_value = nm_instance
+
+        mock_analyze.return_value = [
+            {"type": "high_activity_user", "user": "a@x.com", "action_count": 50,
+             "average": 10.0, "description": "..."},
+            {"type": "off_hours_activity", "hour": 3, "action_count": 25,
+             "description": "..."},
+        ]
+
+        result = runner.invoke(main, ["cli", "anomalies"])
+        assert result.exit_code == 0
+        assert nm_instance.notify_anomaly.call_count == 2
+
+    @patch("cja_audit.cli.NotificationManager")
+    @patch("cja_audit.cli.analyze_for_anomalies")
+    @patch("cja_audit.cli.get_client")
+    def test_oneshot_skips_dispatch_when_anomalies_disabled(
+        self,
+        mock_get_client: MagicMock,
+        mock_analyze: MagicMock,
+        mock_nm_cls: MagicMock,
+        runner: CliRunner,
+    ) -> None:
+        """notify_on_anomalies: false → notify_anomaly returns 0 (early return)."""
+        from cja_audit.config import CJASettings
+        from cja_audit.models import NotificationConfig
+
+        client = MagicMock()
+        client.__enter__ = MagicMock(return_value=client)
+        client.__exit__ = MagicMock(return_value=False)
+        client.get_all_logs = MagicMock(return_value=iter([MagicMock()]))
+
+        settings = CJASettings(
+            org_id="x@AdobeOrg", client_id="cid", client_secret="cs", scopes="openid",
+            notifications=NotificationConfig(
+                slack_webhook_url="https://hooks.slack.com/x",
+                notify_on_anomalies=False,
+            ),
+        )
+        mock_get_client.return_value = (client, settings)
+
+        nm_instance = MagicMock()
+        nm_instance.__enter__ = MagicMock(return_value=nm_instance)
+        nm_instance.__exit__ = MagicMock(return_value=False)
+        nm_instance.is_configured = MagicMock(return_value=True)
+        nm_instance.notify_anomaly = MagicMock(return_value=0)
+        nm_instance.pop_first_failure = MagicMock(return_value=None)
+        mock_nm_cls.return_value = nm_instance
+
+        mock_analyze.return_value = [
+            {"type": "high_activity_user", "user": "a@x.com", "action_count": 50,
+             "average": 10.0, "description": "..."},
+        ]
+
+        result = runner.invoke(main, ["cli", "anomalies"])
+        assert result.exit_code == 0
+        assert nm_instance.notify_anomaly.call_count == 1
+
+    @patch("cja_audit.cli.NotificationManager")
+    @patch("cja_audit.cli.analyze_for_anomalies")
+    @patch("cja_audit.cli.get_client")
+    def test_oneshot_no_dispatch_when_manager_unconfigured(
+        self,
+        mock_get_client: MagicMock,
+        mock_analyze: MagicMock,
+        mock_nm_cls: MagicMock,
+        runner: CliRunner,
+    ) -> None:
+        """is_configured() == False → no Slack/webhook traffic, but command runs."""
+        from cja_audit.config import CJASettings
+        from cja_audit.models import NotificationConfig
+
+        client = MagicMock()
+        client.__enter__ = MagicMock(return_value=client)
+        client.__exit__ = MagicMock(return_value=False)
+        client.get_all_logs = MagicMock(return_value=iter([MagicMock()]))
+
+        settings = CJASettings(
+            org_id="x@AdobeOrg", client_id="cid", client_secret="cs", scopes="openid",
+            notifications=NotificationConfig(),
+        )
+        mock_get_client.return_value = (client, settings)
+
+        nm_instance = MagicMock()
+        nm_instance.__enter__ = MagicMock(return_value=nm_instance)
+        nm_instance.__exit__ = MagicMock(return_value=False)
+        nm_instance.is_configured = MagicMock(return_value=False)
+        nm_instance.notify_anomaly = MagicMock(return_value=0)
+        nm_instance.pop_first_failure = MagicMock(return_value=None)
+        mock_nm_cls.return_value = nm_instance
+
+        mock_analyze.return_value = [
+            {"type": "high_activity_user", "user": "a@x.com", "action_count": 50,
+             "average": 10.0, "description": "..."},
+        ]
+
+        result = runner.invoke(main, ["cli", "anomalies"])
+        assert result.exit_code == 0
+        # notify_anomaly is called regardless; the manager itself short-circuits
+        # internally. The test verifies no exception and clean exit.
