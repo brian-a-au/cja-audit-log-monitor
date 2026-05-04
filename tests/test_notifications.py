@@ -201,7 +201,7 @@ class TestNotificationConfig:
         assert config.webhooks == []
         assert config.slack_webhook_url is None
         assert config.notify_on_alerts is True
-        assert config.notify_on_anomalies is True
+        assert config.notify_on_anomalies is False
 
 
 class TestFailureWarning:
@@ -264,7 +264,10 @@ class TestFailureWarning:
 
     def test_anomaly_path_tracks_slack_failure(self, httpx_mock):
         """notify_anomaly's Slack path participates in failure tracking."""
-        config = NotificationConfig(slack_webhook_url="https://hooks.slack.com/x")
+        config = NotificationConfig(
+            slack_webhook_url="https://hooks.slack.com/x",
+            notify_on_anomalies=True,
+        )
         manager = NotificationManager(config)
         httpx_mock.add_response(url="https://hooks.slack.com/x", status_code=500)
 

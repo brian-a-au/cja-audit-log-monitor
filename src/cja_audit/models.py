@@ -182,5 +182,5 @@ class NotificationConfig(BaseModel):
 
     webhooks: list[WebhookConfig] = Field(default_factory=list)
     slack_webhook_url: str | None = None
-    notify_on_anomalies: bool = True
+    notify_on_anomalies: bool = False
     notify_on_alerts: bool = True
