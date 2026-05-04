@@ -1,7 +1,8 @@
 """Notification handlers for alert delivery."""
 
+import hashlib
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 
 import httpx
@@ -378,7 +379,6 @@ class NotificationManager:
 
 def _today_iso() -> str:
     """Return today's local date as YYYY-MM-DD. Module-level for test patching."""
-    from datetime import date
     return date.today().isoformat()
 
 
@@ -400,7 +400,6 @@ class AnomalyDedupFilter:
 
     def fingerprint(self, anomaly: dict[str, Any]) -> str:
         """Return a stable 16-char hex fingerprint for the anomaly."""
-        import hashlib
         items = sorted(
             (str(k), str(v))
             for k, v in anomaly.items()
