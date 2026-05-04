@@ -1027,12 +1027,11 @@ class TestAnomaliesCommand:
         nm_instance.__exit__ = MagicMock(return_value=False)
         nm_instance.is_configured = MagicMock(return_value=True)
         nm_instance.notify_anomaly = MagicMock(return_value=0)
-        nm_instance.pop_first_failure = MagicMock(
-            side_effect=[
-                "Notification delivery failed (slack); subsequent failures suppressed for this session — check logs.",
-                None,
-            ]
+        warning_text = (
+            "Notification delivery failed (slack); subsequent failures "
+            "suppressed for this session — check logs."
         )
+        nm_instance.pop_first_failure = MagicMock(side_effect=[warning_text, None])
         mock_nm_cls.return_value = nm_instance
 
         mock_analyze.return_value = [
