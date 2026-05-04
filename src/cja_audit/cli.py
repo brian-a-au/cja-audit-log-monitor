@@ -757,7 +757,8 @@ def anomalies(
 
             dedup = AnomalyDedupFilter()
             stop_event = threading.Event()
-            _install_anomalies_sigint(stop_event)
+            if watch:
+                _install_anomalies_sigint(stop_event)
 
             while True:
                 _run_anomalies_cycle(client, nm, dedup, lookback)
@@ -776,8 +777,13 @@ def anomalies(
         console.print("\n[yellow]Anomaly scan stopped.[/yellow]")
 
 
-def _install_anomalies_sigint(stop_event: "threading.Event") -> None:
-    """Install a SIGINT handler that sets stop_event. Idempotent within a session."""
+def _install_anomalies_sigint(stop_event: threading.Event) -> None:
+    """Install a SIGINT handler that sets stop_event for the watch-loop.
+
+    Replaces any prior SIGINT handler for the duration of the process. Intended
+    for one-shot CLI invocations where the watch loop owns the process lifetime;
+    not safe to call from longer-lived embedders.
+    """
     import signal
 
     def _handler(signum, frame):  # noqa: ARG001

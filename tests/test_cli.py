@@ -941,6 +941,9 @@ class TestAnomaliesCommand:
             )
 
         assert result.exit_code == 0
+        # Exactly one cycle ran before stop_event broke the loop.
+        assert mock_analyze.call_count == 1
+        assert nm_instance.notify_anomaly.call_count == 0
 
     @patch("cja_audit.cli.NotificationManager")
     @patch("cja_audit.cli.analyze_for_anomalies")
