@@ -288,6 +288,12 @@ def analyze_for_anomalies(entries: list[AuditLogEntry]) -> list[dict[str, Any]]:
 
     Returns:
         List of anomaly reports.
+
+    Note:
+        When adding new anomaly types, fields whose values fluctuate between
+        cycles (counts, averages) must be added to
+        ``notifications.AnomalyDedupFilter._EXCLUDED_FIELDS`` or per-cycle
+        re-dispatch will silently break for that anomaly type.
     """
     anomalies: list[dict[str, Any]] = []
 

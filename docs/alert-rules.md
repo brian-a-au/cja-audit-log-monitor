@@ -69,7 +69,7 @@ Fired alerts can optionally be delivered to external channels via the `notificat
 notifications:
   slack_webhook_url: https://hooks.slack.com/services/XXX/YYY/ZZZ
   notify_on_alerts: true
-  notify_on_anomalies: true   # config-honored; anomaly delivery not implemented in this scope
+  notify_on_anomalies: true   # opt-in; fires from `cja-audit cli anomalies`
   webhooks:
     - url: https://example.com/webhook
       enabled: true
@@ -84,7 +84,7 @@ notifications:
 |---|---|
 | `slack_webhook_url` | Slack incoming webhook URL. One per org. |
 | `notify_on_alerts` | Master toggle for rule-based alert delivery. Default `true`. |
-| `notify_on_anomalies` | Reserved — anomaly delivery is not wired in the current scope. Default `true`. |
+| `notify_on_anomalies` | Enable anomaly delivery via `cja-audit cli anomalies [--watch]`. Default `false` (opt-in). |
 | `webhooks[].url` | Webhook target. Multiple supported. |
 | `webhooks[].enabled` | Per-webhook toggle. Default `true`. |
 | `webhooks[].method` | HTTP method. Default `POST`. |
@@ -93,3 +93,23 @@ notifications:
 | `webhooks[].include_entry_details` | Include the audit entry in the payload. Default `true`. |
 
 Both the [Real-Time Monitor screen](screens/monitor.md) and the CLI's `cja-audit cli monitor` / `tail` dispatch to all configured channels when a rule fires. The first delivery failure per channel per session surfaces a one-time warning; subsequent failures are suppressed until the channel recovers (logs always record every failure).
+
+### Anomaly delivery
+
+Anomalies (`high_activity_user`, `bulk_delete_single_user`, `off_hours_activity`) are
+detected by `analyze_for_anomalies` and dispatched via `cja-audit cli anomalies`.
+
+- **Opt-in.** Set `notify_on_anomalies: true` in your `notifications:` block. Default
+  is `false`.
+- **Dedup.** Per-session in-memory fingerprint over `(type, identifying fields,
+  today's date)`. Recurring anomalies whose counts grew between cycles still
+  dedupe within a session. Dedup state is lost on process exit.
+- **Day-bucket boundary.** An anomaly observed at 23:59 fingerprints differently
+  at 00:01 the next day, so a long-running `--watch` loop will re-dispatch
+  recurring patterns under the new day. This is intended.
+- **Failure warnings.** Anomaly delivery shares the alert failure-warning channel:
+  one warning per channel per session, then silenced.
+- **TUI Dashboard.** The Dashboard's Recent Anomalies block remains a passive
+  review surface and does not dispatch.
+
+See [CLI Reference → `anomalies`](cli.md#anomalies--detect-and-deliver-anomalies) for the command flags.

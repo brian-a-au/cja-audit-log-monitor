@@ -70,6 +70,15 @@ class TestNotificationManager:
         manager = NotificationManager(NotificationConfig())
         assert manager.is_configured() is False
 
+    def test_is_configured_ignores_disabled_webhooks(self) -> None:
+        """Disabled webhook entries do not count as active channels."""
+        config = NotificationConfig(
+            webhooks=[WebhookConfig(url="https://disabled.example", enabled=False)]
+        )
+        manager = NotificationManager(config)
+
+        assert manager.is_configured() is False
+
     def test_build_alert_payload(self, sample_entry: AuditLogEntry) -> None:
         """Test building alert payload."""
         manager = NotificationManager()
@@ -201,7 +210,19 @@ class TestNotificationConfig:
         assert config.webhooks == []
         assert config.slack_webhook_url is None
         assert config.notify_on_alerts is True
-        assert config.notify_on_anomalies is True
+        assert config.notify_on_anomalies is False
+
+    def test_active_channels_ignore_disabled_webhooks(self) -> None:
+        """Only enabled webhooks count as active channels."""
+        config = NotificationConfig(
+            webhooks=[
+                WebhookConfig(url="https://disabled.example", enabled=False),
+                WebhookConfig(url="https://enabled.example", enabled=True),
+            ]
+        )
+
+        assert config.enabled_webhook_count == 1
+        assert config.has_active_channels is True
 
 
 class TestFailureWarning:
@@ -264,7 +285,10 @@ class TestFailureWarning:
 
     def test_anomaly_path_tracks_slack_failure(self, httpx_mock):
         """notify_anomaly's Slack path participates in failure tracking."""
-        config = NotificationConfig(slack_webhook_url="https://hooks.slack.com/x")
+        config = NotificationConfig(
+            slack_webhook_url="https://hooks.slack.com/x",
+            notify_on_anomalies=True,
+        )
         manager = NotificationManager(config)
         httpx_mock.add_response(url="https://hooks.slack.com/x", status_code=500)
 
@@ -272,3 +296,122 @@ class TestFailureWarning:
         warning = manager.pop_first_failure()
         assert warning is not None
         assert "slack" in warning.lower()
+
+
+class TestAnomalyDedupFilter:
+    """Tests for in-memory per-session anomaly dedup."""
+
+    def test_empty_input_returns_empty(self):
+        from cja_audit.notifications import AnomalyDedupFilter
+        f = AnomalyDedupFilter()
+        assert f.suppress_seen([]) == []
+
+    def test_single_anomaly_passes_through_first_time(self):
+        from cja_audit.notifications import AnomalyDedupFilter
+        f = AnomalyDedupFilter()
+        anomaly = {
+            "type": "high_activity_user",
+            "user": "alice@example.com",
+            "action_count": 50,
+            "average": 10.0,
+            "description": "User alice@example.com has 50 actions (10.0 avg)",
+        }
+        out = f.suppress_seen([anomaly])
+        assert out == [anomaly]
+
+    def test_same_anomaly_suppressed_on_repeat(self):
+        from cja_audit.notifications import AnomalyDedupFilter
+        f = AnomalyDedupFilter()
+        anomaly = {
+            "type": "bulk_delete_single_user",
+            "user": "bob@example.com",
+            "delete_count": 15,
+            "description": "Single user performed 15 deletes",
+        }
+        f.suppress_seen([anomaly])
+        assert f.suppress_seen([anomaly]) == []
+
+    def test_count_change_does_not_change_fingerprint(self):
+        """Recurring anomaly whose count grew between cycles still dedupes."""
+        from cja_audit.notifications import AnomalyDedupFilter
+        f = AnomalyDedupFilter()
+        first = {
+            "type": "bulk_delete_single_user",
+            "user": "carol@example.com",
+            "delete_count": 12,
+            "description": "Single user performed 12 deletes",
+        }
+        second = {**first, "delete_count": 18, "description": "Single user performed 18 deletes"}
+        f.suppress_seen([first])
+        assert f.suppress_seen([second]) == []
+
+    def test_different_users_pass_through(self):
+        from cja_audit.notifications import AnomalyDedupFilter
+        f = AnomalyDedupFilter()
+        a1 = {"type": "high_activity_user", "user": "a@x.com", "action_count": 50,
+              "average": 10.0, "description": "..."}
+        a2 = {"type": "high_activity_user", "user": "b@x.com", "action_count": 60,
+              "average": 10.0, "description": "..."}
+        out = f.suppress_seen([a1, a2])
+        assert len(out) == 2
+
+    def test_different_anomaly_types_pass_through(self):
+        from cja_audit.notifications import AnomalyDedupFilter
+        f = AnomalyDedupFilter()
+        a1 = {"type": "high_activity_user", "user": "a@x.com", "action_count": 50,
+              "average": 10.0, "description": "..."}
+        a2 = {"type": "off_hours_activity", "hour": 3, "action_count": 25,
+              "description": "..."}
+        out = f.suppress_seen([a1, a2])
+        assert len(out) == 2
+
+    def test_off_hours_different_hours_pass_through(self):
+        from cja_audit.notifications import AnomalyDedupFilter
+        f = AnomalyDedupFilter()
+        a1 = {"type": "off_hours_activity", "hour": 2, "action_count": 25,
+              "description": "..."}
+        a2 = {"type": "off_hours_activity", "hour": 4, "action_count": 30,
+              "description": "..."}
+        out = f.suppress_seen([a1, a2])
+        assert len(out) == 2
+
+    def test_missing_fields_fingerprint_stably(self):
+        """Anomaly dict shape with missing optional keys still fingerprints; no exception."""
+        from cja_audit.notifications import AnomalyDedupFilter
+        f = AnomalyDedupFilter()
+        a = {"type": "unknown_type"}
+        out1 = f.suppress_seen([a])
+        out2 = f.suppress_seen([a])
+        assert out1 == [a]
+        assert out2 == []
+
+    def test_description_only_difference_dedupes(self):
+        """Same identity fields, different free-text description → suppressed."""
+        from cja_audit.notifications import AnomalyDedupFilter
+        f = AnomalyDedupFilter()
+        a1 = {"type": "bulk_delete_single_user", "user": "d@x.com", "delete_count": 10,
+              "description": "Single user performed 10 deletes"}
+        a2 = {**a1, "description": "totally different wording"}
+        f.suppress_seen([a1])
+        assert f.suppress_seen([a2]) == []
+
+    def test_day_bucket_simulated_via_freezegun_alternative(self, monkeypatch):
+        """Same anomaly on different days fingerprints differently.
+
+        We patch the date helper directly because freezegun isn't a project dep.
+        """
+        from datetime import date
+
+        import cja_audit.notifications as nm_mod
+        from cja_audit.notifications import AnomalyDedupFilter
+
+        f = AnomalyDedupFilter()
+        a = {"type": "high_activity_user", "user": "e@x.com", "action_count": 50,
+             "average": 10.0, "description": "..."}
+
+        monkeypatch.setattr(nm_mod, "_today_iso", lambda: date(2026, 5, 4).isoformat())
+        f.suppress_seen([a])
+
+        monkeypatch.setattr(nm_mod, "_today_iso", lambda: date(2026, 5, 5).isoformat())
+        out = f.suppress_seen([a])
+        assert len(out) == 1

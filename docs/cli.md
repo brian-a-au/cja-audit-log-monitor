@@ -22,6 +22,9 @@ cja-audit cli stats --days 7
 # Real-time monitoring
 cja-audit cli monitor --interval 30
 
+# Detect and deliver anomalies
+cja-audit cli anomalies --watch
+
 # Generate report
 cja-audit cli report --days 30 --output report.json
 ```
@@ -52,9 +55,35 @@ cja-audit cli report [--days N] [--output FILE]
 ```bash
 cja-audit cli monitor [--interval N] [--duration N] [--no-alerts]
 cja-audit cli tail [--user EMAIL] [--action TYPE] [--interval N]
+cja-audit cli anomalies [--watch] [--interval N] [--lookback N]
 ```
 
 > When `~/.cja-audit/config.yaml` defines a `notifications:` block (Slack and/or webhooks), each fired alert is also delivered to those channels. See [Alert Rules → Delivery channels](alert-rules.md#delivery-channels).
+
+### `anomalies` — Detect and deliver anomalies
+
+Run anomaly detection over recent audit logs and dispatch new findings to
+configured notification channels.
+
+```bash
+cja-audit cli anomalies                    # one-shot scan
+cja-audit cli anomalies --watch            # continuous loop
+cja-audit cli anomalies --watch --interval 600 --lookback 48
+```
+
+**Flags:**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--watch` | off | Loop continuously; otherwise scan once and exit. |
+| `--interval` | 300 | Positive number of seconds between `--watch` cycles. |
+| `--lookback` | 24 | Positive number of hours of history to scan per cycle. |
+
+The command runs detection and prints anomalies to the console regardless of
+notification configuration. External delivery requires `notifications:` to be
+configured **and** `notify_on_anomalies: true` (opt-in; default `false`). See
+[Alert Rules → Anomaly delivery](alert-rules.md#anomaly-delivery) for dedup and
+failure-warning behavior.
 
 ## Export commands
 

@@ -2,6 +2,7 @@
 
 import logging
 import sys
+import time
 from datetime import UTC, datetime, timedelta
 from itertools import chain, islice
 from pathlib import Path
@@ -9,11 +10,12 @@ from pathlib import Path
 import click
 from rich.console import Console
 from rich.logging import RichHandler
+from rich.markup import escape
 
 from . import __version__
 from .alerts import AlertEngine, analyze_for_anomalies
 from .auth import AuthenticationError, TokenManager
-from .client import APIError, AuditLogsClient
+from .client import APIError, AuditLogsClient, RateLimitError
 from .config import (
     CJASettings,
     create_default_config,
@@ -30,7 +32,7 @@ from .formatters import (
 )
 from .models import ActionType, AuditLogQuery, ComponentType
 from .monitor import AuditLogMonitor
-from .notifications import NotificationManager
+from .notifications import AnomalyDedupFilter, NotificationManager
 from .stats import build_date_range_query, calculate_stats, generate_report
 
 console = Console()
@@ -684,8 +686,9 @@ def monitor(
                 channel_summary = []
                 if settings.notifications.slack_webhook_url:
                     channel_summary.append("Slack")
-                if settings.notifications.webhooks:
-                    channel_summary.append(f"{len(settings.notifications.webhooks)} webhook(s)")
+                enabled_webhooks = settings.notifications.enabled_webhook_count
+                if enabled_webhooks:
+                    channel_summary.append(f"{enabled_webhooks} webhook(s)")
                 console.print(
                     f"[dim]Notification channels: {', '.join(channel_summary)}[/dim]"
                 )
@@ -707,6 +710,153 @@ def monitor(
         sys.exit(1)
     except KeyboardInterrupt:
         console.print("\n[yellow]Monitor stopped.[/yellow]")
+
+
+@cli.command()
+@click.option("--watch", is_flag=True, help="Run continuously")
+@click.option(
+    "--interval",
+    type=click.IntRange(min=1),
+    default=300,
+    help="Poll interval in seconds (--watch only, default 300)",
+)
+@click.option(
+    "--lookback",
+    type=click.IntRange(min=1),
+    default=24,
+    help="Hours of history to scan per cycle (default 24)",
+)
+@click.pass_context
+def anomalies(
+    ctx: click.Context,
+    watch: bool,
+    interval: int,
+    lookback: int,
+) -> None:
+    """Detect anomalies and dispatch to configured notification channels."""
+    config_path = ctx.obj.get("config_path")
+
+    try:
+        client, settings = get_client(config_path)
+
+        with (
+            client,
+            NotificationManager(settings.notifications) as nm,
+        ):
+            if nm.is_configured() and settings.notifications.notify_on_anomalies:
+                channel_summary = []
+                if settings.notifications.slack_webhook_url:
+                    channel_summary.append("Slack")
+                enabled_webhooks = settings.notifications.enabled_webhook_count
+                if enabled_webhooks:
+                    channel_summary.append(f"{enabled_webhooks} webhook(s)")
+                console.print(
+                    f"[dim]Anomaly delivery enabled: {', '.join(channel_summary)}[/dim]"
+                )
+            elif nm.is_configured():
+                console.print(
+                    "[dim]Notifications configured but notify_on_anomalies is false.[/dim]"
+                )
+
+            dedup = AnomalyDedupFilter()
+            if watch:
+                _install_anomalies_signal_handlers()
+
+            while True:
+                cycle_delay = interval
+                try:
+                    _run_anomalies_cycle(client, nm, dedup, lookback)
+                except APIError as e:
+                    if not watch or not _is_retryable_anomalies_error(e):
+                        raise
+                    if isinstance(e, RateLimitError):
+                        cycle_delay = max(interval, e.retry_after)
+                    # In --watch mode, transient upstream errors must not kill
+                    # the daemon. Log and continue to the next cycle.
+                    console.print(f"[yellow]API error this cycle:[/yellow] {e}")
+                if not watch:
+                    break
+                time.sleep(cycle_delay)
+
+    except AuthenticationError as e:
+        console.print(f"[red]Authentication error:[/red] {e}")
+        sys.exit(1)
+    except APIError as e:
+        console.print(f"[red]API error:[/red] {e}")
+        sys.exit(1)
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Anomaly scan stopped.[/yellow]")
+
+
+_RETRYABLE_ANOMALY_STATUSES = frozenset({408, 425, 429, 500, 502, 503, 504})
+
+
+def _is_retryable_anomalies_error(error: APIError) -> bool:
+    """Return whether a watch cycle should retry an API failure."""
+    return error.status_code is None or error.status_code in _RETRYABLE_ANOMALY_STATUSES
+
+
+def _install_anomalies_signal_handlers() -> None:
+    """Install SIGINT and SIGTERM handlers that interrupt the watch loop.
+
+    Replaces any prior handlers for the duration of the process. SIGTERM is
+    handled the same as SIGINT so systemd's default `KillSignal=SIGTERM` shuts
+    the daemon down cleanly. Intended for one-shot CLI invocations where the
+    watch loop owns the process lifetime; not safe to call from longer-lived
+    embedders. Raising KeyboardInterrupt unwinds in-flight API pagination and
+    notification delivery through both context managers instead of waiting for
+    the full cycle to complete.
+    """
+    import signal
+
+    def _handler(signum, frame):  # noqa: ARG001
+        raise KeyboardInterrupt
+
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            signal.signal(sig, _handler)
+        except ValueError:
+            # signal.signal raises if not in main thread (e.g., under CliRunner).
+            pass
+
+
+def _run_anomalies_cycle(
+    client: AuditLogsClient,
+    nm: NotificationManager,
+    dedup: AnomalyDedupFilter,
+    lookback: int,
+) -> None:
+    """One scan cycle: fetch → detect → dedup → print + dispatch → drain warnings."""
+    end = datetime.now(UTC)
+    start = end - timedelta(hours=lookback)
+    query = AuditLogQuery(start_date=start, end_date=end)
+    # Wrap in list() so analyze_for_anomalies (which calls len()) works against
+    # any iterable-of-entries the client/mock returns.
+    entries = list(client.get_all_logs(query))
+
+    raw_anomalies = analyze_for_anomalies(entries)
+    new_anomalies = dedup.suppress_seen(raw_anomalies)
+
+    for anomaly in new_anomalies:
+        # Escape the description: it's user-derived (component names, user
+        # identifiers) and may contain `[` characters that would otherwise
+        # be parsed as Rich markup.
+        description = anomaly.get("description", anomaly.get("type", "anomaly"))
+        console.print(f"[yellow]•[/yellow] {escape(description)}")
+        try:
+            nm.notify_anomaly(anomaly)
+        except Exception:
+            # Network failures are surfaced via pop_first_failure; this catches
+            # unexpected programming errors so one bad anomaly doesn't kill the cycle.
+            logging.getLogger(__name__).exception(
+                "notify_anomaly raised unexpectedly; continuing"
+            )
+
+    while True:
+        warning = nm.pop_first_failure()
+        if warning is None:
+            break
+        console.print(f"[yellow]⚠ {warning}[/yellow]")
 
 
 @cli.command()

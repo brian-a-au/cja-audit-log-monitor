@@ -8,7 +8,7 @@ A powerful TUI (Text User Interface) application for monitoring and analyzing Ad
 - **Real-Time Updates**: Monitor audit logs as they happen with configurable polling
 - **Smart Filtering**: Search by user, action type, component, and text
 - **Visual Analytics**: Bar charts for action distribution and activity patterns
-- **Alert Detection & Delivery**: Configurable rules for bulk deletes, exports, and suspicious patterns; optional Slack/webhook delivery
+- **Alert & Anomaly Detection & Delivery**: Configurable rules for bulk deletes, exports, and suspicious patterns; optional Slack/webhook delivery (anomaly delivery via `cja-audit cli anomalies`; opt-in by setting `notify_on_anomalies: true`, default `false`)
 - **Export Options**: Save filtered logs to JSON, CSV, or TSV
 - **Connection Status**: Live API connection monitoring
 
@@ -33,6 +33,10 @@ cp .env.example .env
 
 # 5. Launch the TUI
 uv run cja-audit
+
+# Or run a CLI command — e.g. watch for anomalies and dispatch to Slack
+# (delivery is opt-in: set notify_on_anomalies: true in your notifications block)
+cja-audit cli anomalies --watch
 ```
 
 That's it! The interactive TUI will launch with a dashboard showing your audit log activity.

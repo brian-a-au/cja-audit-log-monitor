@@ -182,5 +182,15 @@ class NotificationConfig(BaseModel):
 
     webhooks: list[WebhookConfig] = Field(default_factory=list)
     slack_webhook_url: str | None = None
-    notify_on_anomalies: bool = True
+    notify_on_anomalies: bool = False
     notify_on_alerts: bool = True
+
+    @property
+    def enabled_webhook_count(self) -> int:
+        """Return the number of enabled webhook channels."""
+        return sum(webhook.enabled for webhook in self.webhooks)
+
+    @property
+    def has_active_channels(self) -> bool:
+        """Return whether Slack or an enabled webhook is configured."""
+        return bool(self.slack_webhook_url) or self.enabled_webhook_count > 0
