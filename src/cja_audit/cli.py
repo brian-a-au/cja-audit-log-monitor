@@ -2,7 +2,7 @@
 
 import logging
 import sys
-import threading
+import time
 from datetime import UTC, datetime, timedelta
 from itertools import chain, islice
 from pathlib import Path
@@ -15,7 +15,7 @@ from rich.markup import escape
 from . import __version__
 from .alerts import AlertEngine, analyze_for_anomalies
 from .auth import AuthenticationError, TokenManager
-from .client import APIError, AuditLogsClient
+from .client import APIError, AuditLogsClient, RateLimitError
 from .config import (
     CJASettings,
     create_default_config,
@@ -686,8 +686,9 @@ def monitor(
                 channel_summary = []
                 if settings.notifications.slack_webhook_url:
                     channel_summary.append("Slack")
-                if settings.notifications.webhooks:
-                    channel_summary.append(f"{len(settings.notifications.webhooks)} webhook(s)")
+                enabled_webhooks = settings.notifications.enabled_webhook_count
+                if enabled_webhooks:
+                    channel_summary.append(f"{enabled_webhooks} webhook(s)")
                 console.print(
                     f"[dim]Notification channels: {', '.join(channel_summary)}[/dim]"
                 )
@@ -715,13 +716,13 @@ def monitor(
 @click.option("--watch", is_flag=True, help="Run continuously")
 @click.option(
     "--interval",
-    type=int,
+    type=click.IntRange(min=1),
     default=300,
     help="Poll interval in seconds (--watch only, default 300)",
 )
 @click.option(
     "--lookback",
-    type=int,
+    type=click.IntRange(min=1),
     default=24,
     help="Hours of history to scan per cycle (default 24)",
 )
@@ -746,8 +747,9 @@ def anomalies(
                 channel_summary = []
                 if settings.notifications.slack_webhook_url:
                     channel_summary.append("Slack")
-                if settings.notifications.webhooks:
-                    channel_summary.append(f"{len(settings.notifications.webhooks)} webhook(s)")
+                enabled_webhooks = settings.notifications.enabled_webhook_count
+                if enabled_webhooks:
+                    channel_summary.append(f"{enabled_webhooks} webhook(s)")
                 console.print(
                     f"[dim]Anomaly delivery enabled: {', '.join(channel_summary)}[/dim]"
                 )
@@ -757,23 +759,24 @@ def anomalies(
                 )
 
             dedup = AnomalyDedupFilter()
-            stop_event = threading.Event()
             if watch:
-                _install_anomalies_signal_handlers(stop_event)
+                _install_anomalies_signal_handlers()
 
             while True:
+                cycle_delay = interval
                 try:
                     _run_anomalies_cycle(client, nm, dedup, lookback)
                 except APIError as e:
-                    if not watch:
+                    if not watch or not _is_retryable_anomalies_error(e):
                         raise
+                    if isinstance(e, RateLimitError):
+                        cycle_delay = max(interval, e.retry_after)
                     # In --watch mode, transient upstream errors must not kill
                     # the daemon. Log and continue to the next cycle.
                     console.print(f"[yellow]API error this cycle:[/yellow] {e}")
-                if not watch or stop_event.is_set():
+                if not watch:
                     break
-                if stop_event.wait(timeout=interval):
-                    break
+                time.sleep(cycle_delay)
 
     except AuthenticationError as e:
         console.print(f"[red]Authentication error:[/red] {e}")
@@ -785,27 +788,35 @@ def anomalies(
         console.print("\n[yellow]Anomaly scan stopped.[/yellow]")
 
 
-def _install_anomalies_signal_handlers(stop_event: threading.Event) -> None:
-    """Install SIGINT and SIGTERM handlers that set stop_event for the watch-loop.
+_RETRYABLE_ANOMALY_STATUSES = frozenset({408, 425, 429, 500, 502, 503, 504})
+
+
+def _is_retryable_anomalies_error(error: APIError) -> bool:
+    """Return whether a watch cycle should retry an API failure."""
+    return error.status_code is None or error.status_code in _RETRYABLE_ANOMALY_STATUSES
+
+
+def _install_anomalies_signal_handlers() -> None:
+    """Install SIGINT and SIGTERM handlers that interrupt the watch loop.
 
     Replaces any prior handlers for the duration of the process. SIGTERM is
     handled the same as SIGINT so systemd's default `KillSignal=SIGTERM` shuts
     the daemon down cleanly. Intended for one-shot CLI invocations where the
     watch loop owns the process lifetime; not safe to call from longer-lived
-    embedders.
+    embedders. Raising KeyboardInterrupt unwinds in-flight API pagination and
+    notification delivery through both context managers instead of waiting for
+    the full cycle to complete.
     """
     import signal
 
     def _handler(signum, frame):  # noqa: ARG001
-        stop_event.set()
+        raise KeyboardInterrupt
 
     for sig in (signal.SIGINT, signal.SIGTERM):
         try:
             signal.signal(sig, _handler)
         except ValueError:
             # signal.signal raises if not in main thread (e.g., under CliRunner).
-            # In that case the loop relies on Event.wait()'s timeout cycling and
-            # tests patch wait() directly.
             pass
 
 

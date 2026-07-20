@@ -70,6 +70,15 @@ class TestNotificationManager:
         manager = NotificationManager(NotificationConfig())
         assert manager.is_configured() is False
 
+    def test_is_configured_ignores_disabled_webhooks(self) -> None:
+        """Disabled webhook entries do not count as active channels."""
+        config = NotificationConfig(
+            webhooks=[WebhookConfig(url="https://disabled.example", enabled=False)]
+        )
+        manager = NotificationManager(config)
+
+        assert manager.is_configured() is False
+
     def test_build_alert_payload(self, sample_entry: AuditLogEntry) -> None:
         """Test building alert payload."""
         manager = NotificationManager()
@@ -202,6 +211,18 @@ class TestNotificationConfig:
         assert config.slack_webhook_url is None
         assert config.notify_on_alerts is True
         assert config.notify_on_anomalies is False
+
+    def test_active_channels_ignore_disabled_webhooks(self) -> None:
+        """Only enabled webhooks count as active channels."""
+        config = NotificationConfig(
+            webhooks=[
+                WebhookConfig(url="https://disabled.example", enabled=False),
+                WebhookConfig(url="https://enabled.example", enabled=True),
+            ]
+        )
+
+        assert config.enabled_webhook_count == 1
+        assert config.has_active_channels is True
 
 
 class TestFailureWarning:

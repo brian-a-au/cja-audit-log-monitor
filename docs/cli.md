@@ -76,8 +76,8 @@ cja-audit cli anomalies --watch --interval 600 --lookback 48
 | Flag | Default | Description |
 |---|---|---|
 | `--watch` | off | Loop continuously; otherwise scan once and exit. |
-| `--interval` | 300 | Seconds to wait between cycles in `--watch` mode. |
-| `--lookback` | 24 | Hours of history to scan per cycle. |
+| `--interval` | 300 | Positive number of seconds between `--watch` cycles. |
+| `--lookback` | 24 | Positive number of hours of history to scan per cycle. |
 
 The command runs detection and prints anomalies to the console regardless of
 notification configuration. External delivery requires `notifications:` to be

@@ -369,12 +369,12 @@ class NotificationManager:
         return None
 
     def is_configured(self) -> bool:
-        """Check if any notification channels are configured.
+        """Check if any active notification channels are configured.
 
         Returns:
-            True if at least one channel is configured.
+            True if Slack or at least one enabled webhook is configured.
         """
-        return bool(self.config.webhooks) or bool(self.config.slack_webhook_url)
+        return self.config.has_active_channels
 
 
 def _today_iso() -> str:
