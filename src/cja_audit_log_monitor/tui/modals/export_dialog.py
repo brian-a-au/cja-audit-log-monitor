@@ -147,4 +147,14 @@ class ExportDialog(ModalScreen):
             return
         self._set_status(f"[$success]exported {count:,} entries to {output_path}[/$success]")
         self.app.notify(f"exported {count:,} entries to {output_path}")
-        self.set_timer(1.5, self.dismiss)
+        self.set_timer(1.5, self._close_if_open)
+
+    def _close_if_open(self) -> None:
+        """Close the dialog after a successful export, unless the user already did.
+
+        Calls ``dismiss`` without awaiting it: a timer callback runs as this
+        screen's own message handler, where awaiting ``dismiss`` raises
+        ``ScreenError`` and crashes the app.
+        """
+        if self.is_attached and self.app.screen is self:
+            self.dismiss()

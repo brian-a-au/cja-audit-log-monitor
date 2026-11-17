@@ -1339,6 +1339,35 @@ class TestExportScope:
         _, kwargs = mock_app_state.client.get_logs_sample.call_args
         assert kwargs["max_entries"] == 10_000
 
+    async def test_dialog_closes_itself_after_export_without_crashing(
+        self, mock_app_state, sample_audit_entries, tmp_path
+    ):
+        from cja_audit_log_monitor.tui.modals import ExportDialog
+
+        mock_app_state.entries = sample_audit_entries
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(120, 40)) as pilot:
+            dialog = await self._open(app, pilot)
+            dialog.query_one("#output-path").value = str(tmp_path / "x.json")
+            await pilot.click("#export-button")
+            await pilot.pause(2.0)
+            assert not isinstance(app.screen, ExportDialog)
+        assert app._exception is None
+
+    async def test_closing_before_auto_close_does_not_crash(
+        self, mock_app_state, sample_audit_entries, tmp_path
+    ):
+        mock_app_state.entries = sample_audit_entries
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(120, 40)) as pilot:
+            dialog = await self._open(app, pilot)
+            dialog.query_one("#output-path").value = str(tmp_path / "x.json")
+            await pilot.click("#export-button")
+            await pilot.pause()
+            await pilot.press("escape")
+            await pilot.pause(2.0)
+        assert app._exception is None
+
     async def test_dialog_uses_lowercase_labels(self, mock_app_state):
         app = _make_app(mock_app_state)
         async with app.run_test(size=(120, 40)) as pilot:
