@@ -8,10 +8,11 @@ from textual.widget import Widget
 from textual.widgets import Button, Label, LoadingIndicator, Static
 from textual.worker import get_current_worker
 
+from ...formatters import resolve_tcss_markup
 from ...models import ActionType, ComponentType
 from ..modals import EntryDetailPanel
 from ..widgets import FilterBar, LogTable
-from .base import ContentView
+from .base import ContentView, not_connected_message
 
 
 class LogBrowserScreen(ContentView):
@@ -41,8 +42,12 @@ class LogBrowserScreen(ContentView):
             id="log-table-and-panel",
         )
 
+        table_message = Static("", id="table-message", classes="empty-state")
+        table_message.display = False
+
         yield Container(
             FilterBar(id="filter-bar"),
+            table_message,
             table_and_panel,
             pagination,
             LoadingIndicator(id="loading"),
@@ -83,6 +88,19 @@ class LogBrowserScreen(ContentView):
         """Update the log table with entries."""
         table = self.query_one("#log-table", LogTable)
         table.load_entries(entries)
+        if entries:
+            self._set_table_message(None)
+        elif self._filters_active():
+            self._set_table_message(
+                resolve_tcss_markup(
+                    "[$text-muted]no entries match these filters · "
+                    "change the search or press reset[/$text-muted]"
+                )
+            )
+        else:
+            self._set_table_message(
+                resolve_tcss_markup("[$text-muted]no audit log entries[/$text-muted]")
+            )
 
         # Update pagination info
         page = self._state.filters.page
@@ -97,8 +115,21 @@ class LogBrowserScreen(ContentView):
         self.query_one("#next-page", Button).disabled = page >= total_pages - 1
 
     def _show_error(self, error: str) -> None:
-        """Show error message."""
-        self.app.notify(f"Error: {error}", severity="error")
+        """Show why the table is empty, above it, so the filters stay usable."""
+        self.query_one("#log-table", LogTable).load_entries([])
+        self._set_table_message(not_connected_message(error))
+
+    def _set_table_message(self, message: str | None) -> None:
+        """Show ``message`` above the table, or hide it when None."""
+        widget = self.query_one("#table-message", Static)
+        widget.display = message is not None
+        widget.update(message or "")
+
+    def _filters_active(self) -> bool:
+        filters = self._state.filters
+        return bool(
+            filters.search_text or filters.user or filters.actions or filters.components
+        )
 
 
     def on_filter_bar_filter_changed(self, event: FilterBar.FilterChanged) -> None:
@@ -158,8 +189,18 @@ class LogBrowserScreen(ContentView):
         panel = self.query_one("#entry-detail-panel", EntryDetailPanel)
         if entry:
             panel.toggle(entry)
+            self.refresh_bindings()
         else:
-            self.app.notify("No entry selected", severity="warning")
+            self.app.notify("no entry selected", severity="warning")
+
+    def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
+        """Offer "close details" in the footer only while the panel is open."""
+        if action == "dismiss_details":
+            try:
+                return self.query_one("#entry-detail-panel", EntryDetailPanel).is_visible()
+            except NoMatches:
+                return False
+        return True
 
     def on_data_table_row_selected(self, event) -> None:
         """Handle DataTable row selection (Enter key)."""
@@ -186,3 +227,4 @@ class LogBrowserScreen(ContentView):
             return
         if panel.is_visible():
             panel.hide()
+            self.refresh_bindings()

@@ -1394,3 +1394,56 @@ class TestHelpScreen:
             await pilot.press("escape")
             await pilot.pause()
             assert app.screen is not help_screen
+
+
+class TestLogBrowserMessages:
+    """The log browser explains an empty table instead of showing a blank grid."""
+
+    async def test_connection_error_is_shown_in_view(self, mock_app_state):
+        mock_app_state.client.get_logs.side_effect = RuntimeError(
+            "invalid_client: invalid client_secret parameter"
+        )
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, "l")
+            message = view.query_one("#table-message", Static)
+            assert message.display
+            assert "not connected" in str(message.render())
+            assert "invalid_client" in str(message.render())
+            assert view.query_one("#filter-bar").display
+
+    async def test_no_matches_says_so(self, mock_app_state):
+        from cja_audit_log_monitor.models import AuditLogResponse
+
+        mock_app_state.client.get_logs.return_value = AuditLogResponse(
+            content=[], total_elements=0, total_pages=0
+        )
+        mock_app_state.filters.search_text = "zzzz"
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, "l")
+            message = view.query_one("#table-message", Static)
+            assert message.display
+            assert "no entries match these filters" in str(message.render())
+
+    async def test_message_hidden_when_rows_load(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, "l")
+            assert not view.query_one("#table-message", Static).display
+
+
+class TestFooterBindings:
+    """The footer only offers keys that do something right now."""
+
+    async def test_close_details_only_when_panel_open(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, "l")
+            assert view.check_action("dismiss_details", ()) is False
+            await pilot.press("enter")
+            await pilot.pause()
+            assert view.check_action("dismiss_details", ()) is True
+            await pilot.press("escape")
+            await pilot.pause()
+            assert view.check_action("dismiss_details", ()) is False
