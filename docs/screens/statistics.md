@@ -7,8 +7,8 @@ The Statistics screen runs deeper analytics over a configurable date window — 
 ## What you see
 
 - **Window control**: a `days` input and an `update` button. Default is 7 days. It stays visible even when the window has no activity, so you can widen it.
-- **Stat cards**: total entries, active users, and the period actually covered by the result.
-- **Action distribution** and **hourly activity** charts side by side. The busiest hour is highlighted.
+- **Stat cards**: the total number of entries in the window, active users, and the dates of the window. When the window has more than 5,000 entries, a note says the charts use the newest 5,000.
+- **Action distribution** and **hourly activity** charts side by side. Hours and days are in your local time zone. The busiest hour is highlighted.
 - **Daily activity** (one bar per day, last 14 days in the window) and the **user ranking** (top 10 by action count) side by side.
 
 ## What you can do

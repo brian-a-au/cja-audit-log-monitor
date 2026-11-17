@@ -12,7 +12,9 @@ Usage:
 
 import argparse
 import asyncio
+import os
 import random
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -81,7 +83,8 @@ def generate_mock_entries(count: int = 150) -> list[AuditLogEntry]:
     entries = []
     # Use fixed seed for reproducible screenshots
     random.seed(42)
-    base_time = datetime(2025, 1, 20, 15, 30, 0, tzinfo=UTC)
+    # Recent data, so it falls inside the dashboard's "last 7 days" window.
+    base_time = datetime.now(UTC).replace(minute=30, second=0, microsecond=0) - timedelta(hours=1)
 
     for i in range(count):
         timestamp = base_time - timedelta(
@@ -198,8 +201,13 @@ def setup_mock_state(app, entries: list[AuditLogEntry]) -> None:
             size=page_size,
         )
 
+    def mock_get_logs_sample(query=None, max_entries=1000):
+        del query  # see mock_get_all_logs
+        return entries[:max_entries], len(entries)
+
     mock_client.get_logs = mock_get_logs
     mock_client.get_all_logs = mock_get_all_logs
+    mock_client.get_logs_sample = mock_get_logs_sample
     mock_client.verify_connection = MagicMock(return_value={
         "connected": True,
         "authenticated": True,
@@ -281,6 +289,9 @@ async def capture_screenshots(output_dir: Path, size: tuple[int, int]) -> None:
 
 def main() -> None:
     """Parse arguments and capture screenshots."""
+    # Screenshots show times in UTC, whatever the local zone of the machine is.
+    os.environ["TZ"] = "UTC"
+    time.tzset()
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
         "--out",

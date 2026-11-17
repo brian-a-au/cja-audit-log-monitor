@@ -51,7 +51,7 @@ class DashboardScreen(ContentView):
             stat_card("total entries", "stat-total"),
             stat_card("active users", "stat-users"),
             stat_card("anomalies", "stat-alerts"),
-            stat_card(f"window · last {DASHBOARD_DAYS} days", "stat-range"),
+            stat_card(f"last {DASHBOARD_DAYS} days", "stat-range"),
             classes="dashboard-stats",
         )
         yield sample_note()
