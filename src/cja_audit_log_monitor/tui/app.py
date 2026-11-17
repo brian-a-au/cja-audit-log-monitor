@@ -1,18 +1,22 @@
 """Main TUI application for CJA Audit Log Monitor."""
 
 from pathlib import Path
+from typing import Literal
 
 from textual import events
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.css.query import NoMatches
+from textual.markup import escape
 from textual.message import Message
 from textual.screen import Screen
 from textual.widgets import ContentSwitcher, Footer, Static
 
 from .screens.base import ContentView
 from .state import AppState
+
+ConnectionStatus = Literal["connecting", "connected", "disconnected"]
 
 
 class HelpScreen(Screen):
@@ -146,14 +150,29 @@ class CJAAuditApp(App):
         )
         yield Footer()
 
-    def _status_row_text(self) -> str:
+    _STATUS_DOT = {"connecting": "$warning", "connected": "$success", "disconnected": "$danger"}
+
+    def _status_row_text(
+        self, status: ConnectionStatus = "connecting", detail: str = ""
+    ) -> str:
         """Build the top status row content."""
-        org = self.state.settings.org_id or "—"
-        return (
-            "cja-audit-log-monitor · "
-            "[$success]●[/$success] connected · "
-            f"[$text-muted]org {org}[/$text-muted]"
-        )
+        color = self._STATUS_DOT[status]
+        if not detail:
+            org = self.state.settings.org_id
+            detail = f"org {org}" if org else ""
+        text = f"cja-audit-log-monitor · [{color}]●[/{color}] {status}"
+        if detail:
+            text += f" · [$text-muted]{escape(detail)}[/$text-muted]"
+        return text
+
+    def set_connection_status(self, status: ConnectionStatus, detail: str = "") -> None:
+        """Show the API connection state in the header row.
+
+        Args:
+            status: One of ``connecting``, ``connected`` or ``disconnected``.
+            detail: Org id, or the error when disconnected.
+        """
+        self.query_one("#status-row", Static).update(self._status_row_text(status, detail))
 
     async def on_mount(self) -> None:
         """Handle application mount."""

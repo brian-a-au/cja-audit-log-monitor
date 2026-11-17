@@ -60,7 +60,6 @@ class DashboardScreen(ContentView):
 
         yield Container(
             Static("dashboard", id="dashboard-title", classes="section-label"),
-            Static(id="connection-status"),
             stats_row,
             Static("ACTION DISTRIBUTION", classes="section-label"),
             Static(id="action-chart", classes="bar-chart"),
@@ -129,12 +128,11 @@ class DashboardScreen(ContentView):
             self.app.call_from_thread(self._hide_loading)
 
     def _update_connection_status(self, connected: bool, info: str) -> None:
-        """Update connection status display."""
-        status = self.query_one("#connection-status", Static)
+        """Report connection state in the app header."""
         if connected:
-            status.update(resolve_tcss_markup(f"[$success]●[/$success] connected · {info}"))
+            self.app.set_connection_status("connected", f"org {info}")
         else:
-            status.update(resolve_tcss_markup(f"[$danger]●[/$danger] disconnected · {info}"))
+            self.app.set_connection_status("disconnected", info)
 
     def _update_stats(self, stats: dict, anomalies: list, entry_count: int) -> None:
         """Update statistics display."""
@@ -201,9 +199,7 @@ class DashboardScreen(ContentView):
 
     def _show_error(self, error: str) -> None:
         """Show error message."""
-        self.query_one("#connection-status", Static).update(
-            resolve_tcss_markup(f"[$danger]error: {error}[/$danger]")
-        )
+        self.app.set_connection_status("disconnected", error)
 
     def _hide_loading(self) -> None:
         """Hide loading indicator."""

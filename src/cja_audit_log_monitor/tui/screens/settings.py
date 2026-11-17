@@ -201,6 +201,7 @@ class SettingsScreen(ContentView):
         status = self.query_one("#connection-status", Static)
 
         if result.get("connected") and result.get("authenticated"):
+            self.app.set_connection_status("connected", f"org {result.get('org_id', '')}")
             status.update(
                 resolve_tcss_markup(
                     f"[$success]●[/$success] connected\n"
@@ -211,6 +212,7 @@ class SettingsScreen(ContentView):
             )
         else:
             error = result.get("error", "Unknown error")
+            self.app.set_connection_status("disconnected", str(error))
             status.update(
                 resolve_tcss_markup(f"[$danger]●[/$danger] disconnected\n  error: {error}")
             )

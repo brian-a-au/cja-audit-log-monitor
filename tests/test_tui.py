@@ -214,6 +214,40 @@ class TestViewRendering:
 
 
 # ---------------------------------------------------------------------------
+# TestConnectionHeader
+# ---------------------------------------------------------------------------
+
+
+def _status_text(app) -> str:
+    return str(app.query_one("#status-row", Static).render())
+
+
+class TestConnectionHeader:
+    """The header reports the real connection state."""
+
+    async def test_header_starts_connecting(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test() as _pilot:
+            assert "connecting" in _status_text(app)
+
+    async def test_set_connection_status_disconnected_shows_error(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test() as pilot:
+            app.set_connection_status("disconnected", "invalid_client")
+            await pilot.pause()
+            text = _status_text(app)
+            assert "disconnected" in text
+            assert "invalid_client" in text
+            assert "● connected" not in text
+
+    async def test_dashboard_has_no_duplicate_status(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            assert len(app.query("#connection-status")) == 0
+
+
+# ---------------------------------------------------------------------------
 # TestNavigation
 # ---------------------------------------------------------------------------
 
@@ -312,7 +346,6 @@ class TestDashboardScreen:
             assert app.query_one("#stat-users", Static)
             assert app.query_one("#stat-range", Static)
             assert app.query_one("#stat-alerts", Static)
-            assert app.query_one("#connection-status", Static)
 
     async def test_refresh_button_exists(self, mock_app_state):
         app = _make_app(mock_app_state)
