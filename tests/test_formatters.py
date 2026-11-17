@@ -213,3 +213,32 @@ class TestCLIColorOutput:
 
         # The destructive icon `✕` must appear in the rendered output.
         assert "✕" in out
+
+
+class TestRenderBar:
+    """Tests for render_bar (eighth-block horizontal bars)."""
+
+    def test_render_bar_full(self):
+        from cja_audit_log_monitor.formatters import render_bar
+
+        assert render_bar(10, 10, 5) == "█████"
+
+    def test_render_bar_partial(self):
+        from cja_audit_log_monitor.formatters import render_bar
+
+        assert render_bar(5, 10, 3) == "█▌"
+
+    def test_render_bar_min_visible(self):
+        from cja_audit_log_monitor.formatters import render_bar
+
+        assert render_bar(1, 1000, 10) == "▏"
+
+    def test_render_bar_zero_max(self):
+        from cja_audit_log_monitor.formatters import render_bar
+
+        assert render_bar(0, 0, 10) == ""
+
+    def test_render_bar_zero_count(self):
+        from cja_audit_log_monitor.formatters import render_bar
+
+        assert render_bar(0, 10, 10) == ""

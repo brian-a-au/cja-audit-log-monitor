@@ -9,9 +9,10 @@ from textual.widgets import Button, LoadingIndicator, Static
 from textual.worker import get_current_worker
 
 from ...alerts import analyze_for_anomalies
-from ...formatters import ACTION_COLORS, TCSS_TOKEN_HEX, resolve_tcss_markup
+from ...formatters import resolve_tcss_markup
 from ...stats import build_date_range_query, calculate_stats
 from ..state import AppState
+from ..widgets import ActionBarChart
 from .base import ContentView
 
 
@@ -62,7 +63,7 @@ class DashboardScreen(ContentView):
             Static("dashboard", id="dashboard-title", classes="section-label"),
             stats_row,
             Static("ACTION DISTRIBUTION", classes="section-label"),
-            Static(id="action-chart", classes="bar-chart"),
+            ActionBarChart(id="action-chart"),
             Static("TOP 5 ACTIVE USERS · LAST 7 DAYS", classes="section-label"),
             Static(id="top-users"),
             Static("RECENT ANOMALIES", classes="section-label"),
@@ -158,19 +159,9 @@ class DashboardScreen(ContentView):
         )
 
         # Update action chart
-        actions = stats.get("action_counts", {})
-        if actions:
-            max_count = max(actions.values()) if actions else 1
-            chart_lines = []
-            for action, count in sorted(actions.items(), key=lambda x: -x[1])[:8]:
-                token = ACTION_COLORS.get(action, "$text-muted")
-                color = TCSS_TOKEN_HEX.get(token, token)
-                bar_width = int((count / max_count) * 30)
-                bar = "█" * bar_width
-                chart_lines.append(f"[{color}]{action:15}[/{color}] {bar} {count:,}")
-            self.query_one("#action-chart", Static).update("\n".join(chart_lines))
-        else:
-            self.query_one("#action-chart", Static).update("[dim]No data[/dim]")
+        self.query_one("#action-chart", ActionBarChart).update_data(
+            stats.get("action_counts", {})
+        )
 
         # Update top users
         if top_users:

@@ -80,6 +80,23 @@ ACTION_ICONS = {
 }
 
 
+_EIGHTHS = " ▏▎▍▌▋▊▉"
+
+
+def render_bar(count: int, max_count: int, width: int) -> str:
+    """Render a horizontal bar scaled to ``width`` cells, with eighth-cell precision.
+
+    A nonzero count always renders at least ``▏`` so small values stay visible.
+    """
+    if max_count <= 0 or count <= 0:
+        return ""
+    cells = min(count / max_count, 1.0) * width
+    full = int(cells)
+    remainder = int((cells - full) * 8)
+    bar = "█" * full + (_EIGHTHS[remainder] if remainder else "")
+    return bar or "▏"
+
+
 def get_action_color(action: str) -> str:
     """Get the action's severity color as a hex value, suitable for Rich and Textual.
 

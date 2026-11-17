@@ -91,7 +91,7 @@ FooterKey:hover {
 #sidebar .nav-item.active {
     color: $text-strong;
     background: $primary 8%;
-    border-left: thick $primary;
+    border-left: heavy $primary;
     padding: 0 1;        /* offset to compensate for the left border */
 }
 
@@ -110,6 +110,27 @@ FooterKey:hover {
     margin: 1 0 0 0;
 }
 
+/* ---- Cards: one shared surface style ----
+ * Accent edge uses `heavy` (box-drawing ┃) so it renders as a continuous line. */
+.card,
+.stat-card,
+.stats-section,
+.settings-section,
+.rule-card,
+StatsPanel,
+AlertCard,
+#monitor-status {
+    height: auto;
+    padding: 1 2;
+    background: $surface;
+    border-left: heavy $primary;
+}
+
+.card.-danger, .stat-card.severity-danger, AlertCard { border-left: heavy $danger; }
+.card.-warning, .stat-card.severity-warning { border-left: heavy $warning; }
+.card.-success, .stat-card.severity-success { border-left: heavy $success; }
+.card.-muted { border-left: heavy #6e7480; }
+
 /* ---- Stat cards ---- */
 .dashboard-stats {
     height: auto;
@@ -120,16 +141,9 @@ FooterKey:hover {
 
 .stat-card {
     width: 1fr;
-    height: auto;
-    padding: 1 2;
+    height: 5;
     margin: 0 1 0 0;
-    background: $surface;
-    border-left: thick $primary;
 }
-
-.stat-card.severity-danger  { border-left: thick $danger; }
-.stat-card.severity-warning { border-left: thick $warning; }
-.stat-card.severity-success { border-left: thick $success; }
 
 .stat-value {
     color: $text-strong;
@@ -207,11 +221,7 @@ FilterBar Button.-primary {
 
 /* ---- Stats panel ---- */
 StatsPanel {
-    height: auto;
-    padding: 1 2;
     margin: 1 0;
-    background: $surface;
-    border-left: thick $primary;
 }
 
 .stats-grid {
@@ -221,11 +231,8 @@ StatsPanel {
 }
 
 .stats-section {
-    height: auto;
     padding: 0 2;
     margin: 1 1 1 0;
-    background: $surface;
-    border-left: thick $primary;
 }
 
 .bar-chart {
@@ -235,11 +242,8 @@ StatsPanel {
 
 /* ---- Alert card ---- */
 AlertCard {
-    height: auto;
-    padding: 1 2;
     margin: 1 0;
-    background: $surface;
-    border-left: thick $danger;
+    border-left: heavy $danger;
 }
 
 AlertCard .alert-title {
@@ -275,11 +279,11 @@ AlertSummary {
 }
 
 .monitor-running {
-    border-left: thick $success;
+    border-left: heavy $success;
 }
 
 .monitor-stopped {
-    border-left: thick $danger;
+    border-left: heavy $danger;
 }
 
 #monitor-log {
@@ -376,11 +380,7 @@ ExportDialog Input {
 
 /* ---- Settings ---- */
 .settings-section {
-    height: auto;
-    padding: 1 2;
     margin: 1 0;
-    background: $surface;
-    border-left: thick $primary;
 }
 
 .settings-row {
@@ -400,19 +400,16 @@ ExportDialog Input {
 
 /* ---- Alerts management ---- */
 .rule-card {
-    height: auto;
-    padding: 1 2;
     margin: 1 0;
-    background: $surface;
-    border-left: thick #6e7480;
+    border-left: heavy #6e7480;
 }
 
 .rule-card.rule-enabled {
-    border-left: thick $success;
+    border-left: heavy $success;
 }
 
 .rule-card.rule-disabled {
-    border-left: thick #6e7480;
+    border-left: heavy #6e7480;
 }
 
 /* ---- Help overlay ---- */

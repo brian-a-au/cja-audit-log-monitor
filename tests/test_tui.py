@@ -248,6 +248,38 @@ class TestConnectionHeader:
 
 
 # ---------------------------------------------------------------------------
+# TestCharts
+# ---------------------------------------------------------------------------
+
+
+class TestCharts:
+    """Chart widgets render colored, compact output."""
+
+    async def test_hourly_chart_has_axis_and_six_rows(self, mock_app_state):
+        from cja_audit_log_monitor.tui.widgets import HourlyChart
+
+        app = _make_app(mock_app_state)
+        async with app.run_test() as pilot:
+            chart = HourlyChart()
+            await app.query_one("#sidebar").mount(chart)
+            chart.update_data({h: h + 1 for h in range(24)})
+            await pilot.pause()
+            lines = str(chart.render()).splitlines()
+            assert len(lines) == 7
+            assert lines[-1].lstrip().startswith("00")
+
+    def test_action_chart_bar_uses_action_color(self):
+        from cja_audit_log_monitor.formatters import TCSS_TOKEN_HEX
+        from cja_audit_log_monitor.tui.widgets import ActionBarChart
+
+        chart = ActionBarChart()
+        markup = chart.build_markup({"DELETE": 4, "EDIT": 8}, width=10)
+        danger = TCSS_TOKEN_HEX["$danger"]
+        delete_line = next(line for line in markup.splitlines() if "DELETE" in line)
+        assert f"[{danger}]█" in delete_line
+
+
+# ---------------------------------------------------------------------------
 # TestNavigation
 # ---------------------------------------------------------------------------
 
