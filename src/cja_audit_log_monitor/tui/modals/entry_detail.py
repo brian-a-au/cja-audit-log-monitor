@@ -35,7 +35,7 @@ class EntryDetailPanel(Container):
     def show_entry(self, entry: AuditLogEntry) -> None:
         """Display the given entry and reveal the panel."""
         self._entry = entry
-        self._render()
+        self._render_entry()
         self.remove_class("hidden")
 
     def hide(self) -> None:
@@ -58,7 +58,7 @@ class EntryDetailPanel(Container):
             if self.is_visible():
                 self.hide()
 
-    def _render(self) -> None:
+    def _render_entry(self) -> None:
         """Render the current entry into the panel body."""
         entry = self._entry
         if entry is None:

@@ -10,7 +10,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from .models import AlertRule, NotificationConfig
 
-DEFAULT_CONFIG_DIR = Path.home() / ".cja-audit"
+DEFAULT_CONFIG_DIR = Path.home() / ".cja-audit-log-monitor"
 DEFAULT_CONFIG_FILE = DEFAULT_CONFIG_DIR / "config.yaml"
 
 
@@ -172,7 +172,7 @@ scopes: openid,AdobeID,read_organizations,additional_info.projectedProductContex
 # notifications:
 #   slack_webhook_url: https://hooks.slack.com/services/XXX/YYY/ZZZ
 #   notify_on_alerts: true
-#   notify_on_anomalies: true   # opt-in; fires from `cja-audit cli anomalies`
+#   notify_on_anomalies: true   # opt-in; fires from `cja-audit-log-monitor cli anomalies`
 #   webhooks:
 #     - url: https://example.com/webhook
 #       enabled: true

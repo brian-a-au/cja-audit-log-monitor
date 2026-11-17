@@ -3,10 +3,10 @@
 import pytest
 from pytest_httpx import HTTPXMock
 
-from cja_audit.auth import TokenManager
-from cja_audit.client import APIError, AuditLogsClient
-from cja_audit.config import CJASettings
-from cja_audit.models import AuditLogQuery
+from cja_audit_log_monitor.auth import TokenManager
+from cja_audit_log_monitor.client import APIError, AuditLogsClient
+from cja_audit_log_monitor.config import CJASettings
+from cja_audit_log_monitor.models import AuditLogQuery
 
 # Mark all tests to allow non-mocked requests (for token endpoint reuse)
 pytestmark = pytest.mark.httpx_mock(can_send_already_matched_responses=True)
@@ -64,7 +64,7 @@ class TestAuditLogsClient:
             json=sample_api_response,
         )
 
-        from cja_audit.models import ActionType
+        from cja_audit_log_monitor.models import ActionType
 
         query = AuditLogQuery(
             actions=[ActionType.CREATE],

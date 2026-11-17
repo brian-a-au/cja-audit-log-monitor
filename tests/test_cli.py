@@ -6,8 +6,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from click.testing import CliRunner
 
-from cja_audit.cli import main, parse_date
-from cja_audit.models import AuditLogEntry, AuditLogResponse
+from cja_audit_log_monitor.cli import main, parse_date
+from cja_audit_log_monitor.models import AuditLogEntry, AuditLogResponse
 
 
 @pytest.fixture
@@ -86,7 +86,7 @@ class TestInitCommand:
 class TestConfigCommand:
     """Tests for config command."""
 
-    @patch("cja_audit.cli.load_config")
+    @patch("cja_audit_log_monitor.cli.load_config")
     def test_show_config(
         self,
         mock_load: MagicMock,
@@ -100,7 +100,7 @@ class TestConfigCommand:
         assert result.exit_code == 0
         assert "Current Configuration" in result.output
 
-    @patch("cja_audit.cli.load_config")
+    @patch("cja_audit_log_monitor.cli.load_config")
     def test_show_config_uses_explicit_config_path(
         self,
         mock_load: MagicMock,
@@ -118,7 +118,7 @@ class TestConfigCommand:
 class TestListCommand:
     """Tests for list command."""
 
-    @patch("cja_audit.cli.get_client")
+    @patch("cja_audit_log_monitor.cli.get_client")
     def test_list_empty(self, mock_get_client: MagicMock, runner: CliRunner) -> None:
         """Test list with no results."""
         mock_client = MagicMock()
@@ -131,7 +131,7 @@ class TestListCommand:
         assert result.exit_code == 0
         assert "No audit logs found" in result.output
 
-    @patch("cja_audit.cli.get_client")
+    @patch("cja_audit_log_monitor.cli.get_client")
     def test_list_with_results(
         self,
         mock_get_client: MagicMock,
@@ -148,7 +148,7 @@ class TestListCommand:
         result = runner.invoke(main, ["cli", "list", "--limit", "5"])
         assert result.exit_code == 0
 
-    @patch("cja_audit.cli.get_client")
+    @patch("cja_audit_log_monitor.cli.get_client")
     def test_list_json_format(
         self,
         mock_get_client: MagicMock,
@@ -171,7 +171,7 @@ class TestListCommand:
 class TestSearchCommand:
     """Tests for search command."""
 
-    @patch("cja_audit.cli.get_client")
+    @patch("cja_audit_log_monitor.cli.get_client")
     def test_search_by_action(
         self,
         mock_get_client: MagicMock,
@@ -196,7 +196,7 @@ class TestSearchCommand:
 class TestUserCommand:
     """Tests for user command."""
 
-    @patch("cja_audit.cli.get_client")
+    @patch("cja_audit_log_monitor.cli.get_client")
     def test_user_command(
         self,
         mock_get_client: MagicMock,
@@ -217,7 +217,7 @@ class TestUserCommand:
 class TestComponentCommand:
     """Tests for component command."""
 
-    @patch("cja_audit.cli.get_client")
+    @patch("cja_audit_log_monitor.cli.get_client")
     def test_component_command(
         self,
         mock_get_client: MagicMock,
@@ -238,7 +238,7 @@ class TestComponentCommand:
 class TestExportCommand:
     """Tests for export command."""
 
-    @patch("cja_audit.cli.get_client")
+    @patch("cja_audit_log_monitor.cli.get_client")
     def test_export_tsv_format(
         self,
         mock_get_client: MagicMock,
@@ -259,7 +259,7 @@ class TestExportCommand:
             )
             assert result.exit_code == 0
 
-    @patch("cja_audit.cli.get_client")
+    @patch("cja_audit_log_monitor.cli.get_client")
     def test_export_tsv_uses_paginated_stream(
         self,
         mock_get_client: MagicMock,
@@ -286,7 +286,7 @@ class TestExportCommand:
 class TestStatsCommand:
     """Tests for stats command."""
 
-    @patch("cja_audit.cli.get_client")
+    @patch("cja_audit_log_monitor.cli.get_client")
     def test_stats_json_format(
         self,
         mock_get_client: MagicMock,
@@ -308,7 +308,7 @@ class TestStatsCommand:
 class TestVerifyCommand:
     """Tests for verify command."""
 
-    @patch("cja_audit.cli.get_client")
+    @patch("cja_audit_log_monitor.cli.get_client")
     def test_verify_success(
         self,
         mock_get_client: MagicMock,
@@ -332,7 +332,7 @@ class TestVerifyCommand:
         assert result.exit_code == 0
         assert "Connection successful" in result.output
 
-    @patch("cja_audit.cli.get_client")
+    @patch("cja_audit_log_monitor.cli.get_client")
     def test_verify_json_format(
         self,
         mock_get_client: MagicMock,
@@ -359,7 +359,7 @@ class TestVerifyCommand:
 class TestReportCommand:
     """Tests for report command."""
 
-    @patch("cja_audit.cli.get_client")
+    @patch("cja_audit_log_monitor.cli.get_client")
     def test_report_generation(
         self,
         mock_get_client: MagicMock,
@@ -377,7 +377,7 @@ class TestReportCommand:
         assert result.exit_code == 0
         assert '"summary"' in result.output
 
-    @patch("cja_audit.cli.get_client")
+    @patch("cja_audit_log_monitor.cli.get_client")
     def test_report_to_file(
         self,
         mock_get_client: MagicMock,
@@ -396,7 +396,7 @@ class TestReportCommand:
             assert result.exit_code == 0
             assert "Report saved" in result.output
 
-    @patch("cja_audit.cli.get_client")
+    @patch("cja_audit_log_monitor.cli.get_client")
     def test_report_honors_max_entries(
         self,
         mock_get_client: MagicMock,
@@ -420,7 +420,7 @@ class TestReportCommand:
 class TestQueryCommand:
     """Tests for query command with date presets."""
 
-    @patch("cja_audit.cli.get_client")
+    @patch("cja_audit_log_monitor.cli.get_client")
     def test_query_today(
         self,
         mock_get_client: MagicMock,
@@ -436,7 +436,7 @@ class TestQueryCommand:
         result = runner.invoke(main, ["cli", "query", "--today"])
         assert result.exit_code == 0
 
-    @patch("cja_audit.cli.get_client")
+    @patch("cja_audit_log_monitor.cli.get_client")
     def test_query_yesterday(
         self,
         mock_get_client: MagicMock,
@@ -452,7 +452,7 @@ class TestQueryCommand:
         result = runner.invoke(main, ["cli", "query", "--yesterday"])
         assert result.exit_code == 0
 
-    @patch("cja_audit.cli.get_client")
+    @patch("cja_audit_log_monitor.cli.get_client")
     def test_query_last_week(
         self,
         mock_get_client: MagicMock,
@@ -488,7 +488,7 @@ class TestAlertsSubcommand:
 class TestTimelineCommand:
     """Tests for timeline command."""
 
-    @patch("cja_audit.cli.get_client")
+    @patch("cja_audit_log_monitor.cli.get_client")
     def test_timeline(
         self,
         mock_get_client: MagicMock,
@@ -510,7 +510,7 @@ class TestTimelineCommand:
 class TestFindActionCommand:
     """Tests for find-action command."""
 
-    @patch("cja_audit.cli.get_client")
+    @patch("cja_audit_log_monitor.cli.get_client")
     def test_find_action(
         self,
         mock_get_client: MagicMock,
@@ -530,7 +530,7 @@ class TestFindActionCommand:
 class TestTopUsersCommand:
     """Tests for top-users command."""
 
-    @patch("cja_audit.cli.get_client")
+    @patch("cja_audit_log_monitor.cli.get_client")
     def test_top_users(
         self,
         mock_get_client: MagicMock,
@@ -551,8 +551,8 @@ class TestTopUsersCommand:
 class TestTailCommand:
     """Tests for tail command."""
 
-    @patch("cja_audit.cli.AuditLogMonitor.start", autospec=True)
-    @patch("cja_audit.cli.get_client")
+    @patch("cja_audit_log_monitor.cli.AuditLogMonitor.start", autospec=True)
+    @patch("cja_audit_log_monitor.cli.get_client")
     def test_tail_handles_unknown_action_values(
         self,
         mock_get_client: MagicMock,
@@ -587,7 +587,7 @@ class TestTailCommand:
     def test_tail_command_constructs_notification_manager(
         self, monkeypatch
     ) -> None:
-        """`cja-audit cli tail` opens NotificationManager as a `with` block."""
+        """`cja-audit-log-monitor cli tail` opens NotificationManager as a `with` block."""
         runner = CliRunner()
         fake_nm = MagicMock()
         fake_nm.__enter__ = MagicMock(return_value=fake_nm)
@@ -600,9 +600,9 @@ class TestTailCommand:
         fake_settings.notifications.slack_webhook_url = None
         fake_settings.notifications.webhooks = []
 
-        with patch("cja_audit.cli.get_client") as gc, \
-             patch("cja_audit.cli.NotificationManager", return_value=fake_nm), \
-             patch("cja_audit.cli.AuditLogMonitor") as mon_cls:
+        with patch("cja_audit_log_monitor.cli.get_client") as gc, \
+             patch("cja_audit_log_monitor.cli.NotificationManager", return_value=fake_nm), \
+             patch("cja_audit_log_monitor.cli.AuditLogMonitor") as mon_cls:
             gc.return_value = (MagicMock(), fake_settings)
             mon = MagicMock()
             mon_cls.return_value = mon
@@ -632,7 +632,7 @@ class TestMonitorCommand:
     def test_monitor_command_constructs_notification_manager(
         self, monkeypatch
     ) -> None:
-        """`cja-audit cli monitor` opens NotificationManager as a `with` block."""
+        """`cja-audit-log-monitor cli monitor` opens NotificationManager as a `with` block."""
         runner = CliRunner()
         fake_nm = MagicMock()
         fake_nm.__enter__ = MagicMock(return_value=fake_nm)
@@ -645,9 +645,9 @@ class TestMonitorCommand:
         fake_settings.notifications.slack_webhook_url = None
         fake_settings.notifications.webhooks = []
 
-        with patch("cja_audit.cli.get_client") as gc, \
-             patch("cja_audit.cli.NotificationManager", return_value=fake_nm), \
-             patch("cja_audit.cli.AuditLogMonitor") as mon_cls:
+        with patch("cja_audit_log_monitor.cli.get_client") as gc, \
+             patch("cja_audit_log_monitor.cli.NotificationManager", return_value=fake_nm), \
+             patch("cja_audit_log_monitor.cli.AuditLogMonitor") as mon_cls:
             gc.return_value = (MagicMock(), fake_settings)
             mon = MagicMock()
             mon_cls.return_value = mon
@@ -667,8 +667,8 @@ class TestMonitorCommand:
             ([False, True], "Notification channels: 1 webhook(s)"),
         ],
     )
-    @patch("cja_audit.cli.AuditLogMonitor")
-    @patch("cja_audit.cli.get_client")
+    @patch("cja_audit_log_monitor.cli.AuditLogMonitor")
+    @patch("cja_audit_log_monitor.cli.get_client")
     def test_monitor_summary_counts_only_enabled_webhooks(
         self,
         mock_get_client: MagicMock,
@@ -678,8 +678,8 @@ class TestMonitorCommand:
         expected_summary: str | None,
     ) -> None:
         """The monitor startup summary reflects only active webhooks."""
-        from cja_audit.config import CJASettings
-        from cja_audit.models import NotificationConfig, WebhookConfig
+        from cja_audit_log_monitor.config import CJASettings
+        from cja_audit_log_monitor.models import NotificationConfig, WebhookConfig
 
         settings = CJASettings(
             org_id="x@AdobeOrg",
@@ -706,7 +706,7 @@ class TestMonitorCommand:
 
 
 class TestAnomaliesCommand:
-    """Tests for the new `cja-audit cli anomalies` command."""
+    """Tests for the new `cja-audit-log-monitor cli anomalies` command."""
 
     @pytest.mark.parametrize(
         ("option", "value"),
@@ -717,7 +717,7 @@ class TestAnomaliesCommand:
             ("--lookback", "-1"),
         ],
     )
-    @patch("cja_audit.cli.get_client")
+    @patch("cja_audit_log_monitor.cli.get_client")
     def test_rejects_nonpositive_timing_options(
         self,
         mock_get_client: MagicMock,
@@ -732,9 +732,9 @@ class TestAnomaliesCommand:
         assert "Invalid value" in result.output
         mock_get_client.assert_not_called()
 
-    @patch("cja_audit.cli.NotificationManager")
-    @patch("cja_audit.cli._run_anomalies_cycle")
-    @patch("cja_audit.cli.get_client")
+    @patch("cja_audit_log_monitor.cli.NotificationManager")
+    @patch("cja_audit_log_monitor.cli._run_anomalies_cycle")
+    @patch("cja_audit_log_monitor.cli.get_client")
     def test_accepts_minimum_lookback(
         self,
         mock_get_client: MagicMock,
@@ -743,8 +743,8 @@ class TestAnomaliesCommand:
         runner: CliRunner,
     ) -> None:
         """The minimum valid lookback reaches the anomaly scan."""
-        from cja_audit.config import CJASettings
-        from cja_audit.models import NotificationConfig
+        from cja_audit_log_monitor.config import CJASettings
+        from cja_audit_log_monitor.models import NotificationConfig
 
         client = MagicMock()
         client.__enter__ = MagicMock(return_value=client)
@@ -770,8 +770,8 @@ class TestAnomaliesCommand:
         mock_cycle.assert_called_once()
         assert mock_cycle.call_args.args[-1] == 1
 
-    @patch("cja_audit.cli.NotificationManager")
-    @patch("cja_audit.cli.get_client")
+    @patch("cja_audit_log_monitor.cli.NotificationManager")
+    @patch("cja_audit_log_monitor.cli.get_client")
     def test_oneshot_no_entries_prints_nothing_to_dispatch(
         self,
         mock_get_client: MagicMock,
@@ -779,8 +779,8 @@ class TestAnomaliesCommand:
         runner: CliRunner,
     ) -> None:
         """Empty entries → no anomalies → no dispatch."""
-        from cja_audit.config import CJASettings
-        from cja_audit.models import NotificationConfig
+        from cja_audit_log_monitor.config import CJASettings
+        from cja_audit_log_monitor.models import NotificationConfig
 
         client = MagicMock()
         client.__enter__ = MagicMock(return_value=client)
@@ -805,9 +805,9 @@ class TestAnomaliesCommand:
         assert result.exit_code == 0
         assert nm_instance.notify_anomaly.call_count == 0
 
-    @patch("cja_audit.cli.NotificationManager")
-    @patch("cja_audit.cli.analyze_for_anomalies")
-    @patch("cja_audit.cli.get_client")
+    @patch("cja_audit_log_monitor.cli.NotificationManager")
+    @patch("cja_audit_log_monitor.cli.analyze_for_anomalies")
+    @patch("cja_audit_log_monitor.cli.get_client")
     def test_oneshot_dispatches_each_unique_anomaly_once(
         self,
         mock_get_client: MagicMock,
@@ -816,8 +816,8 @@ class TestAnomaliesCommand:
         runner: CliRunner,
     ) -> None:
         """Each new anomaly dispatched once via notify_anomaly."""
-        from cja_audit.config import CJASettings
-        from cja_audit.models import NotificationConfig
+        from cja_audit_log_monitor.config import CJASettings
+        from cja_audit_log_monitor.models import NotificationConfig
 
         client = MagicMock()
         client.__enter__ = MagicMock(return_value=client)
@@ -852,9 +852,9 @@ class TestAnomaliesCommand:
         assert result.exit_code == 0
         assert nm_instance.notify_anomaly.call_count == 2
 
-    @patch("cja_audit.cli.NotificationManager")
-    @patch("cja_audit.cli.analyze_for_anomalies")
-    @patch("cja_audit.cli.get_client")
+    @patch("cja_audit_log_monitor.cli.NotificationManager")
+    @patch("cja_audit_log_monitor.cli.analyze_for_anomalies")
+    @patch("cja_audit_log_monitor.cli.get_client")
     def test_oneshot_skips_dispatch_when_anomalies_disabled(
         self,
         mock_get_client: MagicMock,
@@ -863,8 +863,8 @@ class TestAnomaliesCommand:
         runner: CliRunner,
     ) -> None:
         """notify_on_anomalies: false → notify_anomaly returns 0 (early return)."""
-        from cja_audit.config import CJASettings
-        from cja_audit.models import NotificationConfig
+        from cja_audit_log_monitor.config import CJASettings
+        from cja_audit_log_monitor.models import NotificationConfig
 
         client = MagicMock()
         client.__enter__ = MagicMock(return_value=client)
@@ -897,9 +897,9 @@ class TestAnomaliesCommand:
         assert result.exit_code == 0
         assert nm_instance.notify_anomaly.call_count == 1
 
-    @patch("cja_audit.cli.NotificationManager")
-    @patch("cja_audit.cli.analyze_for_anomalies")
-    @patch("cja_audit.cli.get_client")
+    @patch("cja_audit_log_monitor.cli.NotificationManager")
+    @patch("cja_audit_log_monitor.cli.analyze_for_anomalies")
+    @patch("cja_audit_log_monitor.cli.get_client")
     def test_oneshot_no_dispatch_when_manager_unconfigured(
         self,
         mock_get_client: MagicMock,
@@ -908,8 +908,8 @@ class TestAnomaliesCommand:
         runner: CliRunner,
     ) -> None:
         """is_configured() == False → no Slack/webhook traffic, but command runs."""
-        from cja_audit.config import CJASettings
-        from cja_audit.models import NotificationConfig
+        from cja_audit_log_monitor.config import CJASettings
+        from cja_audit_log_monitor.models import NotificationConfig
 
         client = MagicMock()
         client.__enter__ = MagicMock(return_value=client)
@@ -945,8 +945,8 @@ class TestAnomaliesCommand:
         assert nm_instance.notify_anomaly.call_count == 1
         assert nm_instance.pop_first_failure.call_count >= 1
 
-    @patch("cja_audit.cli.analyze_for_anomalies")
-    @patch("cja_audit.cli.get_client")
+    @patch("cja_audit_log_monitor.cli.analyze_for_anomalies")
+    @patch("cja_audit_log_monitor.cli.get_client")
     def test_disabled_webhooks_are_not_reported_or_called(
         self,
         mock_get_client: MagicMock,
@@ -955,8 +955,8 @@ class TestAnomaliesCommand:
         httpx_mock,
     ) -> None:
         """Disabled webhook entries are not active delivery channels."""
-        from cja_audit.config import CJASettings
-        from cja_audit.models import NotificationConfig, WebhookConfig
+        from cja_audit_log_monitor.config import CJASettings
+        from cja_audit_log_monitor.models import NotificationConfig, WebhookConfig
 
         client = MagicMock()
         client.__enter__ = MagicMock(return_value=client)
@@ -984,8 +984,8 @@ class TestAnomaliesCommand:
         assert "Anomaly delivery enabled" not in result.output
         assert httpx_mock.get_requests() == []
 
-    @patch("cja_audit.cli.analyze_for_anomalies")
-    @patch("cja_audit.cli.get_client")
+    @patch("cja_audit_log_monitor.cli.analyze_for_anomalies")
+    @patch("cja_audit_log_monitor.cli.get_client")
     def test_delivery_summary_counts_only_enabled_webhooks(
         self,
         mock_get_client: MagicMock,
@@ -994,8 +994,8 @@ class TestAnomaliesCommand:
         httpx_mock,
     ) -> None:
         """The startup summary and delivery use only enabled webhooks."""
-        from cja_audit.config import CJASettings
-        from cja_audit.models import NotificationConfig, WebhookConfig
+        from cja_audit_log_monitor.config import CJASettings
+        from cja_audit_log_monitor.models import NotificationConfig, WebhookConfig
 
         enabled_url = "https://enabled.example"
         client = MagicMock()
@@ -1028,9 +1028,9 @@ class TestAnomaliesCommand:
         assert "Anomaly delivery enabled: 1 webhook(s)" in result.output
         assert len(httpx_mock.get_requests()) == 1
 
-    @patch("cja_audit.cli.NotificationManager")
-    @patch("cja_audit.cli.analyze_for_anomalies")
-    @patch("cja_audit.cli.get_client")
+    @patch("cja_audit_log_monitor.cli.NotificationManager")
+    @patch("cja_audit_log_monitor.cli.analyze_for_anomalies")
+    @patch("cja_audit_log_monitor.cli.get_client")
     def test_watch_dedupes_across_cycles(
         self,
         mock_get_client: MagicMock,
@@ -1039,8 +1039,8 @@ class TestAnomaliesCommand:
         runner: CliRunner,
     ) -> None:
         """Across two cycles, repeated anomaly is suppressed in the second."""
-        from cja_audit.config import CJASettings
-        from cja_audit.models import NotificationConfig
+        from cja_audit_log_monitor.config import CJASettings
+        from cja_audit_log_monitor.models import NotificationConfig
 
         client = MagicMock()
         client.__enter__ = MagicMock(return_value=client)
@@ -1070,7 +1070,7 @@ class TestAnomaliesCommand:
         mock_analyze.return_value = [anomaly]
 
         # Allow exactly two cycles, then simulate Ctrl-C during the second wait.
-        with patch("cja_audit.cli.time.sleep", side_effect=[None, KeyboardInterrupt]):
+        with patch("cja_audit_log_monitor.cli.time.sleep", side_effect=[None, KeyboardInterrupt]):
             result = runner.invoke(
                 main, ["cli", "anomalies", "--watch", "--interval", "1"]
             )
@@ -1081,9 +1081,9 @@ class TestAnomaliesCommand:
         assert mock_analyze.call_count == 2
         assert nm_instance.notify_anomaly.call_count == 1
 
-    @patch("cja_audit.cli.NotificationManager")
-    @patch("cja_audit.cli.analyze_for_anomalies")
-    @patch("cja_audit.cli.get_client")
+    @patch("cja_audit_log_monitor.cli.NotificationManager")
+    @patch("cja_audit_log_monitor.cli.analyze_for_anomalies")
+    @patch("cja_audit_log_monitor.cli.get_client")
     def test_watch_exits_cleanly_when_sleep_is_interrupted(
         self,
         mock_get_client: MagicMock,
@@ -1092,8 +1092,8 @@ class TestAnomaliesCommand:
         runner: CliRunner,
     ) -> None:
         """Ctrl-C during the inter-cycle sleep exits the watch loop cleanly."""
-        from cja_audit.config import CJASettings
-        from cja_audit.models import NotificationConfig
+        from cja_audit_log_monitor.config import CJASettings
+        from cja_audit_log_monitor.models import NotificationConfig
 
         client = MagicMock()
         client.__enter__ = MagicMock(return_value=client)
@@ -1115,7 +1115,7 @@ class TestAnomaliesCommand:
         mock_nm_cls.return_value = nm_instance
         mock_analyze.return_value = []
 
-        with patch("cja_audit.cli.time.sleep", side_effect=KeyboardInterrupt):
+        with patch("cja_audit_log_monitor.cli.time.sleep", side_effect=KeyboardInterrupt):
             result = runner.invoke(
                 main, ["cli", "anomalies", "--watch", "--interval", "1"]
             )
@@ -1125,9 +1125,9 @@ class TestAnomaliesCommand:
         assert mock_analyze.call_count == 1
         assert nm_instance.notify_anomaly.call_count == 0
 
-    @patch("cja_audit.cli.NotificationManager")
-    @patch("cja_audit.cli.analyze_for_anomalies")
-    @patch("cja_audit.cli.get_client")
+    @patch("cja_audit_log_monitor.cli.NotificationManager")
+    @patch("cja_audit_log_monitor.cli.analyze_for_anomalies")
+    @patch("cja_audit_log_monitor.cli.get_client")
     def test_dispatch_exception_does_not_break_loop(
         self,
         mock_get_client: MagicMock,
@@ -1136,8 +1136,8 @@ class TestAnomaliesCommand:
         runner: CliRunner,
     ) -> None:
         """notify_anomaly raising → next anomaly still processed; clean exit."""
-        from cja_audit.config import CJASettings
-        from cja_audit.models import NotificationConfig
+        from cja_audit_log_monitor.config import CJASettings
+        from cja_audit_log_monitor.models import NotificationConfig
 
         client = MagicMock()
         client.__enter__ = MagicMock(return_value=client)
@@ -1174,9 +1174,9 @@ class TestAnomaliesCommand:
         assert result.exit_code == 0
         assert nm_instance.notify_anomaly.call_count == 2
 
-    @patch("cja_audit.cli.NotificationManager")
-    @patch("cja_audit.cli.analyze_for_anomalies")
-    @patch("cja_audit.cli.get_client")
+    @patch("cja_audit_log_monitor.cli.NotificationManager")
+    @patch("cja_audit_log_monitor.cli.analyze_for_anomalies")
+    @patch("cja_audit_log_monitor.cli.get_client")
     def test_pop_first_failure_drained_to_console(
         self,
         mock_get_client: MagicMock,
@@ -1190,8 +1190,8 @@ class TestAnomaliesCommand:
         CLI's drain-and-print loop, not end-to-end Slack-failure → warning wiring.
         The wiring is symmetric to the alert path tested in test_notifications.py.
         """
-        from cja_audit.config import CJASettings
-        from cja_audit.models import NotificationConfig
+        from cja_audit_log_monitor.config import CJASettings
+        from cja_audit_log_monitor.models import NotificationConfig
 
         client = MagicMock()
         client.__enter__ = MagicMock(return_value=client)
@@ -1229,9 +1229,9 @@ class TestAnomaliesCommand:
         assert "Notification delivery failed (slack)" in result.output
 
     @pytest.mark.parametrize("status_code", [None, 408, 425, 429, 500, 502, 503, 504])
-    @patch("cja_audit.cli.NotificationManager")
-    @patch("cja_audit.cli._run_anomalies_cycle")
-    @patch("cja_audit.cli.get_client")
+    @patch("cja_audit_log_monitor.cli.NotificationManager")
+    @patch("cja_audit_log_monitor.cli._run_anomalies_cycle")
+    @patch("cja_audit_log_monitor.cli.get_client")
     def test_watch_survives_transient_api_error(
         self,
         mock_get_client: MagicMock,
@@ -1241,9 +1241,9 @@ class TestAnomaliesCommand:
         status_code: int | None,
     ) -> None:
         """In --watch mode, an APIError on one cycle is logged; loop continues."""
-        from cja_audit.client import APIError
-        from cja_audit.config import CJASettings
-        from cja_audit.models import NotificationConfig
+        from cja_audit_log_monitor.client import APIError
+        from cja_audit_log_monitor.config import CJASettings
+        from cja_audit_log_monitor.models import NotificationConfig
 
         client = MagicMock()
         client.__enter__ = MagicMock(return_value=client)
@@ -1267,7 +1267,7 @@ class TestAnomaliesCommand:
             None,
         ]
 
-        with patch("cja_audit.cli.time.sleep", side_effect=[None, KeyboardInterrupt]):
+        with patch("cja_audit_log_monitor.cli.time.sleep", side_effect=[None, KeyboardInterrupt]):
             result = runner.invoke(
                 main, ["cli", "anomalies", "--watch", "--interval", "1"]
             )
@@ -1276,9 +1276,9 @@ class TestAnomaliesCommand:
         assert mock_cycle.call_count == 2
         assert "API error this cycle" in result.output
 
-    @patch("cja_audit.cli.NotificationManager")
-    @patch("cja_audit.cli._run_anomalies_cycle")
-    @patch("cja_audit.cli.get_client")
+    @patch("cja_audit_log_monitor.cli.NotificationManager")
+    @patch("cja_audit_log_monitor.cli._run_anomalies_cycle")
+    @patch("cja_audit_log_monitor.cli.get_client")
     def test_watch_honors_rate_limit_retry_after(
         self,
         mock_get_client: MagicMock,
@@ -1287,9 +1287,9 @@ class TestAnomaliesCommand:
         runner: CliRunner,
     ) -> None:
         """Rate-limit responses delay the next cycle by at least Retry-After."""
-        from cja_audit.client import RateLimitError
-        from cja_audit.config import CJASettings
-        from cja_audit.models import NotificationConfig
+        from cja_audit_log_monitor.client import RateLimitError
+        from cja_audit_log_monitor.config import CJASettings
+        from cja_audit_log_monitor.models import NotificationConfig
 
         client = MagicMock()
         client.__enter__ = MagicMock(return_value=client)
@@ -1310,7 +1310,7 @@ class TestAnomaliesCommand:
         mock_nm_cls.return_value = nm_instance
         mock_cycle.side_effect = RateLimitError(retry_after=60)
 
-        with patch("cja_audit.cli.time.sleep", side_effect=KeyboardInterrupt) as sleep:
+        with patch("cja_audit_log_monitor.cli.time.sleep", side_effect=KeyboardInterrupt) as sleep:
             result = runner.invoke(
                 main, ["cli", "anomalies", "--watch", "--interval", "1"]
             )
@@ -1319,9 +1319,9 @@ class TestAnomaliesCommand:
         sleep.assert_called_once_with(60)
 
     @pytest.mark.parametrize("status_code", [400, 401, 403, 501, 505])
-    @patch("cja_audit.cli.NotificationManager")
-    @patch("cja_audit.cli._run_anomalies_cycle")
-    @patch("cja_audit.cli.get_client")
+    @patch("cja_audit_log_monitor.cli.NotificationManager")
+    @patch("cja_audit_log_monitor.cli._run_anomalies_cycle")
+    @patch("cja_audit_log_monitor.cli.get_client")
     def test_watch_exits_on_terminal_api_error(
         self,
         mock_get_client: MagicMock,
@@ -1331,9 +1331,9 @@ class TestAnomaliesCommand:
         status_code: int,
     ) -> None:
         """Permanent client errors exit nonzero instead of retrying forever."""
-        from cja_audit.client import APIError
-        from cja_audit.config import CJASettings
-        from cja_audit.models import NotificationConfig
+        from cja_audit_log_monitor.client import APIError
+        from cja_audit_log_monitor.config import CJASettings
+        from cja_audit_log_monitor.models import NotificationConfig
 
         client = MagicMock()
         client.__enter__ = MagicMock(return_value=client)
@@ -1362,9 +1362,9 @@ class TestAnomaliesCommand:
         assert mock_cycle.call_count == 1
         assert "API error" in result.output
 
-    @patch("cja_audit.cli.NotificationManager")
-    @patch("cja_audit.cli._run_anomalies_cycle")
-    @patch("cja_audit.cli.get_client")
+    @patch("cja_audit_log_monitor.cli.NotificationManager")
+    @patch("cja_audit_log_monitor.cli._run_anomalies_cycle")
+    @patch("cja_audit_log_monitor.cli.get_client")
     @pytest.mark.parametrize("signal_name", ["SIGINT", "SIGTERM"])
     def test_signal_interrupts_active_cycle_and_closes_clients(
         self,
@@ -1377,8 +1377,8 @@ class TestAnomaliesCommand:
         """Process signals unwind an in-flight cycle through both contexts."""
         import signal as signal_mod
 
-        from cja_audit.config import CJASettings
-        from cja_audit.models import NotificationConfig
+        from cja_audit_log_monitor.config import CJASettings
+        from cja_audit_log_monitor.models import NotificationConfig
 
         client = MagicMock()
         client.__enter__ = MagicMock(return_value=client)
@@ -1416,9 +1416,9 @@ class TestAnomaliesCommand:
         client.__exit__.assert_called_once()
         nm_instance.__exit__.assert_called_once()
 
-    @patch("cja_audit.cli.NotificationManager")
-    @patch("cja_audit.cli._run_anomalies_cycle")
-    @patch("cja_audit.cli.get_client")
+    @patch("cja_audit_log_monitor.cli.NotificationManager")
+    @patch("cja_audit_log_monitor.cli._run_anomalies_cycle")
+    @patch("cja_audit_log_monitor.cli.get_client")
     def test_oneshot_apierror_exits_nonzero(
         self,
         mock_get_client: MagicMock,
@@ -1427,9 +1427,9 @@ class TestAnomaliesCommand:
         runner: CliRunner,
     ) -> None:
         """One-shot mode preserves exit-1 on APIError (no watch loop to survive)."""
-        from cja_audit.client import APIError
-        from cja_audit.config import CJASettings
-        from cja_audit.models import NotificationConfig
+        from cja_audit_log_monitor.client import APIError
+        from cja_audit_log_monitor.config import CJASettings
+        from cja_audit_log_monitor.models import NotificationConfig
 
         client = MagicMock()
         client.__enter__ = MagicMock(return_value=client)
@@ -1457,7 +1457,7 @@ class TestAnomaliesCommand:
         """SIGTERM gets the same handler as SIGINT for systemd compatibility."""
         import signal as signal_mod
 
-        from cja_audit.cli import _install_anomalies_signal_handlers
+        from cja_audit_log_monitor.cli import _install_anomalies_signal_handlers
 
         prior_int = signal_mod.signal(signal_mod.SIGINT, signal_mod.SIG_DFL)
         prior_term = signal_mod.signal(signal_mod.SIGTERM, signal_mod.SIG_DFL)

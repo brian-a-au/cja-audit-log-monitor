@@ -35,21 +35,23 @@ class FilterBar(Static):
     def compose(self) -> ComposeResult:
         """Compose filter bar widgets — single row, hairline divider only."""
         with Horizontal():
-            yield Input(placeholder="search", id="filter-search")
-            yield Input(placeholder="user", id="filter-user")
+            yield Input(placeholder="search", id="filter-search", compact=True)
+            yield Input(placeholder="user", id="filter-user", compact=True)
             yield Select(
                 [(a.value, a.value) for a in ActionType],
                 prompt="action",
                 allow_blank=True,
+                compact=True,
                 id="filter-action",
             )
             yield Select(
                 [(c.value, c.value) for c in ComponentType],
                 prompt="component",
                 allow_blank=True,
+                compact=True,
                 id="filter-component",
             )
-            yield Button("reset", id="filter-reset")
+            yield Button("reset", id="filter-reset", compact=True)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle filter button presses."""

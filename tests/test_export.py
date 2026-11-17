@@ -8,14 +8,14 @@ from tempfile import TemporaryDirectory
 
 import pytest
 
-from cja_audit.export import (
+from cja_audit_log_monitor.export import (
     entry_to_dict,
     export_entries,
     export_to_csv,
     export_to_json,
     export_to_tsv,
 )
-from cja_audit.models import AuditLogEntry
+from cja_audit_log_monitor.models import AuditLogEntry
 
 
 class TestEntryToDict:

@@ -6,8 +6,8 @@ The Monitor screen polls the audit API on a configurable interval and streams ne
 
 ## What you see
 
-- **Controls bar**: `▶ Start` / `⏹ Stop` buttons and an `Interval` input (seconds, minimum 5).
-- **Status row**: a `running` / `stopped` indicator that flips color with state, plus a stats line — *Last check · New entries · Alerts triggered* — updated after every poll.
+- **Controls bar** (one row): `▶ start` / `■ stop` buttons and an `interval` input (seconds, minimum 5).
+- **Status row**: a `running` / `stopped` indicator that flips color with state, plus *last check · new · alerts*, updated after every poll.
 - **Live log stream**: a log table that prepends new entries as they arrive, with the same color-coded action column as the Log Browser. Cleared each time you start a new session.
 - **Alerts panel**: a compact summary of any alerts triggered during the active session.
 - **Notifications**: alerts and warnings (e.g. "high event volume detected") raise toast notifications on top of the screen.

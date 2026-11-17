@@ -4,17 +4,16 @@ import threading
 from collections.abc import Iterator
 from datetime import UTC, datetime
 
-from textual.app import ComposeResult
 from textual.containers import Container, Horizontal
-from textual.screen import Screen
 from textual.widget import Widget
-from textual.widgets import Button, Input, Label, LoadingIndicator, Static
+from textual.widgets import Button, Input, Label, Static
 from textual.worker import Worker
 
 from ...formatters import resolve_tcss_markup
 from ...models import AuditLogQuery
 from ..state import AppState
 from ..widgets import AlertSummary, LogTable
+from .base import ContentView
 
 # Cap _seen_ids to prevent unbounded memory growth during long sessions
 _MAX_SEEN_IDS = 10_000
@@ -22,12 +21,15 @@ _MAX_SEEN_IDS = 10_000
 _MAX_POLL_PAGES = 20
 
 
-class MonitorScreen(Screen):
+class MonitorScreen(ContentView):
     """Screen for real-time audit log monitoring."""
 
     BINDINGS = [
-        ("space", "toggle_monitor", "Start/Stop"),
+        ("space", "toggle_monitor", "start/stop"),
     ]
+
+    # The view itself takes focus so `space` works as soon as it is shown.
+    can_focus = True
 
     def __init__(self, state: AppState, **kwargs) -> None:
         """Initialize MonitorScreen.
@@ -36,18 +38,13 @@ class MonitorScreen(Screen):
             state: Application state.
             **kwargs: Additional arguments for Screen.
         """
-        super().__init__(**kwargs)
-        self._state = state
+        super().__init__(state, **kwargs)
         self._monitor_worker: Worker | None = None
         self._refresh_worker: Worker | None = None
         self._last_timestamp: datetime | None = None
         self._seen_ids: set[str] = set()
         # Guard shared poll state against concurrent refresh/background workers.
         self._poll_lock = threading.Lock()
-
-    def compose(self) -> ComposeResult:
-        """Compose the screen."""
-        yield from self.compose_content()
 
     def compose_content(self) -> Iterator[Widget]:
         """Yield widgets for embedding in main content area.
@@ -56,17 +53,18 @@ class MonitorScreen(Screen):
             Widgets for the monitor content.
         """
         controls = Horizontal(
-            Button("▶ Start", id="start-button", variant="success"),
-            Button("⏹ Stop", id="stop-button", variant="error", disabled=True),
-            Label("Interval:"),
-            Input(value="60", id="interval-input", type="integer"),
-            Label("seconds"),
+            Button("▶ start", id="start-button", variant="success", compact=True),
+            Button("■ stop", id="stop-button", variant="error", disabled=True, compact=True),
+            Label("interval"),
+            Input(value="60", id="interval-input", type="integer", compact=True),
+            Label("s"),
             id="monitor-controls",
+            classes="toolbar",
         )
 
         status = Horizontal(
             Static(resolve_tcss_markup("[$danger]● stopped[/$danger]"), id="status-indicator"),
-            Static("", id="stats-info"),
+            Static("last check — · new 0 · alerts 0", id="stats-info"),
             id="monitor-status",
             classes="monitor-stopped",
         )
@@ -78,9 +76,12 @@ class MonitorScreen(Screen):
             LogTable(id="monitor-log", show_details=False),
             Static("ALERTS", classes="section-label"),
             AlertSummary(id="alert-summary"),
-            LoadingIndicator(id="loading"),
             id="monitor-container",
         )
+
+    def default_focus(self) -> Widget | None:
+        """Focus the view so `space` toggles monitoring right away."""
+        return self
 
     def refresh_data(self) -> None:
         """Refresh monitor data for the active screen."""
@@ -313,11 +314,11 @@ class MonitorScreen(Screen):
     def _update_stats_display(self) -> None:
         """Update the stats display."""
         monitor = self._state.monitor
-        last_check = monitor.last_check.strftime("%H:%M:%S") if monitor.last_check else "Never"
+        last_check = monitor.last_check.strftime("%H:%M:%S") if monitor.last_check else "—"
         self.query_one("#stats-info", Static).update(
-            f"Last check: {last_check} | "
-            f"New entries: {monitor.entries_since_start} | "
-            f"Alerts: {monitor.alerts_triggered}"
+            f"last check {last_check} · "
+            f"new {monitor.entries_since_start} · "
+            f"alerts {monitor.alerts_triggered}"
         )
 
     def _show_error(self, error: str) -> None:

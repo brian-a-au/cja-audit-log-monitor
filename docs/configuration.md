@@ -2,7 +2,7 @@
 
 Authentication uses **OAuth Server-to-Server** (Adobe's current standard). Setup is a one-time process in the Adobe Developer Console.
 
-> Commands below assume you've already run through the README's [Quick Start](../README.md#quick-start). Prefix CLI commands with `uv run` (e.g. `uv run cja-audit cli verify`) or activate the venv first.
+> Commands below assume you've already run through the README's [Quick Start](../README.md#quick-start). Prefix CLI commands with `uv run` (e.g. `uv run cja-audit-log-monitor cli verify`) or activate the venv first.
 
 ## Prerequisites
 
@@ -54,18 +54,18 @@ cp .env.example .env
 ## 4. (Optional) Create a config file for alert rules and notification channels
 
 ```bash
-uv run cja-audit cli init
+uv run cja-audit-log-monitor cli init
 ```
 
-Writes `~/.cja-audit/config.yaml` with default alert rules and a commented `notifications:` example block (Slack + webhooks). Environment variables always take precedence over the config file. See [Alert Rules](alert-rules.md) for rule schema and [Delivery channels](alert-rules.md#delivery-channels) for notification config.
+Writes `~/.cja-audit-log-monitor/config.yaml` with default alert rules and a commented `notifications:` example block (Slack + webhooks). Environment variables always take precedence over the config file. See [Alert Rules](alert-rules.md) for rule schema and [Delivery channels](alert-rules.md#delivery-channels) for notification config.
 
 > The default for `notify_on_anomalies` is `false` (opt-in). Set to `true` to
-> enable delivery via `cja-audit cli anomalies`.
+> enable delivery via `cja-audit-log-monitor cli anomalies`.
 
 ## 5. Verify
 
 ```bash
-uv run cja-audit cli verify
+uv run cja-audit-log-monitor cli verify
 ```
 
 Expected: `Connected` with your organization ID. If it fails, see [Troubleshooting](troubleshooting.md).

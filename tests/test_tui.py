@@ -5,11 +5,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from textual.widgets import Button, Static
 
-from cja_audit.alerts import FiredAlert
-from cja_audit.models import AlertRule
-from cja_audit.notifications import NotificationManager
-from cja_audit.tui.app import CJAAuditApp, HelpScreen
-from cja_audit.tui.state import AppState
+from cja_audit_log_monitor.alerts import FiredAlert
+from cja_audit_log_monitor.models import AlertRule
+from cja_audit_log_monitor.notifications import NotificationManager
+from cja_audit_log_monitor.tui.app import CJAAuditApp, HelpScreen
+from cja_audit_log_monitor.tui.state import AppState
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -23,14 +23,14 @@ def _make_app(mock_app_state) -> CJAAuditApp:
     return app
 
 
-# Patch on_content_mounted on screens that launch workers via run_worker / call_from_thread.
-# These screens are used as widget factories (compose_content) and are never actually
-# mounted in the Textual DOM, so their workers crash in headless tests.
+# Patch on_content_mounted on views that launch data-loading workers, so tests that only
+# check layout/navigation don't race background threads. Tests that need real workers
+# run them explicitly.
 _SCREEN_WORKER_PATCHES = [
-    "cja_audit.tui.screens.dashboard.DashboardScreen.on_content_mounted",
-    "cja_audit.tui.screens.log_browser.LogBrowserScreen.on_content_mounted",
-    "cja_audit.tui.screens.settings.SettingsScreen.on_content_mounted",
-    "cja_audit.tui.screens.stats.StatsScreen.on_content_mounted",
+    "cja_audit_log_monitor.tui.screens.dashboard.DashboardScreen.on_content_mounted",
+    "cja_audit_log_monitor.tui.screens.log_browser.LogBrowserScreen.on_content_mounted",
+    "cja_audit_log_monitor.tui.screens.settings.SettingsScreen.on_content_mounted",
+    "cja_audit_log_monitor.tui.screens.stats.StatsScreen.on_content_mounted",
 ]
 
 
@@ -137,12 +137,14 @@ class TestAppLifecycle:
             nav_items = app.query("#sidebar .nav-item")
             assert len(nav_items) == 6
 
-    async def test_main_content_mounts_active_screen_widget(self, mock_app_state):
+    async def test_main_content_shows_dashboard_view(self, mock_app_state):
+        from textual.widgets import ContentSwitcher
+
         app = _make_app(mock_app_state)
         async with app.run_test() as pilot:
             await pilot.pause()
-            mounted_screens = app.query("#main-content Screen")
-            assert len(mounted_screens) == 1
+            switcher = app.query_one("#main-content", ContentSwitcher)
+            assert switcher.current == "view-dashboard"
 
     async def test_quit_calls_state_close(self, mock_app_state):
         mock_app_state.close = MagicMock()
@@ -150,6 +152,489 @@ class TestAppLifecycle:
         async with app.run_test() as _pilot:
             app.action_quit()
             mock_app_state.close.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# TestViewRendering — regression for blank main pane (views had zero region)
+# ---------------------------------------------------------------------------
+
+
+class TestViewRendering:
+    """Views must be laid out with a real, nonzero region."""
+
+    @pytest.mark.parametrize(
+        "key,name",
+        [
+            ("d", "dashboard"),
+            ("l", "logs"),
+            ("m", "monitor"),
+            ("s", "stats"),
+            ("a", "alerts"),
+            ("c", "settings"),
+        ],
+    )
+    async def test_each_view_has_nonzero_region(self, mock_app_state, key, name):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.press(key)
+            await pilot.pause()
+            assert app._screens[name].region.area > 0
+
+    async def test_revisit_keeps_same_instance_no_remount(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test() as pilot:
+            for key in ("l", "d", "l"):
+                await pilot.press(key)
+                await pilot.pause()
+            views = app.query("#main-content > #view-logs")
+            assert len(views) == 1
+            assert views.first() is app._screens["logs"]
+
+    async def test_on_content_mounted_called_once_per_view(self, mock_app_state):
+        hook = MagicMock()
+        with patch(
+            "cja_audit_log_monitor.tui.screens.log_browser.LogBrowserScreen.on_content_mounted",
+            hook,
+        ):
+            app = _make_app(mock_app_state)
+            async with app.run_test() as pilot:
+                for key in ("l", "d", "l"):
+                    await pilot.press(key)
+                    await pilot.pause()
+        assert hook.call_count == 1
+
+    async def test_slash_from_dashboard_focuses_logs_search(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("slash")
+            await pilot.pause()
+            assert app._current_screen == "logs"
+            assert app.focused is not None and app.focused.id == "filter-search"
+
+
+# ---------------------------------------------------------------------------
+# TestConnectionHeader
+# ---------------------------------------------------------------------------
+
+
+def _status_text(app) -> str:
+    return str(app.query_one("#status-row", Static).render())
+
+
+class TestConnectionHeader:
+    """The header reports the real connection state."""
+
+    async def test_header_starts_connecting(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test() as _pilot:
+            assert "connecting" in _status_text(app)
+
+    async def test_set_connection_status_disconnected_shows_error(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test() as pilot:
+            app.set_connection_status("disconnected", "invalid_client")
+            await pilot.pause()
+            text = _status_text(app)
+            assert "disconnected" in text
+            assert "invalid_client" in text
+            assert "● connected" not in text
+
+    async def test_dashboard_has_no_duplicate_status(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            assert len(app.query("#connection-status")) == 0
+
+
+# ---------------------------------------------------------------------------
+# TestCharts
+# ---------------------------------------------------------------------------
+
+
+class TestCharts:
+    """Chart widgets render colored, compact output."""
+
+    async def test_hourly_chart_has_axis_and_six_rows(self, mock_app_state):
+        from cja_audit_log_monitor.tui.widgets import HourlyChart
+
+        app = _make_app(mock_app_state)
+        async with app.run_test() as pilot:
+            chart = HourlyChart()
+            await app.query_one("#sidebar").mount(chart)
+            chart.update_data({h: h + 1 for h in range(24)})
+            await pilot.pause()
+            lines = str(chart.render()).splitlines()
+            assert len(lines) == 7
+            assert lines[-1].lstrip().startswith("00")
+
+    def test_action_chart_bar_uses_action_color(self):
+        from cja_audit_log_monitor.formatters import TCSS_TOKEN_HEX
+        from cja_audit_log_monitor.tui.widgets import ActionBarChart
+
+        chart = ActionBarChart()
+        markup = chart.build_markup({"DELETE": 4, "EDIT": 8}, width=10)
+        danger = TCSS_TOKEN_HEX["$danger"]
+        delete_line = next(line for line in markup.splitlines() if "DELETE" in line)
+        assert f"[{danger}]█" in delete_line
+
+
+# ---------------------------------------------------------------------------
+# TestCompactControls
+# ---------------------------------------------------------------------------
+
+
+class TestCompactControls:
+    """Buttons, inputs and the filter bar take one row each."""
+
+    async def test_filter_bar_single_row(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.press("l")
+            await pilot.pause()
+            row = app.query_one("#filter-bar Horizontal")
+            children = list(row.children)
+            assert children
+            assert all(c.region.height == 1 for c in children)
+            assert len({c.region.y for c in children}) == 1
+
+    @pytest.mark.parametrize(
+        "key,selector",
+        [
+            ("d", "#refresh-button"),
+            ("m", "#start-button"),
+            ("a", "#test-rules"),
+            ("c", "#verify-button"),
+            ("s", "#update-button"),
+        ],
+    )
+    async def test_toolbar_buttons_height_one(self, mock_app_state, key, selector):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.press(key)
+            await pilot.pause()
+            view = app._screens[app._current_screen]
+            assert view.query_one(selector).region.height == 1
+
+    async def test_pagination_single_row(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.press("l")
+            await pilot.pause()
+            assert app.query_one("#pagination").region.height == 1
+
+
+# ---------------------------------------------------------------------------
+# TestEmptyStatesAndLayout — these run the views' real data workers
+# ---------------------------------------------------------------------------
+
+
+async def _show_and_load(app, pilot, key: str):
+    """Navigate to a view and run its data worker to completion."""
+    await pilot.press(key)
+    await pilot.pause()
+    view = app._screens[app._current_screen]
+    view.refresh_data()
+    await app.workers.wait_for_complete()
+    await pilot.pause()
+    return view
+
+
+def _empty_text(view) -> str:
+    return str(view.query_one("#empty-state", Static).render())
+
+
+class TestEmptyStatesAndLayout:
+    """Views explain missing data instead of showing blank space."""
+
+    async def test_dashboard_empty_state_when_disconnected(self, mock_app_state):
+        mock_app_state.client.verify_connection.return_value = {
+            "connected": False,
+            "authenticated": False,
+            "error": "invalid_client",
+        }
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, "d")
+            empty = view.query_one("#empty-state", Static)
+            assert empty.display
+            assert not view.query_one("#view-body").display
+            assert "invalid_client" in _empty_text(view)
+            assert "press c" in _empty_text(view)
+
+    async def test_dashboard_empty_state_zero_entries(self, mock_app_state):
+        mock_app_state.client.get_all_logs.return_value = []
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, "d")
+            assert view.query_one("#empty-state", Static).display
+            assert "no audit activity in the last 7 days" in _empty_text(view)
+
+    async def test_dashboard_with_data_hides_empty_state(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, "d")
+            assert not view.query_one("#empty-state", Static).display
+            assert view.query_one("#view-body").display
+
+    async def test_dashboard_two_columns(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, "d")
+            left = view.query_one("#dash-left").region
+            right = view.query_one("#dash-right").region
+            assert left.y == right.y
+            assert right.x > left.x
+
+    async def test_top_users_fit_column_at_100_cols(self, mock_app_state, sample_audit_entry):
+        entries = [
+            sample_audit_entry.model_copy(
+                update={"id": f"e{i}", "user_email": f"someone.with.long.name{i}@example.com"}
+            )
+            for i in range(5)
+        ]
+        mock_app_state.client.get_all_logs.return_value = entries
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(100, 30)) as pilot:
+            view = await _show_and_load(app, pilot, "d")
+            top = view.query_one("#top-users", Static)
+            lines = str(top.render()).splitlines()
+            assert lines
+            assert all(len(line) <= top.content_region.width for line in lines)
+
+    async def test_stats_empty_state_zero_entries(self, mock_app_state):
+        mock_app_state.client.get_all_logs.return_value = []
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, "s")
+            assert view.query_one("#empty-state", Static).display
+            assert "no audit activity in the last 7 days" in _empty_text(view)
+
+    @pytest.mark.parametrize("key", ["m", "a"])
+    async def test_idle_views_show_no_spinner(self, mock_app_state, key):
+        from textual.widgets import LoadingIndicator
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.press(key)
+            await pilot.pause()
+            view = app._screens[app._current_screen]
+            spinners = view.query(LoadingIndicator)
+            assert all(not s.display for s in spinners)
+
+
+# ---------------------------------------------------------------------------
+# TestTableFit
+# ---------------------------------------------------------------------------
+
+
+class TestTableFit:
+    """Log tables fill the width without horizontal scrolling."""
+
+    @pytest.mark.parametrize("size", [(100, 30), (140, 42)])
+    async def test_log_table_has_no_horizontal_overflow(
+        self, mock_app_state, sample_audit_entries, size
+    ):
+        from cja_audit_log_monitor.tui.widgets import LogTable
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=size) as pilot:
+            await pilot.press("l")
+            await pilot.pause()
+            table = app.query_one("#log-table", LogTable)
+            table.load_entries(sample_audit_entries)
+            await pilot.pause()
+            assert table.virtual_size.width <= table.scrollable_content_region.width
+
+    @pytest.mark.parametrize("size", [(100, 30), (140, 42)])
+    async def test_no_horizontal_scrollbar_when_rows_overflow(
+        self, mock_app_state, sample_audit_entry, size
+    ):
+        from cja_audit_log_monitor.tui.widgets import LogTable
+
+        many = [sample_audit_entry.model_copy(update={"id": f"e{i}"}) for i in range(80)]
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=size) as pilot:
+            await pilot.press("l")
+            await pilot.pause()
+            table = app.query_one("#log-table", LogTable)
+            table.load_entries(many)
+            await pilot.pause()
+            await pilot.pause()
+            assert table.show_vertical_scrollbar
+            assert not table.show_horizontal_scrollbar
+
+    async def test_filter_bar_search_usable_at_100_cols(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(100, 30)) as pilot:
+            await pilot.press("l")
+            await pilot.pause()
+            search = app.query_one("#filter-search")
+            reset = app.query_one("#filter-reset")
+            bar = app.query_one("#filter-bar")
+            assert search.region.width >= 12
+            assert reset.region.right <= bar.region.right
+
+    async def test_name_column_takes_remaining_width(self, mock_app_state, sample_audit_entries):
+        from cja_audit_log_monitor.tui.widgets import LogTable
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(160, 40)) as pilot:
+            await pilot.press("l")
+            await pilot.pause()
+            table = app.query_one("#log-table", LogTable)
+            table.load_entries(sample_audit_entries)
+            await pilot.pause()
+            assert table.columns["name"].width > 30
+
+    def test_long_user_truncated_with_ellipsis(self, sample_audit_entry):
+        from cja_audit_log_monitor.tui.widgets import LogTable
+
+        entry = sample_audit_entry.model_copy(
+            update={"user_email": "a.very.long.user.name.for.testing@example-company.com"}
+        )
+        row = LogTable()._build_row(entry)
+        user_cell = str(row[1])
+        assert user_cell.endswith("…")
+        assert len(user_cell) == LogTable.COLUMN_WIDTHS["user"]
+
+
+# ---------------------------------------------------------------------------
+# TestViewLayouts
+# ---------------------------------------------------------------------------
+
+
+class TestViewLayouts:
+    """Stats, alerts and settings layouts use space well."""
+
+    async def test_settings_shows_tilde_path(self, mock_app_state):
+        from pathlib import Path
+
+        mock_app_state._config_path = Path.home() / ".cja-audit-log-monitor" / "config.yaml"
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.press("c")
+            await pilot.pause()
+            view = app._screens["settings"]
+            texts = [str(w.render()) for w in view.query(Static)]
+            assert not any(str(Path.home()) in t for t in texts)
+            assert any("~/.cja-audit-log-monitor/config.yaml" in t for t in texts)
+
+    async def test_stats_charts_side_by_side(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, "s")
+            action = view.query_one("#action-chart").region
+            hourly = view.query_one("#hourly-chart").region
+            assert action.y == hourly.y
+            assert hourly.x > action.x
+
+    async def test_rule_card_height_at_most_4(self, mock_app_state):
+        from cja_audit_log_monitor.models import ActionType
+
+        mock_app_state._alert_engine.rules = [
+            AlertRule(
+                name="bulk_delete",
+                description="Alert on multiple delete operations",
+                enabled=True,
+                actions=[ActionType.DELETE],
+                threshold_count=5,
+                threshold_window_minutes=60,
+            )
+        ]
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.press("a")
+            await pilot.pause()
+            card = app._screens["alerts"].query_one("#card-bulk_delete")
+            assert 0 < card.region.height <= 4
+
+    async def test_monitor_stream_fills_space(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.press("m")
+            await pilot.pause()
+            assert app._screens["monitor"].query_one("#monitor-log").region.height >= 15
+
+
+# ---------------------------------------------------------------------------
+# TestViewFocusAndScroll — regressions from moving views off textual Screen
+# ---------------------------------------------------------------------------
+
+
+class TestViewFocusAndScroll:
+    """Views scroll when short, own their keys, and never leave focus hidden."""
+
+    @pytest.mark.parametrize("key", ["s", "c"])
+    async def test_tall_view_body_scrolls_at_100x30(self, mock_app_state, key):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(100, 30)) as pilot:
+            view = await _show_and_load(app, pilot, key)
+            body = view.query_one("#view-body")
+            assert body.max_scroll_y > 0
+
+    @pytest.mark.parametrize("key", ["s", "d"])
+    async def test_charts_do_not_wrap_at_100_cols(self, mock_app_state, sample_audit_entry, key):
+        from datetime import UTC, datetime
+
+        from cja_audit_log_monitor.tui.widgets import ActionBarChart, HourlyChart
+
+        entries = [
+            sample_audit_entry.model_copy(
+                update={
+                    "id": f"e{i}",
+                    "action": ["CREATE", "DELETE", "APPROVE"][i % 3],
+                    "timestamp": datetime(2025, 1, 20, i % 24, 0, tzinfo=UTC),
+                }
+            )
+            for i in range(48)
+        ]
+        mock_app_state.client.get_all_logs.return_value = entries
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(100, 30)) as pilot:
+            view = await _show_and_load(app, pilot, key)
+            for chart in (view.query_one(ActionBarChart), view.query_one(HourlyChart)):
+                width = chart.content_region.width
+                lines = str(chart.render()).splitlines()
+                assert lines
+                assert all(len(line.rstrip()) <= width for line in lines), (chart.id, width)
+
+    async def test_switching_view_does_not_leave_focus_in_hidden_input(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.press("slash")
+            await pilot.pause()
+            await app._show_screen("dashboard")
+            await pilot.pause()
+            await pilot.press("s")
+            await pilot.pause()
+            assert app._current_screen == "stats"
+            assert app._screens["logs"].query_one("#filter-user").value == ""
+
+    async def test_n_pages_logs_right_after_l(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.press("l")
+            await pilot.pause()
+            await pilot.press("n")
+            await pilot.pause()
+            assert mock_app_state.filters.page == 1
+
+    async def test_space_starts_monitor_right_after_m(self, mock_app_state):
+        from cja_audit_log_monitor.tui.screens.monitor import MonitorScreen
+
+        async def _no_loop(self):
+            return None
+
+        app = _make_app(mock_app_state)
+        with patch.object(MonitorScreen, "_monitoring_loop", _no_loop):
+            async with app.run_test(size=(140, 40)) as pilot:
+                await pilot.press("m")
+                await pilot.pause()
+                await pilot.press("space")
+                await pilot.pause()
+                assert mock_app_state.monitor.is_running
+                app._screens["monitor"]._stop_monitoring()
 
 
 # ---------------------------------------------------------------------------
@@ -251,7 +736,6 @@ class TestDashboardScreen:
             assert app.query_one("#stat-users", Static)
             assert app.query_one("#stat-range", Static)
             assert app.query_one("#stat-alerts", Static)
-            assert app.query_one("#connection-status", Static)
 
     async def test_refresh_button_exists(self, mock_app_state):
         app = _make_app(mock_app_state)
@@ -368,9 +852,7 @@ class TestMonitorScreen:
 
     def test_monitor_surfaces_pop_first_failure_warning(self):
         """When pop_first_failure returns a string, _show_warning is dispatched."""
-        from textual.screen import Screen
-
-        from cja_audit.tui.screens.monitor import MonitorScreen
+        from cja_audit_log_monitor.tui.screens.monitor import MonitorScreen
 
         expected_warning = (
             "Notification delivery failed (slack);"
@@ -383,7 +865,9 @@ class TestMonitorScreen:
         screen = MonitorScreen(state=state)
         mock_app = MagicMock()
 
-        with patch.object(Screen, "app", new_callable=lambda: property(lambda self: mock_app)):
+        with patch.object(
+            MonitorScreen, "app", new_callable=lambda: property(lambda self: mock_app)
+        ):
             # Directly exercise the warning-surface idiom as it appears in production code.
             warning = screen._state.notification_manager.pop_first_failure()
             if warning:
@@ -399,9 +883,7 @@ class TestMonitorScreen:
 
     def test_monitor_show_alert_uses_rule_name(self):
         """_show_alert renders 'rule_name: message' (not the literal 'Alert triggered')."""
-        from textual.screen import Screen
-
-        from cja_audit.tui.screens.monitor import MonitorScreen
+        from cja_audit_log_monitor.tui.screens.monitor import MonitorScreen
 
         state = MagicMock()
         screen = MonitorScreen(state=state)
@@ -409,7 +891,9 @@ class TestMonitorScreen:
         alert_summary = MagicMock()
         screen.query_one = MagicMock(return_value=alert_summary)
 
-        with patch.object(Screen, "app", new_callable=lambda: property(lambda self: mock_app)):
+        with patch.object(
+            MonitorScreen, "app", new_callable=lambda: property(lambda self: mock_app)
+        ):
             screen._show_alert("bulk_delete", "Multiple delete operations: 5 events in 60 minutes")
 
         # Toast text contains both rule_name and message
@@ -500,8 +984,8 @@ class TestSettingsScreen:
         """Settings screen includes a Notifications section showing channel presence."""
         from unittest.mock import MagicMock
 
-        from cja_audit.models import NotificationConfig, WebhookConfig
-        from cja_audit.tui.screens.settings import SettingsScreen
+        from cja_audit_log_monitor.models import NotificationConfig, WebhookConfig
+        from cja_audit_log_monitor.tui.screens.settings import SettingsScreen
 
         state = MagicMock()
         state.settings.notifications = NotificationConfig(
@@ -553,8 +1037,8 @@ class TestModals:
     async def test_entry_detail_panel_shows_when_toggled(
         self, mock_app_state, sample_audit_entry
     ):
-        from cja_audit.tui.modals import EntryDetailPanel
-        from cja_audit.tui.widgets import LogTable
+        from cja_audit_log_monitor.tui.modals import EntryDetailPanel
+        from cja_audit_log_monitor.tui.widgets import LogTable
 
         app = _make_app(mock_app_state)
         async with app.run_test() as pilot:
@@ -590,9 +1074,9 @@ class TestModals:
         require lifting the screen onto the screen stack, which would
         diverge from how the app actually mounts it.
         """
-        from cja_audit.tui.modals import EntryDetailPanel
-        from cja_audit.tui.screens import LogBrowserScreen
-        from cja_audit.tui.widgets import LogTable
+        from cja_audit_log_monitor.tui.modals import EntryDetailPanel
+        from cja_audit_log_monitor.tui.screens import LogBrowserScreen
+        from cja_audit_log_monitor.tui.widgets import LogTable
 
         app = _make_app(mock_app_state)
         async with app.run_test() as pilot:
@@ -618,12 +1102,12 @@ class TestModals:
     ):
         """toggle(): same entry hides; different entry stays visible and re-renders.
 
-        Note: toggle() calls show_entry() → _render() → query_one(), so we need
+        Note: toggle() calls show_entry() → _render_entry() → query_one(), so we need
         a mounted context. We wrap in app.run_test() and load the log browser
         so the panel is properly composed into the DOM before exercising it.
         """
-        from cja_audit.tui.modals import EntryDetailPanel
-        from cja_audit.tui.widgets import LogTable
+        from cja_audit_log_monitor.tui.modals import EntryDetailPanel
+        from cja_audit_log_monitor.tui.widgets import LogTable
 
         entry_a, entry_b = sample_audit_entries[0], sample_audit_entries[1]
         assert entry_a.id != entry_b.id
@@ -666,8 +1150,8 @@ class TestModals:
         self, mock_app_state, sample_audit_entries
     ):
         """When the panel is visible, advancing the cursor updates its content live."""
-        from cja_audit.tui.modals import EntryDetailPanel
-        from cja_audit.tui.widgets import LogTable
+        from cja_audit_log_monitor.tui.modals import EntryDetailPanel
+        from cja_audit_log_monitor.tui.widgets import LogTable
 
         # Use two distinct entries so we can assert the panel content changes.
         entry_a, entry_b = sample_audit_entries[0], sample_audit_entries[1]
@@ -707,8 +1191,8 @@ class TestModals:
         self, mock_app_state, sample_audit_entry
     ):
         """When the panel is hidden, RowHighlighted handler is a no-op."""
-        from cja_audit.tui.modals import EntryDetailPanel
-        from cja_audit.tui.widgets import LogTable
+        from cja_audit_log_monitor.tui.modals import EntryDetailPanel
+        from cja_audit_log_monitor.tui.widgets import LogTable
 
         app = _make_app(mock_app_state)
         async with app.run_test() as pilot:
@@ -728,7 +1212,7 @@ class TestModals:
             assert not panel.is_visible()
 
     async def test_export_dialog_opens_on_e_key(self, mock_app_state):
-        from cja_audit.tui.modals import ExportDialog
+        from cja_audit_log_monitor.tui.modals import ExportDialog
 
         app = _make_app(mock_app_state)
         async with app.run_test() as pilot:
@@ -738,7 +1222,7 @@ class TestModals:
             assert isinstance(app.screen, ExportDialog)
 
     async def test_export_dialog_has_format_radio_buttons(self, mock_app_state):
-        from cja_audit.tui.modals import ExportDialog
+        from cja_audit_log_monitor.tui.modals import ExportDialog
 
         app = _make_app(mock_app_state)
         async with app.run_test() as pilot:
@@ -750,7 +1234,7 @@ class TestModals:
             assert len(radio_buttons) == 3  # JSON, CSV, TSV
 
     async def test_export_dialog_has_export_button(self, mock_app_state):
-        from cja_audit.tui.modals import ExportDialog
+        from cja_audit_log_monitor.tui.modals import ExportDialog
 
         app = _make_app(mock_app_state)
         async with app.run_test() as pilot:

@@ -2,33 +2,18 @@
 
 from collections.abc import Iterator
 
-from textual.app import ComposeResult
 from textual.containers import Container, Horizontal, Vertical
-from textual.screen import Screen
 from textual.widget import Widget
 from textual.widgets import Button, LoadingIndicator, Static
 from textual.worker import get_current_worker
 
 from ...formatters import resolve_tcss_markup
-from ..state import AppState
+from ...utils import display_path
+from .base import ContentView
 
 
-class SettingsScreen(Screen):
+class SettingsScreen(ContentView):
     """Screen for viewing and managing settings."""
-
-    def __init__(self, state: AppState, **kwargs) -> None:
-        """Initialize SettingsScreen.
-
-        Args:
-            state: Application state.
-            **kwargs: Additional arguments for Screen.
-        """
-        super().__init__(**kwargs)
-        self._state = state
-
-    def compose(self) -> ComposeResult:
-        """Compose the screen."""
-        yield from self.compose_content()
 
     def compose_content(self) -> Iterator[Widget]:
         """Yield widgets for embedding in main content area.
@@ -49,17 +34,17 @@ class SettingsScreen(Screen):
         api_section = Vertical(
             Static("API CONFIGURATION", classes="section-label"),
             Horizontal(
-                Static("[bold]Config File:[/bold]", classes="settings-label"),
-                Static(str(self._state.config_path), classes="settings-value"),
+                Static("config file", classes="settings-label"),
+                Static(display_path(self._state.config_path), classes="settings-value"),
                 classes="settings-row",
             ),
             Horizontal(
-                Static("[bold]API Base URL:[/bold]", classes="settings-label"),
+                Static("api base url", classes="settings-label"),
                 Static(settings.api_base_url, classes="settings-value"),
                 classes="settings-row",
             ),
             Horizontal(
-                Static("[bold]IMS Base URL:[/bold]", classes="settings-label"),
+                Static("ims base url", classes="settings-label"),
                 Static(settings.ims_base_url, classes="settings-value"),
                 classes="settings-row",
             ),
@@ -72,17 +57,17 @@ class SettingsScreen(Screen):
         auth_section = Vertical(
             Static("AUTHENTICATION", classes="section-label"),
             Horizontal(
-                Static("[bold]Organization ID:[/bold]", classes="settings-label"),
+                Static("organization id", classes="settings-label"),
                 Static(org_display, classes="settings-value"),
                 classes="settings-row",
             ),
             Horizontal(
-                Static("[bold]Client ID:[/bold]", classes="settings-label"),
+                Static("client id", classes="settings-label"),
                 Static(client_display, classes="settings-value"),
                 classes="settings-row",
             ),
             Horizontal(
-                Static("[bold]OAuth Configured:[/bold]", classes="settings-label"),
+                Static("oauth configured", classes="settings-label"),
                 Static(
                     resolve_tcss_markup(
                         "[$success]yes[/$success]"
@@ -100,17 +85,17 @@ class SettingsScreen(Screen):
         defaults_section = Vertical(
             Static("DEFAULTS", classes="section-label"),
             Horizontal(
-                Static("[bold]Page Size:[/bold]", classes="settings-label"),
+                Static("page size", classes="settings-label"),
                 Static(str(settings.default_page_size), classes="settings-value"),
                 classes="settings-row",
             ),
             Horizontal(
-                Static("[bold]Days:[/bold]", classes="settings-label"),
+                Static("days", classes="settings-label"),
                 Static(str(settings.default_days), classes="settings-value"),
                 classes="settings-row",
             ),
             Horizontal(
-                Static("[bold]Monitor Interval:[/bold]", classes="settings-label"),
+                Static("monitor interval", classes="settings-label"),
                 Static(f"{settings.monitor_interval} seconds", classes="settings-value"),
                 classes="settings-row",
             ),
@@ -124,22 +109,22 @@ class SettingsScreen(Screen):
         notifications_section = Vertical(
             Static("NOTIFICATIONS", classes="section-label"),
             Horizontal(
-                Static("[bold]Slack:[/bold]", classes="settings-label"),
+                Static("slack", classes="settings-label"),
                 Static(slack_state, classes="settings-value"),
                 classes="settings-row",
             ),
             Horizontal(
-                Static("[bold]Webhooks:[/bold]", classes="settings-label"),
+                Static("webhooks", classes="settings-label"),
                 Static(f"{webhook_count} configured", classes="settings-value"),
                 classes="settings-row",
             ),
             Horizontal(
-                Static("[bold]Notify on alerts:[/bold]", classes="settings-label"),
+                Static("notify on alerts", classes="settings-label"),
                 Static("yes" if notif.notify_on_alerts else "no", classes="settings-value"),
                 classes="settings-row",
             ),
             Horizontal(
-                Static("[bold]Notify on anomalies:[/bold]", classes="settings-label"),
+                Static("notify on anomalies", classes="settings-label"),
                 Static("yes" if notif.notify_on_anomalies else "no", classes="settings-value"),
                 classes="settings-row",
             ),
@@ -150,7 +135,7 @@ class SettingsScreen(Screen):
         alerts_section = Vertical(
             Static("ALERT RULES", classes="section-label"),
             Horizontal(
-                Static("[bold]Configured Rules:[/bold]", classes="settings-label"),
+                Static("configured rules", classes="settings-label"),
                 Static(str(len(settings.alert_rules)), classes="settings-value"),
                 classes="settings-row",
             ),
@@ -158,30 +143,34 @@ class SettingsScreen(Screen):
         )
 
         buttons = Horizontal(
-            Button("Verify Connection", id="verify-button", variant="primary"),
-            Button("Refresh Settings", id="refresh-button"),
+            Button("verify connection", id="verify-button", variant="primary", compact=True),
+            Button("reload settings", id="refresh-button", compact=True),
+            classes="toolbar",
         )
 
         yield Container(
-            Static("configuration", id="settings-title", classes="section-label"),
-            connection_section,
-            api_section,
-            auth_section,
-            defaults_section,
-            notifications_section,
-            alerts_section,
-            buttons,
             LoadingIndicator(id="loading"),
+            Static("configuration", id="settings-title", classes="section-label view-title"),
+            Container(
+                connection_section,
+                api_section,
+                auth_section,
+                defaults_section,
+                notifications_section,
+                alerts_section,
+                id="settings-grid",
+            ),
+            buttons,
             id="settings-container",
         )
 
     def on_content_mounted(self) -> None:
         """Called after compose_content widgets are mounted."""
-        self.run_worker(self._check_connection(), exclusive=True, thread=True)
+        self.refresh_data()
 
     def refresh_data(self) -> None:
         """Refresh connection status."""
-        self.query_one("#loading", LoadingIndicator).display = True
+        self.set_loading(True)
         self.run_worker(self._check_connection(), exclusive=True, thread=True)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
@@ -210,13 +199,14 @@ class SettingsScreen(Screen):
                 {"connected": False, "error": str(e)},
             )
         finally:
-            self.app.call_from_thread(self._hide_loading)
+            self.app.call_from_thread(self.set_loading, False)
 
     def _update_connection_status(self, result: dict) -> None:
         """Update connection status display."""
         status = self.query_one("#connection-status", Static)
 
         if result.get("connected") and result.get("authenticated"):
+            self.app.set_connection_status("connected", f"org {result.get('org_id', '')}")
             status.update(
                 resolve_tcss_markup(
                     f"[$success]●[/$success] connected\n"
@@ -227,11 +217,8 @@ class SettingsScreen(Screen):
             )
         else:
             error = result.get("error", "Unknown error")
+            self.app.set_connection_status("disconnected", str(error))
             status.update(
                 resolve_tcss_markup(f"[$danger]●[/$danger] disconnected\n  error: {error}")
             )
 
-    def _hide_loading(self) -> None:
-        """Hide loading indicator."""
-        loading = self.query_one("#loading", LoadingIndicator)
-        loading.display = False

@@ -2,21 +2,19 @@
 
 from collections.abc import Iterator
 
-from textual.app import ComposeResult
 from textual.containers import Container, Horizontal
 from textual.css.query import NoMatches
-from textual.screen import Screen
 from textual.widget import Widget
 from textual.widgets import Button, Label, LoadingIndicator, Static
 from textual.worker import get_current_worker
 
 from ...models import ActionType, ComponentType
 from ..modals import EntryDetailPanel
-from ..state import AppState
 from ..widgets import FilterBar, LogTable
+from .base import ContentView
 
 
-class LogBrowserScreen(Screen):
+class LogBrowserScreen(ContentView):
     """Screen for browsing and filtering audit logs."""
 
     BINDINGS = [
@@ -26,26 +24,12 @@ class LogBrowserScreen(Screen):
         ("p", "prev_page", "prev page"),
     ]
 
-    def __init__(self, state: AppState, **kwargs) -> None:
-        """Initialize LogBrowserScreen.
-
-        Args:
-            state: Application state.
-            **kwargs: Additional arguments for Screen.
-        """
-        super().__init__(**kwargs)
-        self._state = state
-
-    def compose(self) -> ComposeResult:
-        """Compose the screen."""
-        yield from self.compose_content()
-
     def compose_content(self) -> Iterator[Widget]:
         """Yield widgets for embedding in main content area."""
         pagination = Horizontal(
-            Button("◀ prev", id="prev-page"),
+            Button("◀ prev", id="prev-page", compact=True),
             Label("page 1 of 1", id="page-info"),
-            Button("next ▶", id="next-page"),
+            Button("next ▶", id="next-page", compact=True),
             Static("", id="entry-count"),
             id="pagination",
         )
@@ -65,13 +49,17 @@ class LogBrowserScreen(Screen):
             id="log-browser-container",
         )
 
+    def default_focus(self) -> Widget | None:
+        """Focus the table so enter / n / p / escape work right away."""
+        return self.query_one("#log-table", LogTable)
+
     def on_content_mounted(self) -> None:
         """Called after compose_content widgets are mounted."""
-        self.run_worker(self._load_data(), exclusive=True, thread=True)
+        self.refresh_data()
 
     def refresh_data(self) -> None:
         """Refresh log data."""
-        self.query_one("#loading", LoadingIndicator).display = True
+        self.set_loading(True)
         self.run_worker(self._load_data(), exclusive=True, thread=True)
 
     async def _load_data(self) -> None:
@@ -89,7 +77,7 @@ class LogBrowserScreen(Screen):
         except Exception as e:
             self.app.call_from_thread(self._show_error, str(e))
         finally:
-            self.app.call_from_thread(self._hide_loading)
+            self.app.call_from_thread(self.set_loading, False)
 
     def _update_table(self, entries: list, total: int) -> None:
         """Update the log table with entries."""
@@ -101,8 +89,8 @@ class LogBrowserScreen(Screen):
         page_size = self._state.filters.page_size
         total_pages = max(1, (total + page_size - 1) // page_size)
 
-        self.query_one("#page-info", Label).update(f"Page {page + 1} of {total_pages}")
-        self.query_one("#entry-count", Static).update(f"Total: {total:,} entries")
+        self.query_one("#page-info", Label).update(f"page {page + 1} of {total_pages}")
+        self.query_one("#entry-count", Static).update(f"· {total:,} entries")
 
         # Enable/disable pagination buttons
         self.query_one("#prev-page", Button).disabled = page == 0
@@ -112,9 +100,6 @@ class LogBrowserScreen(Screen):
         """Show error message."""
         self.app.notify(f"Error: {error}", severity="error")
 
-    def _hide_loading(self) -> None:
-        """Hide loading indicator."""
-        self.query_one("#loading").display = False
 
     def on_filter_bar_filter_changed(self, event: FilterBar.FilterChanged) -> None:
         """Handle filter changes."""

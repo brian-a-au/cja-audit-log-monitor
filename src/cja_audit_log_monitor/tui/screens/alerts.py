@@ -2,34 +2,18 @@
 
 from collections.abc import Iterator
 
-from textual.app import ComposeResult
 from textual.containers import Container, Horizontal, Vertical
-from textual.screen import Screen
 from textual.widget import Widget
 from textual.widgets import Button, Checkbox, LoadingIndicator, Static
 from textual.worker import get_current_worker
 
 from ...formatters import resolve_tcss_markup
 from ...stats import build_date_range_query
-from ..state import AppState
+from .base import ContentView
 
 
-class AlertsScreen(Screen):
+class AlertsScreen(ContentView):
     """Screen for managing alert rules."""
-
-    def __init__(self, state: AppState, **kwargs) -> None:
-        """Initialize AlertsScreen.
-
-        Args:
-            state: Application state.
-            **kwargs: Additional arguments for Screen.
-        """
-        super().__init__(**kwargs)
-        self._state = state
-
-    def compose(self) -> ComposeResult:
-        """Compose the screen."""
-        yield from self.compose_content()
 
     def compose_content(self) -> Iterator[Widget]:
         """Yield widgets for embedding in main content area.
@@ -41,12 +25,13 @@ class AlertsScreen(Screen):
         rules_list = Vertical(*rule_cards, id="rules-list")
 
         buttons = Horizontal(
-            Button("Test Rules", id="test-rules", variant="primary"),
-            Button("Reset to Defaults", id="reset-rules"),
+            Button("test rules", id="test-rules", variant="primary", compact=True),
+            Button("reset to defaults", id="reset-rules", compact=True),
+            classes="toolbar",
         )
 
         yield Container(
-            Static("alert rules", id="alerts-title", classes="section-label"),
+            Static("alert rules", id="alerts-title", classes="section-label view-title"),
             Static(
                 resolve_tcss_markup(
                     "[$text-muted]toggle rules on/off or test against recent data[/$text-muted]"
@@ -55,7 +40,14 @@ class AlertsScreen(Screen):
             rules_list,
             buttons,
             Static("TEST RESULTS", classes="section-label"),
-            Static(id="test-results"),
+            Static(
+                resolve_tcss_markup(
+                    "[$text-muted]press test rules to check them against the last 24 hours"
+                    "[/$text-muted]"
+                ),
+                id="test-results",
+                classes="card",
+            ),
             LoadingIndicator(id="loading"),
             id="alerts-container",
         )
@@ -86,23 +78,29 @@ class AlertsScreen(Screen):
             Container with rule card content.
         """
         enabled_class = "rule-enabled" if rule.enabled else "rule-disabled"
-        actions_str = ", ".join(a.value for a in rule.actions) if rule.actions else "All"
-        components_str = ", ".join(c.value for c in rule.components) if rule.components else "All"
+        actions = (
+            ", ".join(a.value for a in rule.actions).lower() if rule.actions else "all actions"
+        )
+        components = (
+            ", ".join(c.value for c in rule.components).lower()
+            if rule.components
+            else "all components"
+        )
+        if len(components) > 40:
+            components = components[:39] + "…"
+        window = f"{rule.threshold_count} events / {rule.threshold_window_minutes} min"
+        details = f"{window} · {actions} · {components}"
 
         return Vertical(
             Horizontal(
-                Checkbox(rule.name, value=rule.enabled, id=f"rule-{rule.name}"),
-                Static(f"[dim]{rule.description or ''}[/dim]"),
+                Checkbox(rule.name, value=rule.enabled, id=f"rule-{rule.name}", compact=True),
+                Static(
+                    resolve_tcss_markup(f"[$text-muted]{rule.description or ''}[/$text-muted]"),
+                    classes="rule-description",
+                ),
+                classes="rule-header",
             ),
-            Static(
-                f"  Threshold: {rule.threshold_count} events in "
-                f"{rule.threshold_window_minutes} minutes"
-            ),
-            Static(f"  Actions: {actions_str}"),
-            Static(
-                f"  Components: {components_str[:50]}"
-                f"{'...' if len(components_str) > 50 else ''}"
-            ),
+            Static(resolve_tcss_markup(f"[$text-muted]{details}[/$text-muted]")),
             classes=f"rule-card {enabled_class}",
             id=f"card-{rule.name}",
         )
@@ -127,7 +125,7 @@ class AlertsScreen(Screen):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button presses."""
         if event.button.id == "test-rules":
-            self.query_one("#loading").display = True
+            self.set_loading(True)
             self.run_worker(self._test_rules(), exclusive=True, thread=True)
         elif event.button.id == "reset-rules":
             self._reset_rules()
@@ -179,7 +177,7 @@ class AlertsScreen(Screen):
         except Exception as e:
             self.app.call_from_thread(self._show_error, str(e))
         finally:
-            self.app.call_from_thread(self._hide_loading)
+            self.app.call_from_thread(self.set_loading, False)
 
     def _show_results(self, text: str) -> None:
         """Show test results."""
@@ -189,6 +187,3 @@ class AlertsScreen(Screen):
         """Show error message."""
         self.app.notify(f"Error: {error}", severity="error")
 
-    def _hide_loading(self) -> None:
-        """Hide loading indicator."""
-        self.query_one("#loading").display = False

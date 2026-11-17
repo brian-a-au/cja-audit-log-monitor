@@ -1,22 +1,29 @@
 [project]
-name = "cja-audit"
+name = "cja-audit-log-monitor"
 version = "0.1.0"
-description = "CLI tool for querying and analyzing Adobe CJA audit logs"
+description = "Terminal UI and CLI for monitoring and analyzing Adobe Customer Journey Analytics (CJA) audit logs"
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}
 authors = [
-    {name = "CJA Audit Monitor"}
+    {name = "Brian Au"}
 ]
-keywords = ["adobe", "cja", "customer-journey-analytics", "audit-logs", "cli"]
+keywords = ["adobe", "cja", "customer-journey-analytics", "audit-logs", "cli", "tui", "textual", "security", "monitoring"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Console",
     "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
     "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
-    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Security",
+    "Topic :: System :: Logging",
+    "Topic :: System :: Monitoring",
 ]
 dependencies = [
     "click>=8.1.0",
@@ -26,7 +33,7 @@ dependencies = [
     "pydantic-settings>=2.0.0",
     "pyyaml>=6.0",
     "python-dotenv>=1.0.0",
-    "textual>=0.47.0",
+    "textual>=7.3.0",
 ]
 
 [project.optional-dependencies]
@@ -37,15 +44,24 @@ dev = [
     "ruff>=0.4.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/brian-a-au/cja-audit-log-monitor"
+Documentation = "https://github.com/brian-a-au/cja-audit-log-monitor/tree/main/docs"
+Issues = "https://github.com/brian-a-au/cja-audit-log-monitor/issues"
+Changelog = "https://github.com/brian-a-au/cja-audit-log-monitor/blob/main/CHANGELOG.md"
+
 [project.scripts]
-cja-audit = "cja_audit.cli:main"
+cja-audit-log-monitor = "cja_audit_log_monitor.cli:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/cja_audit"]
+packages = ["src/cja_audit_log_monitor"]
+
+[tool.hatch.build.targets.sdist]
+include = ["/src", "/tests", "/README.md", "/LICENSE", "/CHANGELOG.md", "/.env.example"]
 
 [tool.ruff]
 line-length = 100

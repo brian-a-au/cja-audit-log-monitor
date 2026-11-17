@@ -5,7 +5,7 @@ from tempfile import TemporaryDirectory
 
 import yaml
 
-from cja_audit.config import (
+from cja_audit_log_monitor.config import (
     CJASettings,
     create_default_config,
     load_config,
@@ -194,10 +194,10 @@ class TestCreateDefaultConfigAnomalies:
     """Tests that the init template documents the anomalies command."""
 
     def test_template_mentions_anomalies_command(self, tmp_path):
-        from cja_audit.config import create_default_config
+        from cja_audit_log_monitor.config import create_default_config
         out = create_default_config(tmp_path / "config.yaml")
         content = out.read_text()
-        assert "cja-audit cli anomalies" in content
+        assert "cja-audit-log-monitor cli anomalies" in content
 
 
 def test_settings_no_top_level_slack_field() -> None:

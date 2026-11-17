@@ -140,7 +140,7 @@ def main(ctx: click.Context, verbose: bool, config: Path | None) -> None:
     """CJA Audit Log Monitor - Query and analyze Adobe CJA audit logs.
 
     Running without a subcommand launches the TUI interface.
-    Use 'cja-audit cli <command>' for traditional CLI commands.
+    Use 'cja-audit-log-monitor cli <command>' for traditional CLI commands.
     """
     setup_logging(verbose)
     ctx.ensure_object(dict)

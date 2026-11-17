@@ -3,8 +3,8 @@
 import pytest
 from pytest_httpx import HTTPXMock
 
-from cja_audit.auth import AuthenticationError, TokenManager
-from cja_audit.config import CJASettings
+from cja_audit_log_monitor.auth import AuthenticationError, TokenManager
+from cja_audit_log_monitor.config import CJASettings
 
 pytestmark = pytest.mark.httpx_mock(can_send_already_matched_responses=True)
 

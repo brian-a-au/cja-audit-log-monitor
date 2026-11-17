@@ -91,7 +91,7 @@ FooterKey:hover {
 #sidebar .nav-item.active {
     color: $text-strong;
     background: $primary 8%;
-    border-left: thick $primary;
+    border-left: heavy $primary;
     padding: 0 1;        /* offset to compensate for the left border */
 }
 
@@ -110,6 +110,30 @@ FooterKey:hover {
     margin: 1 0 0 0;
 }
 
+/* ---- Cards: one shared surface style ----
+ * Accent edge uses `heavy` (box-drawing ┃) so it renders as a continuous line. */
+.card,
+.stat-card,
+.settings-section,
+.rule-card,
+AlertCard,
+#monitor-status {
+    height: auto;
+    padding: 1 2;
+    background: $surface;
+    border-left: heavy $primary;
+}
+
+.card.-danger, .stat-card.severity-danger, AlertCard { border-left: heavy $danger; }
+.card.-warning, .stat-card.severity-warning { border-left: heavy $warning; }
+.card.-success, .stat-card.severity-success { border-left: heavy $success; }
+.card.-muted { border-left: heavy #6e7480; }
+
+/* Section labels that open a card sit on its first row. */
+.settings-section > .section-label {
+    margin: 0;
+}
+
 /* ---- Stat cards ---- */
 .dashboard-stats {
     height: auto;
@@ -120,16 +144,9 @@ FooterKey:hover {
 
 .stat-card {
     width: 1fr;
-    height: auto;
-    padding: 1 2;
+    height: 5;
     margin: 0 1 0 0;
-    background: $surface;
-    border-left: thick $primary;
 }
-
-.stat-card.severity-danger  { border-left: thick $danger; }
-.stat-card.severity-warning { border-left: thick $warning; }
-.stat-card.severity-success { border-left: thick $success; }
 
 .stat-value {
     color: $text-strong;
@@ -143,6 +160,7 @@ FooterKey:hover {
 /* ---- Log table ---- */
 LogTable {
     height: 1fr;
+    overflow-x: hidden;
     background: $background;
     color: $text;
 }
@@ -165,7 +183,7 @@ LogTable > .datatable--hover {
 
 /* ---- Filter bar (single row, no panel background) ---- */
 FilterBar {
-    height: 3;
+    height: 2;
     dock: top;
     padding: 0 1;
     background: $background;
@@ -173,59 +191,37 @@ FilterBar {
 }
 
 FilterBar Horizontal {
-    height: 3;
-    align-vertical: middle;
+    height: 1;
 }
 
 FilterBar Input {
     width: 1fr;
     margin: 0 1 0 0;
-    background: $surface;
-    border: none;
-    color: $text;
 }
 
+FilterBar #filter-user { width: 1fr; max-width: 32; }
+FilterBar #filter-action { width: 14; }
+FilterBar #filter-component { width: 18; }
+
 FilterBar Select {
-    width: 18;
     margin: 0 1 0 0;
-    background: $surface;
-    border: none;
-    color: $text;
 }
 
 FilterBar Button {
-    margin: 0 1 0 0;
-    background: $surface;
-    color: $text;
-    border: none;
-    text-style: none;
+    margin: 0;
 }
 
-FilterBar Button.-primary {
-    color: $primary;
-}
 
 /* ---- Stats panel ---- */
-StatsPanel {
+.stats-row {
     height: auto;
-    padding: 1 2;
-    margin: 1 0;
-    background: $surface;
-    border-left: thick $primary;
+    margin: 1 0 0 0;
 }
 
-.stats-grid {
-    layout: grid;
-    grid-size: 2;
-    grid-gutter: 1;
-}
-
-.stats-section {
+.stats-column {
+    width: 1fr;
     height: auto;
-    padding: 0 2;
-    margin: 1 1 1 0;
-    background: $surface;
-    border-left: thick $primary;
+    margin: 0 2 0 0;
 }
 
 .bar-chart {
@@ -235,11 +231,8 @@ StatsPanel {
 
 /* ---- Alert card ---- */
 AlertCard {
-    height: auto;
-    padding: 1 2;
     margin: 1 0;
-    background: $surface;
-    border-left: thick $danger;
+    border-left: heavy $danger;
 }
 
 AlertCard .alert-title {
@@ -260,26 +253,36 @@ AlertSummary {
 
 /* ---- Monitor screen ---- */
 #monitor-controls {
-    height: auto;
-    dock: top;
-    padding: 0 1;
-    background: $background;
-    border-bottom: solid rgba(255, 255, 255, 0.06);
+    height: 1;
+    margin: 1 0;
 }
 
 #monitor-status {
-    height: 3;
+    height: 1;
     padding: 0 2;
-    margin: 1 0;
-    background: $surface;
+    margin: 0 0 1 0;
+}
+
+#status-indicator {
+    width: auto;
+    margin: 0 2 0 0;
+}
+
+#stats-info {
+    width: 1fr;
+    color: $text-muted;
 }
 
 .monitor-running {
-    border-left: thick $success;
+    border-left: heavy $success;
 }
 
 .monitor-stopped {
-    border-left: thick $danger;
+    border-left: heavy $danger;
+}
+
+#alert-summary {
+    max-height: 8;
 }
 
 #monitor-log {
@@ -375,17 +378,20 @@ ExportDialog Input {
 }
 
 /* ---- Settings ---- */
-.settings-section {
+#settings-grid {
+    layout: grid;
+    grid-size: 2;
+    grid-gutter: 1 2;
     height: auto;
-    padding: 1 2;
-    margin: 1 0;
-    background: $surface;
-    border-left: thick $primary;
+    margin: 1 0 0 0;
+}
+
+.settings-section {
+    margin: 0;
 }
 
 .settings-row {
     height: auto;
-    margin: 0 0 1 0;
 }
 
 .settings-label {
@@ -400,19 +406,35 @@ ExportDialog Input {
 
 /* ---- Alerts management ---- */
 .rule-card {
+    margin: 0 0 1 0;
+    padding: 0 2;
+    border-left: heavy #6e7480;
+}
+
+#rules-list {
     height: auto;
-    padding: 1 2;
-    margin: 1 0;
-    background: $surface;
-    border-left: thick #6e7480;
+    margin: 1 0 0 0;
+}
+
+.rule-header {
+    height: 1;
+}
+
+.rule-header Checkbox {
+    width: auto;
+    margin: 0 2 0 0;
+}
+
+.rule-description {
+    width: 1fr;
 }
 
 .rule-card.rule-enabled {
-    border-left: thick $success;
+    border-left: heavy $success;
 }
 
 .rule-card.rule-disabled {
-    border-left: thick #6e7480;
+    border-left: heavy #6e7480;
 }
 
 /* ---- Help overlay ---- */
@@ -451,37 +473,97 @@ HelpScreen {
     color: $text;
 }
 
-/* ---- Pagination ---- */
-#pagination {
-    height: 3;
-    dock: bottom;
-    padding: 0 1;
-    background: $background;
-    border-top: solid rgba(255, 255, 255, 0.06);
+/* ---- Toolbars: one-row control strips ---- */
+.toolbar {
+    height: 1;
+    margin: 1 0;
 }
 
-#pagination Button {
+.toolbar Button {
     margin: 0 1 0 0;
-    background: $surface;
-    color: $text;
-    border: none;
-    text-style: none;
 }
 
-#pagination Label {
-    padding: 1;
+.toolbar Label, .toolbar Static {
+    width: auto;
+    margin: 0 1 0 0;
     color: $text-muted;
 }
 
-/* ---- Loading indicator ---- */
-.loading {
-    align: center middle;
-    height: 100%;
-    width: 100%;
+.toolbar Input {
+    width: 8;
+    margin: 0 1 0 0;
 }
 
-LoadingIndicator {
+/* ---- Pagination ---- */
+#pagination {
+    height: 1;
+    dock: bottom;
+    padding: 0 1;
+    background: $background;
+}
+
+#pagination Button {
+    margin: 0 1;
+}
+
+#pagination Label, #pagination Static {
+    width: auto;
+    color: $text-muted;
+    margin: 0 1 0 0;
+}
+
+/* ---- Loading indicator ----
+ * Hidden until a view starts loading. Lives on an overlay layer, so showing
+ * it never pushes the view's layout around. */
+ContentView {
+    layers: base overlay;
+}
+
+ContentView LoadingIndicator {
+    display: none;
+    layer: overlay;
+    dock: top;
+    height: 1;
+    width: 100%;
+    background: transparent;
     color: $primary;
+}
+
+/* ---- Empty state (no data / not connected) ---- */
+.empty-state {
+    display: none;
+    height: auto;
+    margin: 2 2;
+    padding: 1 2;
+    background: $surface;
+    border-left: heavy $primary;
+}
+
+/* The body scrolls when a view is taller than the terminal. Logs and
+ * monitor still fill the space because their tables are 1fr. */
+#view-body {
+    height: 1fr;
+    overflow-y: auto;
+}
+
+#settings-container, #alerts-container, #stats-container {
+    height: auto;
+}
+
+/* ---- Dashboard columns ---- */
+#dash-columns {
+    height: auto;
+}
+
+#dash-left {
+    width: 2fr;
+    height: auto;
+    margin: 0 2 0 0;
+}
+
+#dash-right {
+    width: 1fr;
+    height: auto;
 }
 
 /* ---- Status indicators (used in dashboard/connection text) ---- */
