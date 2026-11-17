@@ -280,6 +280,51 @@ class TestCharts:
 
 
 # ---------------------------------------------------------------------------
+# TestCompactControls
+# ---------------------------------------------------------------------------
+
+
+class TestCompactControls:
+    """Buttons, inputs and the filter bar take one row each."""
+
+    async def test_filter_bar_single_row(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.press("l")
+            await pilot.pause()
+            row = app.query_one("#filter-bar Horizontal")
+            children = list(row.children)
+            assert children
+            assert all(c.region.height == 1 for c in children)
+            assert len({c.region.y for c in children}) == 1
+
+    @pytest.mark.parametrize(
+        "key,selector",
+        [
+            ("d", "#refresh-button"),
+            ("m", "#start-button"),
+            ("a", "#test-rules"),
+            ("c", "#verify-button"),
+            ("s", "#update-button"),
+        ],
+    )
+    async def test_toolbar_buttons_height_one(self, mock_app_state, key, selector):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.press(key)
+            await pilot.pause()
+            view = app._screens[app._current_screen]
+            assert view.query_one(selector).region.height == 1
+
+    async def test_pagination_single_row(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.press("l")
+            await pilot.pause()
+            assert app.query_one("#pagination").region.height == 1
+
+
+# ---------------------------------------------------------------------------
 # TestNavigation
 # ---------------------------------------------------------------------------
 

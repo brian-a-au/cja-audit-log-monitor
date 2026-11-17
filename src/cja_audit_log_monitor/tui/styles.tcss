@@ -179,7 +179,7 @@ LogTable > .datatable--hover {
 
 /* ---- Filter bar (single row, no panel background) ---- */
 FilterBar {
-    height: 3;
+    height: 2;
     dock: top;
     padding: 0 1;
     background: $background;
@@ -187,37 +187,26 @@ FilterBar {
 }
 
 FilterBar Horizontal {
-    height: 3;
-    align-vertical: middle;
+    height: 1;
 }
 
 FilterBar Input {
     width: 1fr;
     margin: 0 1 0 0;
-    background: $surface;
-    border: none;
-    color: $text;
 }
 
+FilterBar #filter-user { width: 24; }
+FilterBar #filter-action { width: 16; }
+FilterBar #filter-component { width: 22; }
+
 FilterBar Select {
-    width: 18;
     margin: 0 1 0 0;
-    background: $surface;
-    border: none;
-    color: $text;
 }
 
 FilterBar Button {
-    margin: 0 1 0 0;
-    background: $surface;
-    color: $text;
-    border: none;
-    text-style: none;
+    margin: 0;
 }
 
-FilterBar Button.-primary {
-    color: $primary;
-}
 
 /* ---- Stats panel ---- */
 StatsPanel {
@@ -264,11 +253,8 @@ AlertSummary {
 
 /* ---- Monitor screen ---- */
 #monitor-controls {
-    height: auto;
-    dock: top;
-    padding: 0 1;
-    background: $background;
-    border-bottom: solid rgba(255, 255, 255, 0.06);
+    height: 1;
+    margin: 1 0;
 }
 
 #monitor-status {
@@ -448,26 +434,43 @@ HelpScreen {
     color: $text;
 }
 
+/* ---- Toolbars: one-row control strips ---- */
+.toolbar {
+    height: 1;
+    margin: 1 0;
+}
+
+.toolbar Button {
+    margin: 0 1 0 0;
+}
+
+.toolbar Label, .toolbar Static {
+    width: auto;
+    margin: 0 1 0 0;
+    color: $text-muted;
+}
+
+.toolbar Input {
+    width: 8;
+    margin: 0 1 0 0;
+}
+
 /* ---- Pagination ---- */
 #pagination {
-    height: 3;
+    height: 1;
     dock: bottom;
     padding: 0 1;
     background: $background;
-    border-top: solid rgba(255, 255, 255, 0.06);
 }
 
 #pagination Button {
-    margin: 0 1 0 0;
-    background: $surface;
-    color: $text;
-    border: none;
-    text-style: none;
+    margin: 0 1;
 }
 
-#pagination Label {
-    padding: 1;
+#pagination Label, #pagination Static {
+    width: auto;
     color: $text-muted;
+    margin: 0 1 0 0;
 }
 
 /* ---- Loading indicator ---- */

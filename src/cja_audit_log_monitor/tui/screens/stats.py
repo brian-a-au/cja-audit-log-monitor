@@ -39,10 +39,11 @@ class StatsScreen(ContentView):
             Widgets for the stats content.
         """
         controls = Horizontal(
-            Label("Days to analyze:"),
-            Input(value="7", id="days-input", type="integer"),
-            Button("Update", id="update-button", variant="primary"),
+            Label("days"),
+            Input(value="7", id="days-input", type="integer", compact=True),
+            Button("update", id="update-button", variant="primary", compact=True),
             id="stats-controls",
+            classes="toolbar",
         )
 
         action_section = Vertical(

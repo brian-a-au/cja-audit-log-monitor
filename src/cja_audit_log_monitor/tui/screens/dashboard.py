@@ -69,8 +69,9 @@ class DashboardScreen(ContentView):
             Static("RECENT ANOMALIES", classes="section-label"),
             Static(id="anomalies"),
             Horizontal(
-                Button("refresh", id="refresh-button", variant="primary"),
+                Button("refresh", id="refresh-button", variant="primary", compact=True),
                 Static(id="last-update"),
+                classes="toolbar",
             ),
             LoadingIndicator(id="loading"),
             id="dashboard-container",

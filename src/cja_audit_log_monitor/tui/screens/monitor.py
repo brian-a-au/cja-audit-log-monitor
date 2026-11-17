@@ -50,12 +50,13 @@ class MonitorScreen(ContentView):
             Widgets for the monitor content.
         """
         controls = Horizontal(
-            Button("▶ Start", id="start-button", variant="success"),
-            Button("⏹ Stop", id="stop-button", variant="error", disabled=True),
-            Label("Interval:"),
-            Input(value="60", id="interval-input", type="integer"),
-            Label("seconds"),
+            Button("▶ start", id="start-button", variant="success", compact=True),
+            Button("■ stop", id="stop-button", variant="error", disabled=True, compact=True),
+            Label("interval"),
+            Input(value="60", id="interval-input", type="integer", compact=True),
+            Label("s"),
             id="monitor-controls",
+            classes="toolbar",
         )
 
         status = Horizontal(

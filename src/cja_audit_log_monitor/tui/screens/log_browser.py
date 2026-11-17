@@ -27,9 +27,9 @@ class LogBrowserScreen(ContentView):
     def compose_content(self) -> Iterator[Widget]:
         """Yield widgets for embedding in main content area."""
         pagination = Horizontal(
-            Button("◀ prev", id="prev-page"),
+            Button("◀ prev", id="prev-page", compact=True),
             Label("page 1 of 1", id="page-info"),
-            Button("next ▶", id="next-page"),
+            Button("next ▶", id="next-page", compact=True),
             Static("", id="entry-count"),
             id="pagination",
         )
@@ -85,8 +85,8 @@ class LogBrowserScreen(ContentView):
         page_size = self._state.filters.page_size
         total_pages = max(1, (total + page_size - 1) // page_size)
 
-        self.query_one("#page-info", Label).update(f"Page {page + 1} of {total_pages}")
-        self.query_one("#entry-count", Static).update(f"Total: {total:,} entries")
+        self.query_one("#page-info", Label).update(f"page {page + 1} of {total_pages}")
+        self.query_one("#entry-count", Static).update(f"· {total:,} entries")
 
         # Enable/disable pagination buttons
         self.query_one("#prev-page", Button).disabled = page == 0

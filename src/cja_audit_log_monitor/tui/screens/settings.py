@@ -142,8 +142,9 @@ class SettingsScreen(ContentView):
         )
 
         buttons = Horizontal(
-            Button("Verify Connection", id="verify-button", variant="primary"),
-            Button("Refresh Settings", id="refresh-button"),
+            Button("verify connection", id="verify-button", variant="primary", compact=True),
+            Button("reload settings", id="refresh-button", compact=True),
+            classes="toolbar",
         )
 
         yield Container(

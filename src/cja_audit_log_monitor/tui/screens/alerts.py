@@ -25,8 +25,9 @@ class AlertsScreen(ContentView):
         rules_list = Vertical(*rule_cards, id="rules-list")
 
         buttons = Horizontal(
-            Button("Test Rules", id="test-rules", variant="primary"),
-            Button("Reset to Defaults", id="reset-rules"),
+            Button("test rules", id="test-rules", variant="primary", compact=True),
+            Button("reset to defaults", id="reset-rules", compact=True),
+            classes="toolbar",
         )
 
         yield Container(
