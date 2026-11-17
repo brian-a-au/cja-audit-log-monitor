@@ -1524,3 +1524,79 @@ class TestLocalWindows:
             view._update_stats_display()
             await pilot.pause()
             assert "last check 15:25:13" in str(view.query_one("#stats-info", Static).render())
+
+
+class TestSmallCopyFixes:
+    async def test_monitor_alerts_says_none_yet(self, mock_app_state):
+        from cja_audit_log_monitor.tui.widgets import AlertSummary
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.press("m")
+            await pilot.pause()
+            summary = app._screens["monitor"].query_one(AlertSummary)
+            assert str(summary.render()) == "no alerts yet"
+
+    async def test_alert_summary_short_message_not_cut(self, mock_app_state):
+        from cja_audit_log_monitor.tui.widgets import AlertSummary
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.press("m")
+            await pilot.pause()
+            summary = app._screens["monitor"].query_one(AlertSummary)
+            summary.add_alert("bulk_delete", "5 deletes in 60 min")
+            text = str(summary.render())
+            assert "bulk_delete: 5 deletes in 60 min" in text
+            assert "..." not in text and "…" not in text
+
+    async def test_rule_card_uses_singular_event(self, mock_app_state):
+        from cja_audit_log_monitor.alerts import AlertEngine
+
+        mock_app_state._alert_engine = AlertEngine()
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.press("a")
+            await pilot.pause()
+            text = "\n".join(str(s.render()) for s in app._screens["alerts"].query(Static))
+            assert "1 event / 1 min" in text
+            assert "1 events" not in text
+
+
+class TestSidebarKeys:
+    """View keys live in the sidebar, so the footer only lists actions and fits."""
+
+    async def test_sidebar_items_show_their_key(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(100, 30)) as pilot:
+            await pilot.pause()
+            texts = {
+                item.id: str(item.render()).strip() for item in app.query("#sidebar .nav-item")
+            }
+            assert texts["nav-dashboard"].endswith("d dashboard")
+            assert texts["nav-settings"].endswith("c config")
+
+    async def test_footer_hides_view_switch_keys(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(100, 30)) as pilot:
+            await pilot.pause()
+            shown = [
+                b.binding.action for b in app.active_bindings.values() if b.binding.show
+            ]
+            assert not any(action.startswith("switch_screen") for action in shown)
+            assert "refresh" in shown and "quit" in shown
+
+
+class TestActionColumn:
+    @pytest.mark.parametrize("size", [(140, 40), (100, 30)])
+    async def test_longest_action_fits(self, mock_app_state, sample_audit_entry, size):
+        from cja_audit_log_monitor.tui.widgets.log_table import LogTable
+
+        entry = sample_audit_entry.model_copy(update={"action": "API_REQUEST"})
+        mock_app_state.client.get_logs.return_value.content = [entry]
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=size) as pilot:
+            view = await _show_and_load(app, pilot, "l")
+            table = view.query_one(LogTable)
+            cell = table.get_row_at(0)[2]
+            assert table.columns["action"].width >= len(str(cell).rstrip())

@@ -1,5 +1,6 @@
 """Alert card widget for displaying alert notifications."""
 
+from textual.markup import escape
 from textual.widgets import Static
 
 from ...formatters import format_timestamp, resolve_tcss_markup
@@ -45,6 +46,10 @@ class AlertSummary(Static):
         super().__init__(**kwargs)
         self._alerts: list[tuple[str, str]] = []
 
+    def on_mount(self) -> None:
+        """Say there are no alerts until one arrives."""
+        self._refresh_display()
+
     def add_alert(self, name: str, message: str) -> None:
         """Add an alert to the summary.
 
@@ -65,10 +70,13 @@ class AlertSummary(Static):
     def _refresh_display(self) -> None:
         """Refresh the alert display."""
         if not self._alerts:
-            self.update("[dim]No recent alerts[/dim]")
+            self.update(resolve_tcss_markup("[$text-muted]no alerts yet[/$text-muted]"))
             return
 
-        lines = [f"[bold]Recent Alerts ({len(self._alerts)})[/bold]"]
+        lines = [f"recent alerts ({len(self._alerts)})"]
         for name, message in reversed(self._alerts):
-            lines.append(resolve_tcss_markup(f"  [$danger]⚠[/$danger] {name}: {message[:50]}..."))
+            short = message if len(message) <= 60 else message[:59] + "…"
+            lines.append(
+                resolve_tcss_markup(f"[$danger]⚠[/$danger] {escape(name)}: {escape(short)}")
+            )
         self.update("\n".join(lines))

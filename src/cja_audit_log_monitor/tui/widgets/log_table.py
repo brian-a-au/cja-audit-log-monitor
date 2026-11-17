@@ -16,7 +16,7 @@ class LogTable(DataTable):
     width is left. On narrow terminals ``user`` and ``component`` shrink first.
     """
 
-    COLUMN_WIDTHS = {"timestamp": 19, "user": 28, "action": 12, "component": 18}
+    COLUMN_WIDTHS = {"timestamp": 19, "user": 28, "action": 13, "component": 18}
     DETAIL_WIDTHS = {"description": 35, "ip": 15}
     MIN_WIDTHS = {"user": 16, "component": 12, "name": 12}
     NAME_FLOOR = 6
