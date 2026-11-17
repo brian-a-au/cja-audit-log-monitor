@@ -162,11 +162,11 @@ class SettingsScreen(ContentView):
 
     def on_content_mounted(self) -> None:
         """Called after compose_content widgets are mounted."""
-        self.run_worker(self._check_connection(), exclusive=True, thread=True)
+        self.refresh_data()
 
     def refresh_data(self) -> None:
         """Refresh connection status."""
-        self.query_one("#loading", LoadingIndicator).display = True
+        self.set_loading(True)
         self.run_worker(self._check_connection(), exclusive=True, thread=True)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
@@ -195,7 +195,7 @@ class SettingsScreen(ContentView):
                 {"connected": False, "error": str(e)},
             )
         finally:
-            self.app.call_from_thread(self._hide_loading)
+            self.app.call_from_thread(self.set_loading, False)
 
     def _update_connection_status(self, result: dict) -> None:
         """Update connection status display."""
@@ -218,7 +218,3 @@ class SettingsScreen(ContentView):
                 resolve_tcss_markup(f"[$danger]●[/$danger] disconnected\n  error: {error}")
             )
 
-    def _hide_loading(self) -> None:
-        """Hide loading indicator."""
-        loading = self.query_one("#loading", LoadingIndicator)
-        loading.display = False

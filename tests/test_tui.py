@@ -325,6 +325,89 @@ class TestCompactControls:
 
 
 # ---------------------------------------------------------------------------
+# TestEmptyStatesAndLayout — these run the views' real data workers
+# ---------------------------------------------------------------------------
+
+
+async def _show_and_load(app, pilot, key: str):
+    """Navigate to a view and run its data worker to completion."""
+    await pilot.press(key)
+    await pilot.pause()
+    view = app._screens[app._current_screen]
+    view.refresh_data()
+    await app.workers.wait_for_complete()
+    await pilot.pause()
+    return view
+
+
+def _empty_text(view) -> str:
+    return str(view.query_one("#empty-state", Static).render())
+
+
+class TestEmptyStatesAndLayout:
+    """Views explain missing data instead of showing blank space."""
+
+    async def test_dashboard_empty_state_when_disconnected(self, mock_app_state):
+        mock_app_state.client.verify_connection.return_value = {
+            "connected": False,
+            "authenticated": False,
+            "error": "invalid_client",
+        }
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, "d")
+            empty = view.query_one("#empty-state", Static)
+            assert empty.display
+            assert not view.query_one("#view-body").display
+            assert "invalid_client" in _empty_text(view)
+            assert "press c" in _empty_text(view)
+
+    async def test_dashboard_empty_state_zero_entries(self, mock_app_state):
+        mock_app_state.client.get_all_logs.return_value = []
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, "d")
+            assert view.query_one("#empty-state", Static).display
+            assert "no audit activity in the last 7 days" in _empty_text(view)
+
+    async def test_dashboard_with_data_hides_empty_state(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, "d")
+            assert not view.query_one("#empty-state", Static).display
+            assert view.query_one("#view-body").display
+
+    async def test_dashboard_two_columns(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, "d")
+            left = view.query_one("#dash-left").region
+            right = view.query_one("#dash-right").region
+            assert left.y == right.y
+            assert right.x > left.x
+
+    async def test_stats_empty_state_zero_entries(self, mock_app_state):
+        mock_app_state.client.get_all_logs.return_value = []
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, "s")
+            assert view.query_one("#empty-state", Static).display
+            assert "no audit activity in the last 7 days" in _empty_text(view)
+
+    @pytest.mark.parametrize("key", ["m", "a"])
+    async def test_idle_views_show_no_spinner(self, mock_app_state, key):
+        from textual.widgets import LoadingIndicator
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.press(key)
+            await pilot.pause()
+            view = app._screens[app._current_screen]
+            spinners = view.query(LoadingIndicator)
+            assert all(not s.display for s in spinners)
+
+
+# ---------------------------------------------------------------------------
 # TestNavigation
 # ---------------------------------------------------------------------------
 
@@ -789,7 +872,7 @@ class TestModals:
     ):
         """toggle(): same entry hides; different entry stays visible and re-renders.
 
-        Note: toggle() calls show_entry() → _render() → query_one(), so we need
+        Note: toggle() calls show_entry() → _render_entry() → query_one(), so we need
         a mounted context. We wrap in app.run_test() and load the log browser
         so the panel is properly composed into the DOM before exercising it.
         """

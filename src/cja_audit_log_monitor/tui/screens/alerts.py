@@ -112,7 +112,7 @@ class AlertsScreen(ContentView):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button presses."""
         if event.button.id == "test-rules":
-            self.query_one("#loading").display = True
+            self.set_loading(True)
             self.run_worker(self._test_rules(), exclusive=True, thread=True)
         elif event.button.id == "reset-rules":
             self._reset_rules()
@@ -164,7 +164,7 @@ class AlertsScreen(ContentView):
         except Exception as e:
             self.app.call_from_thread(self._show_error, str(e))
         finally:
-            self.app.call_from_thread(self._hide_loading)
+            self.app.call_from_thread(self.set_loading, False)
 
     def _show_results(self, text: str) -> None:
         """Show test results."""
@@ -174,6 +174,3 @@ class AlertsScreen(ContentView):
         """Show error message."""
         self.app.notify(f"Error: {error}", severity="error")
 
-    def _hide_loading(self) -> None:
-        """Hide loading indicator."""
-        self.query_one("#loading").display = False

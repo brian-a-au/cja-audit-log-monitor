@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 
 from textual.containers import Container, Horizontal
 from textual.widget import Widget
-from textual.widgets import Button, Input, Label, LoadingIndicator, Static
+from textual.widgets import Button, Input, Label, Static
 from textual.worker import Worker
 
 from ...formatters import resolve_tcss_markup
@@ -73,7 +73,6 @@ class MonitorScreen(ContentView):
             LogTable(id="monitor-log", show_details=False),
             Static("ALERTS", classes="section-label"),
             AlertSummary(id="alert-summary"),
-            LoadingIndicator(id="loading"),
             id="monitor-container",
         )
 

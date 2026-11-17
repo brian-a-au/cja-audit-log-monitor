@@ -17,6 +17,7 @@ from ...stats import (
 from ..state import AppState
 from ..widgets import ActionBarChart, HourlyChart, StatsPanel
 from .base import ContentView
+from .dashboard import no_activity_message
 
 
 class StatsScreen(ContentView):
@@ -75,11 +76,11 @@ class StatsScreen(ContentView):
 
     def on_content_mounted(self) -> None:
         """Called after compose_content widgets are mounted."""
-        self.run_worker(self._load_data(), exclusive=True, thread=True)
+        self.refresh_data()
 
     def refresh_data(self) -> None:
         """Refresh statistics data."""
-        self.query_one("#loading", LoadingIndicator).display = True
+        self.set_loading(True)
         self.run_worker(self._load_data(), exclusive=True, thread=True)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
@@ -105,6 +106,10 @@ class StatsScreen(ContentView):
             if worker.is_cancelled:
                 return
 
+            if not entries:
+                self.app.call_from_thread(self.set_empty_state, no_activity_message(self._days))
+                return
+
             # Calculate all statistics
             stats = calculate_stats(entries)
             hourly = get_hourly_distribution(entries)
@@ -116,7 +121,7 @@ class StatsScreen(ContentView):
         except Exception as e:
             self.app.call_from_thread(self._show_error, str(e))
         finally:
-            self.app.call_from_thread(self._hide_loading)
+            self.app.call_from_thread(self.set_loading, False)
 
     def _update_display(
         self,
@@ -126,6 +131,7 @@ class StatsScreen(ContentView):
         users: list,
     ) -> None:
         """Update all statistics displays."""
+        self.set_empty_state(None)
         # Update summary panel
         stats_panel = self.query_one("#stats-summary", StatsPanel)
         stats_panel.update_stats(stats)
@@ -163,6 +169,3 @@ class StatsScreen(ContentView):
         """Show error message."""
         self.app.notify(f"Error: {error}", severity="error")
 
-    def _hide_loading(self) -> None:
-        """Hide loading indicator."""
-        self.query_one("#loading").display = False

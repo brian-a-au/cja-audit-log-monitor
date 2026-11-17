@@ -473,15 +473,51 @@ HelpScreen {
     margin: 0 1 0 0;
 }
 
-/* ---- Loading indicator ---- */
-.loading {
-    align: center middle;
-    height: 100%;
-    width: 100%;
+/* ---- Loading indicator ----
+ * Hidden until a view starts loading. Lives on an overlay layer, so showing
+ * it never pushes the view's layout around. */
+ContentView {
+    layers: base overlay;
 }
 
-LoadingIndicator {
+ContentView LoadingIndicator {
+    display: none;
+    layer: overlay;
+    dock: top;
+    height: 1;
+    width: 100%;
+    background: transparent;
     color: $primary;
+}
+
+/* ---- Empty state (no data / not connected) ---- */
+.empty-state {
+    display: none;
+    height: auto;
+    margin: 2 2;
+    padding: 1 2;
+    background: $surface;
+    border-left: heavy $primary;
+}
+
+#view-body {
+    height: 1fr;
+}
+
+/* ---- Dashboard columns ---- */
+#dash-columns {
+    height: auto;
+}
+
+#dash-left {
+    width: 2fr;
+    height: auto;
+    margin: 0 2 0 0;
+}
+
+#dash-right {
+    width: 1fr;
+    height: auto;
 }
 
 /* ---- Status indicators (used in dashboard/connection text) ---- */

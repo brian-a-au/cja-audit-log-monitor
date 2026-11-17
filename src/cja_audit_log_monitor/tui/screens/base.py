@@ -5,6 +5,7 @@ from collections.abc import Iterator
 from textual.app import ComposeResult
 from textual.containers import Vertical
 from textual.widget import Widget
+from textual.widgets import LoadingIndicator, Static
 
 from ..state import AppState
 
@@ -34,12 +35,31 @@ class ContentView(Vertical):
         self._state = state
 
     def compose(self) -> ComposeResult:
-        """Compose the view from ``compose_content``."""
-        yield from self.compose_content()
+        """Compose the view: an (initially hidden) empty state, then the body."""
+        yield Static("", id="empty-state", classes="empty-state")
+        with Vertical(id="view-body"):
+            yield from self.compose_content()
 
     def compose_content(self) -> Iterator[Widget]:
         """Yield the view's widgets."""
         raise NotImplementedError
+
+    def set_empty_state(self, message: str | None) -> None:
+        """Show ``message`` in place of the view body, or restore the body when None."""
+        empty = self.query_one("#empty-state", Static)
+        body = self.query_one("#view-body")
+        if message is None:
+            empty.display = False
+            body.display = True
+        else:
+            empty.update(message)
+            empty.display = True
+            body.display = False
+
+    def set_loading(self, loading: bool) -> None:
+        """Show or hide the view's loading indicator, if it has one."""
+        for indicator in self.query(LoadingIndicator):
+            indicator.display = loading
 
     def on_content_mounted(self) -> None:
         """Hook called once, the first time the view is shown."""

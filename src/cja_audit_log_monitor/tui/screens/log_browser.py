@@ -51,11 +51,11 @@ class LogBrowserScreen(ContentView):
 
     def on_content_mounted(self) -> None:
         """Called after compose_content widgets are mounted."""
-        self.run_worker(self._load_data(), exclusive=True, thread=True)
+        self.refresh_data()
 
     def refresh_data(self) -> None:
         """Refresh log data."""
-        self.query_one("#loading", LoadingIndicator).display = True
+        self.set_loading(True)
         self.run_worker(self._load_data(), exclusive=True, thread=True)
 
     async def _load_data(self) -> None:
@@ -73,7 +73,7 @@ class LogBrowserScreen(ContentView):
         except Exception as e:
             self.app.call_from_thread(self._show_error, str(e))
         finally:
-            self.app.call_from_thread(self._hide_loading)
+            self.app.call_from_thread(self.set_loading, False)
 
     def _update_table(self, entries: list, total: int) -> None:
         """Update the log table with entries."""
@@ -96,9 +96,6 @@ class LogBrowserScreen(ContentView):
         """Show error message."""
         self.app.notify(f"Error: {error}", severity="error")
 
-    def _hide_loading(self) -> None:
-        """Hide loading indicator."""
-        self.query_one("#loading").display = False
 
     def on_filter_bar_filter_changed(self, event: FilterBar.FilterChanged) -> None:
         """Handle filter changes."""
