@@ -1230,7 +1230,7 @@ class TestModals:
             await pilot.press("e")
             await pilot.pause()
             assert isinstance(app.screen, ExportDialog)
-            radio_buttons = app.screen.query("RadioButton")
+            radio_buttons = app.screen.query("#format-select RadioButton")
             assert len(radio_buttons) == 3  # JSON, CSV, TSV
 
     async def test_export_dialog_has_export_button(self, mock_app_state):
@@ -1276,3 +1276,73 @@ class TestSampledTotals:
         async with app.run_test(size=(140, 40)) as pilot:
             view = await _show_and_load(app, pilot, key)
             assert not view.query_one("#sample-note", Static).display
+
+
+class TestExportScope:
+    """Export can save the current page or every matching entry."""
+
+    async def _open(self, app, pilot):
+        await pilot.pause()
+        await pilot.press("e")
+        await pilot.pause()
+        return app.screen
+
+    async def test_scope_options_show_counts(self, mock_app_state, sample_audit_entries):
+        mock_app_state.entries = sample_audit_entries
+        mock_app_state.total_entries = 28775
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(120, 40)) as pilot:
+            dialog = await self._open(app, pilot)
+            page = str(dialog.query_one("#scope-page").label)
+            every = str(dialog.query_one("#scope-all").label)
+            assert f"this page · {len(sample_audit_entries)} entries" in page
+            assert "all matching · 28,775 entries" in every
+            assert "up to 10,000" in every
+
+    async def test_page_scope_is_default_and_writes_page(
+        self, mock_app_state, sample_audit_entries, tmp_path
+    ):
+        mock_app_state.entries = sample_audit_entries
+        app = _make_app(mock_app_state)
+        target = tmp_path / "page.json"
+        async with app.run_test(size=(120, 40)) as pilot:
+            dialog = await self._open(app, pilot)
+            dialog.query_one("#output-path").value = str(target)
+            await pilot.click("#export-button")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+        import json
+
+        assert len(json.loads(target.read_text())["entries"]) == len(sample_audit_entries)
+        mock_app_state.client.get_logs_sample.assert_not_called()
+
+    async def test_all_scope_fetches_every_matching_entry(
+        self, mock_app_state, sample_audit_entries, sample_audit_entry, tmp_path
+    ):
+        mock_app_state.entries = sample_audit_entries[:1]
+        mock_app_state.total_entries = 30
+        many = [sample_audit_entry.model_copy(update={"id": f"m{i}"}) for i in range(30)]
+        mock_app_state.client.get_logs_sample.return_value = (many, 30)
+        app = _make_app(mock_app_state)
+        target = tmp_path / "all.json"
+        async with app.run_test(size=(120, 40)) as pilot:
+            dialog = await self._open(app, pilot)
+            dialog.query_one("#scope-all").value = True
+            await pilot.pause()
+            dialog.query_one("#output-path").value = str(target)
+            await pilot.click("#export-button")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+        import json
+
+        assert len(json.loads(target.read_text())["entries"]) == 30
+        _, kwargs = mock_app_state.client.get_logs_sample.call_args
+        assert kwargs["max_entries"] == 10_000
+
+    async def test_dialog_uses_lowercase_labels(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(120, 40)) as pilot:
+            dialog = await self._open(app, pilot)
+            assert str(dialog.query_one("#export-button").label) == "export"
+            assert str(dialog.query_one("#cancel-button").label) == "cancel"
+            assert str(dialog.query_one("#export-title").render()) == "export audit logs"
