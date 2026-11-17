@@ -468,34 +468,29 @@ HelpScreen {
 }
 
 #help-overlay {
-    width: 70;
+    width: 56;
     height: auto;
-    max-height: 90%;
+    max-height: 100%;
     padding: 1 2;
     background: $background;
-    border: round $primary 50%;
+    border-left: heavy $primary;
+    overflow-y: auto;
 }
 
-.help-title {
+#help-title {
     color: $text-strong;
-    text-style: bold;
-    margin: 0 0 1 0;
 }
 
 .help-section {
-    color: $text-muted;
     margin: 1 0 0 0;
 }
 
-.help-key {
-    width: 10;
-    color: $primary;
-    text-style: bold;
+.help-section-body {
+    height: auto;
 }
 
-.help-description {
-    width: 1fr;
-    color: $text;
+#help-footer {
+    margin: 1 0 0 0;
 }
 
 /* ---- Toolbars: one-row control strips ---- */

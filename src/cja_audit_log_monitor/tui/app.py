@@ -10,85 +10,82 @@ from textual.containers import Horizontal, Vertical
 from textual.css.query import NoMatches
 from textual.markup import escape
 from textual.message import Message
-from textual.screen import Screen
+from textual.screen import ModalScreen
 from textual.widgets import ContentSwitcher, Footer, Static
 
+from ..formatters import resolve_tcss_markup
 from .screens.base import ContentView
 from .state import AppState
 
 ConnectionStatus = Literal["connecting", "connected", "disconnected"]
 
 
-class HelpScreen(Screen):
-    """Help overlay showing keybindings."""
+HELP_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
+    (
+        "views",
+        [
+            ("d", "dashboard · summary of the last 7 days"),
+            ("l", "logs · browse and filter entries"),
+            ("m", "monitor · watch for new entries"),
+            ("s", "stats · charts for any number of days"),
+            ("a", "alerts · alert rules"),
+            ("c", "config · current settings"),
+        ],
+    ),
+    (
+        "logs",
+        [
+            ("/", "search"),
+            ("n", "next page"),
+            ("p", "previous page"),
+            ("enter", "entry details"),
+            ("esc", "close entry details"),
+        ],
+    ),
+    (
+        "monitor",
+        [
+            ("space", "start or stop monitoring"),
+        ],
+    ),
+    (
+        "everywhere",
+        [
+            ("r", "refresh the current view"),
+            ("e", "export entries"),
+            ("?", "show or close this help"),
+            ("esc", "close a dialog"),
+            ("q", "quit"),
+        ],
+    ),
+]
+
+
+class HelpScreen(ModalScreen):
+    """Help overlay listing every keyboard shortcut."""
 
     BINDINGS = [
-        Binding("escape", "dismiss", "Close"),
-        Binding("?", "dismiss", "Close"),
+        Binding("escape", "dismiss", "close"),
+        Binding("question_mark", "dismiss", "close"),
     ]
 
     def compose(self) -> ComposeResult:
         """Compose help screen content."""
-        yield Vertical(
-            Static("[bold]CJA Audit Log Monitor - Help[/bold]\n", classes="help-title"),
-            Static("[bold]Navigation[/bold]", classes="help-section"),
-            Horizontal(
-                Static("d", classes="help-key"),
-                Static("Dashboard - Summary view", classes="help-description"),
-            ),
-            Horizontal(
-                Static("l", classes="help-key"),
-                Static("Logs - Browse audit log entries", classes="help-description"),
-            ),
-            Horizontal(
-                Static("m", classes="help-key"),
-                Static("Monitor - Real-time log monitoring", classes="help-description"),
-            ),
-            Horizontal(
-                Static("s", classes="help-key"),
-                Static("Stats - Statistics and analytics", classes="help-description"),
-            ),
-            Horizontal(
-                Static("a", classes="help-key"),
-                Static("Alerts - Manage alert rules", classes="help-description"),
-            ),
-            Horizontal(
-                Static("c", classes="help-key"),
-                Static("Config - View settings", classes="help-description"),
-            ),
-            Static("\n[bold]Actions[/bold]", classes="help-section"),
-            Horizontal(
-                Static("/", classes="help-key"),
-                Static("Focus search/filter", classes="help-description"),
-            ),
-            Horizontal(
-                Static("r", classes="help-key"),
-                Static("Refresh data", classes="help-description"),
-            ),
-            Horizontal(
-                Static("e", classes="help-key"),
-                Static("Export current data", classes="help-description"),
-            ),
-            Horizontal(
-                Static("Enter", classes="help-key"),
-                Static("View entry details", classes="help-description"),
-            ),
-            Static("\n[bold]General[/bold]", classes="help-section"),
-            Horizontal(
-                Static("?", classes="help-key"),
-                Static("Show this help", classes="help-description"),
-            ),
-            Horizontal(
-                Static("Esc", classes="help-key"),
-                Static("Close modal/dialog", classes="help-description"),
-            ),
-            Horizontal(
-                Static("q", classes="help-key"),
-                Static("Quit application", classes="help-description"),
-            ),
-            Static("\n[dim]Press Esc or ? to close[/dim]"),
-            id="help-overlay",
-        )
+        key_width = max(len(key) for _, rows in HELP_SECTIONS for key, _ in rows) + 2
+        with Vertical(id="help-overlay"):
+            yield Static("keyboard shortcuts", id="help-title", classes="modal-title")
+            for title, rows in HELP_SECTIONS:
+                yield Static(title.upper(), classes="section-label help-section")
+                body = "\n".join(
+                    resolve_tcss_markup(f"[$primary]{escape(key):<{key_width}}[/$primary]")
+                    + escape(description)
+                    for key, description in rows
+                )
+                yield Static(body, classes="help-section-body")
+            yield Static(
+                resolve_tcss_markup("[$text-muted]press esc or ? to close[/$text-muted]"),
+                id="help-footer",
+            )
 
 
 class CJAAuditApp(App):

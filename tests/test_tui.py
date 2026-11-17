@@ -1346,3 +1346,51 @@ class TestExportScope:
             assert str(dialog.query_one("#export-button").label) == "export"
             assert str(dialog.query_one("#cancel-button").label) == "cancel"
             assert str(dialog.query_one("#export-title").render()) == "export audit logs"
+
+
+class TestHelpScreen:
+    """Help lists every shortcut, in the app's lowercase style, without gaps."""
+
+    async def _open(self, app, pilot):
+        await pilot.pause()
+        await pilot.press("question_mark")
+        await pilot.pause()
+        return app.screen
+
+    async def test_lists_view_specific_keys(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(120, 40)) as pilot:
+            help_screen = await self._open(app, pilot)
+            text = "\n".join(str(s.render()) for s in help_screen.query(".help-section-body"))
+            for key, words in [
+                ("n", "next page"),
+                ("p", "previous page"),
+                ("space", "start or stop"),
+                ("enter", "entry details"),
+                ("esc", "close"),
+            ]:
+                line = next((ln for ln in text.splitlines() if ln.strip().startswith(key)), "")
+                assert words in line, (key, line)
+
+    async def test_title_is_lowercase(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(120, 40)) as pilot:
+            help_screen = await self._open(app, pilot)
+            assert str(help_screen.query_one("#help-title").render()) == "keyboard shortcuts"
+
+    async def test_rows_have_no_blank_gaps(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(120, 40)) as pilot:
+            help_screen = await self._open(app, pilot)
+            for body in help_screen.query(".help-section-body"):
+                lines = str(body.render()).splitlines()
+                assert all(line.strip() for line in lines)
+                assert body.region.height == len(lines)
+
+    async def test_escape_closes(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(120, 40)) as pilot:
+            help_screen = await self._open(app, pilot)
+            await pilot.press("escape")
+            await pilot.pause()
+            assert app.screen is not help_screen
