@@ -13,9 +13,17 @@ from ...formatters import resolve_tcss_markup
 from ...stats import build_date_range_query, calculate_stats, get_hourly_distribution
 from ..state import AppState
 from ..widgets import ActionBarChart, HourlyChart
-from .base import ContentView, no_activity_message, not_connected_message, stat_card
+from .base import (
+    ContentView,
+    no_activity_message,
+    not_connected_message,
+    sample_note,
+    show_sample_note,
+    stat_card,
+)
 
 DASHBOARD_DAYS = 7
+DASHBOARD_SAMPLE = 1000
 
 
 class DashboardScreen(ContentView):
@@ -45,6 +53,7 @@ class DashboardScreen(ContentView):
             stat_card(f"window · last {DASHBOARD_DAYS} days", "stat-range"),
             classes="dashboard-stats",
         )
+        yield sample_note()
         yield Horizontal(
             Vertical(
                 Static("ACTION DISTRIBUTION", classes="section-label"),
@@ -99,7 +108,7 @@ class DashboardScreen(ContentView):
             )
 
             query = build_date_range_query(DASHBOARD_DAYS)
-            entries = self._state.client.get_all_logs(query, max_entries=1000)
+            entries, total = self._state.client.get_logs_sample(query, max_entries=DASHBOARD_SAMPLE)
 
             if worker.is_cancelled:
                 return
@@ -114,7 +123,7 @@ class DashboardScreen(ContentView):
             anomalies = analyze_for_anomalies(entries)
             hourly = get_hourly_distribution(entries)
 
-            self.app.call_from_thread(self._update_stats, stats, anomalies, hourly)
+            self.app.call_from_thread(self._update_stats, stats, anomalies, hourly, total)
 
         except Exception as e:
             self.app.call_from_thread(self._show_disconnected, str(e))
@@ -126,12 +135,17 @@ class DashboardScreen(ContentView):
         self.app.set_connection_status("disconnected", error)
         self.set_empty_state(not_connected_message(error))
 
-    def _update_stats(self, stats: dict, anomalies: list, hourly: dict[int, int]) -> None:
+    def _update_stats(
+        self, stats: dict, anomalies: list, hourly: dict[int, int], total: int | None = None
+    ) -> None:
         """Update statistics display."""
         self._stats = stats
         self.set_empty_state(None)
 
-        self.query_one("#stat-total", Static).update(f"{stats.get('total_entries', 0):,}")
+        shown = stats.get("total_entries", 0)
+        total = shown if total is None else max(total, shown)
+        self.query_one("#stat-total", Static).update(f"{total:,}")
+        show_sample_note(self, shown, total)
 
         date_range = stats.get("date_range")
         range_text = (

@@ -177,3 +177,70 @@ class TestClientContextManager:
 
         # Client should be closed after context
         assert client._client is None
+
+
+class TestGetLogsSample:
+    """get_logs_sample returns up to N entries plus the API's true total."""
+
+    @staticmethod
+    def _page(n: int, start: int, total: int, last: bool) -> dict:
+        return {
+            "content": [{"id": f"e{start + i}"} for i in range(n)],
+            "totalElements": total,
+            "last": last,
+        }
+
+    def test_returns_entries_and_true_total(self, client, httpx_mock) -> None:
+        import re
+
+        httpx_mock.add_response(
+            url=re.compile(r"https://cja\.adobe\.io/auditlogs/api/v1/auditlogs.*"),
+            json=self._page(1000, 0, 28775, last=False),
+        )
+        with client:
+            entries, total = client.get_logs_sample(max_entries=1000)
+        assert len(entries) == 1000
+        assert total == 28775
+
+    def test_uses_largest_page_size(self, client, httpx_mock) -> None:
+        import re
+
+        httpx_mock.add_response(
+            url=re.compile(r"https://cja\.adobe\.io/auditlogs/api/v1/auditlogs.*"),
+            json=self._page(1000, 0, 5000, last=False),
+            is_reusable=True,
+        )
+        with client:
+            entries, total = client.get_logs_sample(max_entries=3000)
+        requests = [r for r in httpx_mock.get_requests() if "auditlogs" in str(r.url)]
+        assert len(requests) == 3
+        assert all("pageSize=1000" in str(r.url) for r in requests)
+        assert len(entries) == 3000
+        assert total == 5000
+
+    def test_small_result_stops_at_last_page(self, client, httpx_mock) -> None:
+        import re
+
+        httpx_mock.add_response(
+            url=re.compile(r"https://cja\.adobe\.io/auditlogs/api/v1/auditlogs.*"),
+            json=self._page(3, 0, 3, last=True),
+        )
+        with client:
+            entries, total = client.get_logs_sample(max_entries=1000)
+        assert len(entries) == 3
+        assert total == 3
+
+    def test_does_not_change_callers_query(self, client, httpx_mock) -> None:
+        import re
+
+        from cja_audit_log_monitor.models import AuditLogQuery
+
+        httpx_mock.add_response(
+            url=re.compile(r"https://cja\.adobe\.io/auditlogs/api/v1/auditlogs.*"),
+            json=self._page(3, 0, 3, last=True),
+        )
+        query = AuditLogQuery(page_size=50)
+        with client:
+            client.get_logs_sample(query, max_entries=1000)
+        assert query.page_size == 50
+        assert query.page == 0

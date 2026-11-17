@@ -102,6 +102,7 @@ def mock_app_state(sample_settings, sample_audit_entries) -> AppState:
     # Mock client
     mock_client = MagicMock()
     mock_client.get_all_logs.return_value = sample_audit_entries
+    mock_client.get_logs_sample.return_value = (sample_audit_entries, len(sample_audit_entries))
     mock_client.get_logs.return_value = AuditLogResponse(
         content=sample_audit_entries,
         total_elements=len(sample_audit_entries),

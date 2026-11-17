@@ -17,7 +17,16 @@ from ...stats import (
 )
 from ..state import AppState
 from ..widgets import ActionBarChart, HourlyChart
-from .base import ContentView, no_activity_message, not_connected_message, stat_card
+from .base import (
+    ContentView,
+    no_activity_message,
+    not_connected_message,
+    sample_note,
+    show_sample_note,
+    stat_card,
+)
+
+STATS_SAMPLE = 5000
 
 
 class StatsScreen(ContentView):
@@ -53,6 +62,7 @@ class StatsScreen(ContentView):
             stat_card("period", "stats-period"),
             classes="dashboard-stats",
         )
+        yield sample_note()
         yield Horizontal(
             Vertical(
                 Static("ACTION DISTRIBUTION", classes="section-label"),
@@ -107,7 +117,7 @@ class StatsScreen(ContentView):
 
         try:
             query = build_date_range_query(self._days)
-            entries = self._state.client.get_all_logs(query, max_entries=5000)
+            entries, total = self._state.client.get_logs_sample(query, max_entries=STATS_SAMPLE)
 
             if worker.is_cancelled:
                 return
@@ -122,7 +132,7 @@ class StatsScreen(ContentView):
             daily = get_daily_distribution(entries)
             users = get_user_activity(entries)
 
-            self.app.call_from_thread(self._update_display, stats, hourly, daily, users)
+            self.app.call_from_thread(self._update_display, stats, hourly, daily, users, total)
 
         except Exception as e:
             self.app.call_from_thread(self.set_empty_state, not_connected_message(str(e)))
@@ -135,11 +145,15 @@ class StatsScreen(ContentView):
         hourly: dict,
         daily: dict,
         users: list,
+        total: int | None = None,
     ) -> None:
         """Update all statistics displays."""
         self.set_empty_state(None)
 
-        self.query_one("#stats-total", Static).update(f"{stats.get('total_entries', 0):,}")
+        shown = stats.get("total_entries", 0)
+        total = shown if total is None else max(total, shown)
+        self.query_one("#stats-total", Static).update(f"{total:,}")
+        show_sample_note(self, shown, total)
         self.query_one("#stats-users", Static).update(f"{len(users):,}")
         date_range = stats.get("date_range")
         self.query_one("#stats-period", Static).update(

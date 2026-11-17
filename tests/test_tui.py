@@ -363,7 +363,7 @@ class TestEmptyStatesAndLayout:
             assert "press c" in _empty_text(view)
 
     async def test_dashboard_empty_state_zero_entries(self, mock_app_state):
-        mock_app_state.client.get_all_logs.return_value = []
+        mock_app_state.client.get_logs_sample.return_value = ([], len([]))
         app = _make_app(mock_app_state)
         async with app.run_test(size=(140, 40)) as pilot:
             view = await _show_and_load(app, pilot, "d")
@@ -393,7 +393,7 @@ class TestEmptyStatesAndLayout:
             )
             for i in range(5)
         ]
-        mock_app_state.client.get_all_logs.return_value = entries
+        mock_app_state.client.get_logs_sample.return_value = (entries, len(entries))
         app = _make_app(mock_app_state)
         async with app.run_test(size=(100, 30)) as pilot:
             view = await _show_and_load(app, pilot, "d")
@@ -403,7 +403,7 @@ class TestEmptyStatesAndLayout:
             assert all(len(line) <= top.content_region.width for line in lines)
 
     async def test_stats_empty_state_zero_entries(self, mock_app_state):
-        mock_app_state.client.get_all_logs.return_value = []
+        mock_app_state.client.get_logs_sample.return_value = ([], len([]))
         app = _make_app(mock_app_state)
         async with app.run_test(size=(140, 40)) as pilot:
             view = await _show_and_load(app, pilot, "s")
@@ -589,7 +589,7 @@ class TestViewFocusAndScroll:
             )
             for i in range(48)
         ]
-        mock_app_state.client.get_all_logs.return_value = entries
+        mock_app_state.client.get_logs_sample.return_value = (entries, len(entries))
         app = _make_app(mock_app_state)
         async with app.run_test(size=(100, 30)) as pilot:
             view = await _show_and_load(app, pilot, key)
@@ -1244,3 +1244,35 @@ class TestModals:
             assert isinstance(app.screen, ExportDialog)
             export_btn = app.screen.query_one("#export-button", Button)
             assert export_btn is not None
+
+
+class TestSampledTotals:
+    """Dashboard and stats show the API's true total, and say when charts use a sample."""
+
+    @pytest.mark.parametrize(("key", "total_id"), [("d", "#stat-total"), ("s", "#stats-total")])
+    async def test_total_is_true_api_total(
+        self, mock_app_state, sample_audit_entries, key, total_id
+    ):
+        mock_app_state.client.get_logs_sample.return_value = (sample_audit_entries, 28775)
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, key)
+            assert str(view.query_one(total_id, Static).render()) == "28,775"
+
+    @pytest.mark.parametrize("key", ["d", "s"])
+    async def test_sample_note_when_capped(self, mock_app_state, sample_audit_entries, key):
+        mock_app_state.client.get_logs_sample.return_value = (sample_audit_entries, 28775)
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, key)
+            note = view.query_one("#sample-note", Static)
+            assert note.display
+            n = len(sample_audit_entries)
+            assert f"newest {n:,} of 28,775 entries" in str(note.render())
+
+    @pytest.mark.parametrize("key", ["d", "s"])
+    async def test_no_sample_note_when_complete(self, mock_app_state, key):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, key)
+            assert not view.query_one("#sample-note", Static).display

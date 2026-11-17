@@ -570,3 +570,10 @@ ContentView LoadingIndicator {
 .status-connected     { color: $success; }
 .status-disconnected  { color: $danger; }
 .status-warning       { color: $warning; }
+
+/* Shown under the stat cards when charts use only the newest entries */
+.sample-note {
+    height: auto;
+    margin: 0 0 1 0;
+    color: $text-muted;
+}

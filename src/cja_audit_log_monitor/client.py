@@ -13,6 +13,9 @@ from .models import AuditLogEntry, AuditLogQuery, AuditLogResponse
 
 logger = logging.getLogger(__name__)
 
+# Largest pageSize the CJA Audit Logs API accepts (it rejects 2000 with a 400).
+MAX_PAGE_SIZE = 1000
+
 
 class APIError(Exception):
     """Raised when API request fails."""
@@ -210,6 +213,38 @@ class AuditLogsClient:
             if max_entries and len(entries) >= max_entries:
                 break
         return entries
+
+    def get_logs_sample(
+        self,
+        query: AuditLogQuery | None = None,
+        max_entries: int = 1000,
+    ) -> tuple[list[AuditLogEntry], int]:
+        """Get up to ``max_entries`` of the newest matching entries, plus the true total.
+
+        Fetches with the largest page size the API allows, so a sample of
+        1,000 entries takes one request. The caller's query is not changed.
+
+        Args:
+            query: Query parameters for filtering.
+            max_entries: Maximum number of entries to return.
+
+        Returns:
+            Tuple of (entries, total number of matching entries in the API).
+        """
+        base = query.model_copy() if query else AuditLogQuery()
+        base.page_size = min(MAX_PAGE_SIZE, max_entries)
+        entries: list[AuditLogEntry] = []
+        total = 0
+        page = 0
+        while len(entries) < max_entries:
+            base.page = page
+            response = self.get_logs(base)
+            total = response.total_elements
+            entries.extend(response.content)
+            if response.last or not response.content:
+                break
+            page += 1
+        return entries[:max_entries], total
 
     def search_logs(self, filters: list[dict[str, Any]]) -> AuditLogResponse:
         """Search audit logs using POST with complex filters.
