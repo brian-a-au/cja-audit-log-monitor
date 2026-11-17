@@ -147,7 +147,7 @@ class CJAAuditApp(App):
         """Build the top status row content."""
         org = self.state.settings.org_id or "—"
         return (
-            "cja-audit · "
+            "cja-audit-log-monitor · "
             "[$success]●[/$success] connected · "
             f"[$text-muted]org {org}[/$text-muted]"
         )

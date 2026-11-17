@@ -25,7 +25,7 @@ from textual.containers import Container
 from textual.widget import Widget
 from textual.widgets import Label, LoadingIndicator, Static
 
-from cja_audit.models import ActionType, AuditLogEntry, AuditLogResponse, ComponentType
+from cja_audit_log_monitor.models import ActionType, AuditLogEntry, AuditLogResponse, ComponentType
 
 # ---------------------------------------------------------------------------
 # ScreenContentWidget — the key fix
@@ -163,7 +163,7 @@ def generate_mock_entries(count: int = 150) -> list[AuditLogEntry]:
 
 def create_mock_settings():
     """Create mock settings."""
-    from cja_audit.models import AlertRule
+    from cja_audit_log_monitor.models import AlertRule
 
     mock_settings = MagicMock()
     mock_settings.client_id = "demo_client_12345"
@@ -329,9 +329,9 @@ def _hide_loading(app) -> None:
 
 def populate_dashboard_data(app, entries: list[AuditLogEntry]) -> None:
     """Directly populate dashboard widgets with mock data."""
-    from cja_audit.alerts import analyze_for_anomalies
-    from cja_audit.formatters import ACTION_COLORS, TCSS_TOKEN_HEX, resolve_tcss_markup
-    from cja_audit.stats import calculate_stats
+    from cja_audit_log_monitor.alerts import analyze_for_anomalies
+    from cja_audit_log_monitor.formatters import ACTION_COLORS, TCSS_TOKEN_HEX, resolve_tcss_markup
+    from cja_audit_log_monitor.stats import calculate_stats
 
     stats = calculate_stats(entries)
     anomalies = analyze_for_anomalies(entries)
@@ -404,7 +404,7 @@ def populate_dashboard_data(app, entries: list[AuditLogEntry]) -> None:
 
 def populate_log_browser_data(app, entries: list[AuditLogEntry]) -> None:
     """Populate the log browser with mock entries."""
-    from cja_audit.tui.widgets import LogTable
+    from cja_audit_log_monitor.tui.widgets import LogTable
 
     try:
         table = app.query_one("#log-table", LogTable)
@@ -426,8 +426,8 @@ def populate_log_browser_data(app, entries: list[AuditLogEntry]) -> None:
 
 def populate_monitor_data(app, entries: list[AuditLogEntry]) -> None:
     """Populate the monitor screen with some initial entries to show the log table."""
-    from cja_audit.formatters import resolve_tcss_markup
-    from cja_audit.tui.widgets import LogTable
+    from cja_audit_log_monitor.formatters import resolve_tcss_markup
+    from cja_audit_log_monitor.tui.widgets import LogTable
 
     try:
         # Show stopped state (the default) but populate the log table with recent entries
@@ -451,13 +451,13 @@ def populate_monitor_data(app, entries: list[AuditLogEntry]) -> None:
 
 def populate_stats_data(app, entries: list[AuditLogEntry]) -> None:
     """Populate the stats screen with computed statistics."""
-    from cja_audit.stats import (
+    from cja_audit_log_monitor.stats import (
         calculate_stats,
         get_daily_distribution,
         get_hourly_distribution,
         get_user_activity,
     )
-    from cja_audit.tui.widgets import ActionBarChart, HourlyChart, StatsPanel
+    from cja_audit_log_monitor.tui.widgets import ActionBarChart, HourlyChart, StatsPanel
 
     try:
         stats = calculate_stats(entries)
@@ -523,7 +523,7 @@ def populate_alerts_data(app) -> None:
 
 def populate_settings_data(app) -> None:
     """Populate the settings screen — static content is composed; update connection status."""
-    from cja_audit.formatters import resolve_tcss_markup
+    from cja_audit_log_monitor.formatters import resolve_tcss_markup
 
     try:
         app.query_one("#connection-status", Static).update(
@@ -548,7 +548,7 @@ def populate_settings_data(app) -> None:
 
 async def capture_screenshots():
     """Capture screenshots of all TUI screens with mock data."""
-    from cja_audit.tui import CJAAuditApp
+    from cja_audit_log_monitor.tui import CJAAuditApp
 
     output_dir = Path(__file__).parent.parent / "docs" / "screenshots"
     output_dir.mkdir(parents=True, exist_ok=True)

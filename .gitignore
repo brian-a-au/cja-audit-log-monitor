@@ -40,7 +40,7 @@ config.json
 private.key
 credentials/
 .cja/
-.cja-audit/
+.cja-audit-log-monitor/
 
 # Testing
 .pytest_cache/

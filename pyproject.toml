@@ -1,5 +1,5 @@
 [project]
-name = "cja-audit"
+name = "cja-audit-log-monitor"
 version = "0.1.0"
 description = "CLI tool for querying and analyzing Adobe CJA audit logs"
 readme = "README.md"
@@ -38,14 +38,14 @@ dev = [
 ]
 
 [project.scripts]
-cja-audit = "cja_audit.cli:main"
+cja-audit-log-monitor = "cja_audit_log_monitor.cli:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/cja_audit"]
+packages = ["src/cja_audit_log_monitor"]
 
 [tool.ruff]
 line-length = 100

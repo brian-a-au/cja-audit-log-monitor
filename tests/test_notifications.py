@@ -5,8 +5,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from cja_audit.models import AuditLogEntry, NotificationConfig, WebhookConfig
-from cja_audit.notifications import NotificationManager
+from cja_audit_log_monitor.models import AuditLogEntry, NotificationConfig, WebhookConfig
+from cja_audit_log_monitor.notifications import NotificationManager
 
 
 @pytest.fixture
@@ -302,12 +302,12 @@ class TestAnomalyDedupFilter:
     """Tests for in-memory per-session anomaly dedup."""
 
     def test_empty_input_returns_empty(self):
-        from cja_audit.notifications import AnomalyDedupFilter
+        from cja_audit_log_monitor.notifications import AnomalyDedupFilter
         f = AnomalyDedupFilter()
         assert f.suppress_seen([]) == []
 
     def test_single_anomaly_passes_through_first_time(self):
-        from cja_audit.notifications import AnomalyDedupFilter
+        from cja_audit_log_monitor.notifications import AnomalyDedupFilter
         f = AnomalyDedupFilter()
         anomaly = {
             "type": "high_activity_user",
@@ -320,7 +320,7 @@ class TestAnomalyDedupFilter:
         assert out == [anomaly]
 
     def test_same_anomaly_suppressed_on_repeat(self):
-        from cja_audit.notifications import AnomalyDedupFilter
+        from cja_audit_log_monitor.notifications import AnomalyDedupFilter
         f = AnomalyDedupFilter()
         anomaly = {
             "type": "bulk_delete_single_user",
@@ -333,7 +333,7 @@ class TestAnomalyDedupFilter:
 
     def test_count_change_does_not_change_fingerprint(self):
         """Recurring anomaly whose count grew between cycles still dedupes."""
-        from cja_audit.notifications import AnomalyDedupFilter
+        from cja_audit_log_monitor.notifications import AnomalyDedupFilter
         f = AnomalyDedupFilter()
         first = {
             "type": "bulk_delete_single_user",
@@ -346,7 +346,7 @@ class TestAnomalyDedupFilter:
         assert f.suppress_seen([second]) == []
 
     def test_different_users_pass_through(self):
-        from cja_audit.notifications import AnomalyDedupFilter
+        from cja_audit_log_monitor.notifications import AnomalyDedupFilter
         f = AnomalyDedupFilter()
         a1 = {"type": "high_activity_user", "user": "a@x.com", "action_count": 50,
               "average": 10.0, "description": "..."}
@@ -356,7 +356,7 @@ class TestAnomalyDedupFilter:
         assert len(out) == 2
 
     def test_different_anomaly_types_pass_through(self):
-        from cja_audit.notifications import AnomalyDedupFilter
+        from cja_audit_log_monitor.notifications import AnomalyDedupFilter
         f = AnomalyDedupFilter()
         a1 = {"type": "high_activity_user", "user": "a@x.com", "action_count": 50,
               "average": 10.0, "description": "..."}
@@ -366,7 +366,7 @@ class TestAnomalyDedupFilter:
         assert len(out) == 2
 
     def test_off_hours_different_hours_pass_through(self):
-        from cja_audit.notifications import AnomalyDedupFilter
+        from cja_audit_log_monitor.notifications import AnomalyDedupFilter
         f = AnomalyDedupFilter()
         a1 = {"type": "off_hours_activity", "hour": 2, "action_count": 25,
               "description": "..."}
@@ -377,7 +377,7 @@ class TestAnomalyDedupFilter:
 
     def test_missing_fields_fingerprint_stably(self):
         """Anomaly dict shape with missing optional keys still fingerprints; no exception."""
-        from cja_audit.notifications import AnomalyDedupFilter
+        from cja_audit_log_monitor.notifications import AnomalyDedupFilter
         f = AnomalyDedupFilter()
         a = {"type": "unknown_type"}
         out1 = f.suppress_seen([a])
@@ -387,7 +387,7 @@ class TestAnomalyDedupFilter:
 
     def test_description_only_difference_dedupes(self):
         """Same identity fields, different free-text description → suppressed."""
-        from cja_audit.notifications import AnomalyDedupFilter
+        from cja_audit_log_monitor.notifications import AnomalyDedupFilter
         f = AnomalyDedupFilter()
         a1 = {"type": "bulk_delete_single_user", "user": "d@x.com", "delete_count": 10,
               "description": "Single user performed 10 deletes"}
@@ -402,8 +402,8 @@ class TestAnomalyDedupFilter:
         """
         from datetime import date
 
-        import cja_audit.notifications as nm_mod
-        from cja_audit.notifications import AnomalyDedupFilter
+        import cja_audit_log_monitor.notifications as nm_mod
+        from cja_audit_log_monitor.notifications import AnomalyDedupFilter
 
         f = AnomalyDedupFilter()
         a = {"type": "high_activity_user", "user": "e@x.com", "action_count": 50,

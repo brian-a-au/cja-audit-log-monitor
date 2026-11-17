@@ -1,10 +1,10 @@
 # Alert Rules
 
-Alert rules detect suspicious patterns across audit activity and are evaluated by both the TUI's [Real-Time Monitor](screens/monitor.md) and the CLI's `cja-audit cli alerts test` / `cja-audit cli monitor` commands. The same engine powers both.
+Alert rules detect suspicious patterns across audit activity and are evaluated by both the TUI's [Real-Time Monitor](screens/monitor.md) and the CLI's `cja-audit-log-monitor cli alerts test` / `cja-audit-log-monitor cli monitor` commands. The same engine powers both.
 
 ## Where rules live
 
-Rules are defined in `~/.cja-audit/config.yaml`. Run `uv run cja-audit cli init` to create the file with sensible defaults, then edit it.
+Rules are defined in `~/.cja-audit-log-monitor/config.yaml`. Run `uv run cja-audit-log-monitor cli init` to create the file with sensible defaults, then edit it.
 
 ## Schema
 
@@ -50,7 +50,7 @@ A rule fires when **`threshold_count` or more matching events** occur within **`
 ## Testing rules
 
 ```bash
-uv run cja-audit cli alerts test --days 1
+uv run cja-audit-log-monitor cli alerts test --days 1
 ```
 
 Or open the [Alerts screen](screens/alerts.md) in the TUI and click `Test Rules`. Either path runs every enabled rule against the last 24 hours of audit data and reports what would have fired.
@@ -63,13 +63,13 @@ Or open the [Alerts screen](screens/alerts.md) in the TUI and click `Test Rules`
 
 ## Delivery channels
 
-Fired alerts can optionally be delivered to external channels via the `notifications:` block in `~/.cja-audit/config.yaml`.
+Fired alerts can optionally be delivered to external channels via the `notifications:` block in `~/.cja-audit-log-monitor/config.yaml`.
 
 ```yaml
 notifications:
   slack_webhook_url: https://hooks.slack.com/services/XXX/YYY/ZZZ
   notify_on_alerts: true
-  notify_on_anomalies: true   # opt-in; fires from `cja-audit cli anomalies`
+  notify_on_anomalies: true   # opt-in; fires from `cja-audit-log-monitor cli anomalies`
   webhooks:
     - url: https://example.com/webhook
       enabled: true
@@ -84,7 +84,7 @@ notifications:
 |---|---|
 | `slack_webhook_url` | Slack incoming webhook URL. One per org. |
 | `notify_on_alerts` | Master toggle for rule-based alert delivery. Default `true`. |
-| `notify_on_anomalies` | Enable anomaly delivery via `cja-audit cli anomalies [--watch]`. Default `false` (opt-in). |
+| `notify_on_anomalies` | Enable anomaly delivery via `cja-audit-log-monitor cli anomalies [--watch]`. Default `false` (opt-in). |
 | `webhooks[].url` | Webhook target. Multiple supported. |
 | `webhooks[].enabled` | Per-webhook toggle. Default `true`. |
 | `webhooks[].method` | HTTP method. Default `POST`. |
@@ -92,12 +92,12 @@ notifications:
 | `webhooks[].timeout` | Request timeout in seconds. Default `30`. |
 | `webhooks[].include_entry_details` | Include the audit entry in the payload. Default `true`. |
 
-Both the [Real-Time Monitor screen](screens/monitor.md) and the CLI's `cja-audit cli monitor` / `tail` dispatch to all configured channels when a rule fires. The first delivery failure per channel per session surfaces a one-time warning; subsequent failures are suppressed until the channel recovers (logs always record every failure).
+Both the [Real-Time Monitor screen](screens/monitor.md) and the CLI's `cja-audit-log-monitor cli monitor` / `tail` dispatch to all configured channels when a rule fires. The first delivery failure per channel per session surfaces a one-time warning; subsequent failures are suppressed until the channel recovers (logs always record every failure).
 
 ### Anomaly delivery
 
 Anomalies (`high_activity_user`, `bulk_delete_single_user`, `off_hours_activity`) are
-detected by `analyze_for_anomalies` and dispatched via `cja-audit cli anomalies`.
+detected by `analyze_for_anomalies` and dispatched via `cja-audit-log-monitor cli anomalies`.
 
 - **Opt-in.** Set `notify_on_anomalies: true` in your `notifications:` block. Default
   is `false`.

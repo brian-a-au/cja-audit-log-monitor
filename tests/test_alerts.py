@@ -5,8 +5,13 @@ from datetime import UTC, datetime
 import pytest
 from rich.panel import Panel
 
-from cja_audit.alerts import DEFAULT_ALERT_RULES, AlertEngine, FiredAlert, analyze_for_anomalies
-from cja_audit.models import ActionType, AlertRule, AuditLogEntry, ComponentType
+from cja_audit_log_monitor.alerts import (
+    DEFAULT_ALERT_RULES,
+    AlertEngine,
+    FiredAlert,
+    analyze_for_anomalies,
+)
+from cja_audit_log_monitor.models import ActionType, AlertRule, AuditLogEntry, ComponentType
 
 
 @pytest.fixture

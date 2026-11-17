@@ -5,8 +5,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from cja_audit.models import AuditLogEntry, AuditLogResponse
-from cja_audit.monitor import AuditLogMonitor
+from cja_audit_log_monitor.models import AuditLogEntry, AuditLogResponse
+from cja_audit_log_monitor.monitor import AuditLogMonitor
 
 
 @pytest.fixture
@@ -184,7 +184,7 @@ class TestAuditLogMonitor:
         self, sample_audit_entry
     ) -> None:
         """AuditLogMonitor._handle_entry calls notify_alert for each FiredAlert."""
-        from cja_audit.alerts import FiredAlert
+        from cja_audit_log_monitor.alerts import FiredAlert
 
         fa = FiredAlert(rule_name="r", message="m", entry=sample_audit_entry, panel=MagicMock())
         fake_engine = MagicMock()
@@ -207,7 +207,7 @@ class TestAuditLogMonitor:
         self, sample_audit_entry
     ) -> None:
         """AuditLogMonitor._handle_entry behavior unchanged when notification_manager is None."""
-        from cja_audit.alerts import FiredAlert
+        from cja_audit_log_monitor.alerts import FiredAlert
 
         fa = FiredAlert(rule_name="r", message="m", entry=sample_audit_entry, panel=MagicMock())
         fake_engine = MagicMock()
@@ -220,7 +220,7 @@ class TestAuditLogMonitor:
         self, sample_audit_entry
     ) -> None:
         """An exception inside notify_alert does NOT prevent _handle_entry from completing."""
-        from cja_audit.alerts import FiredAlert
+        from cja_audit_log_monitor.alerts import FiredAlert
 
         fa = FiredAlert(rule_name="r", message="m", entry=sample_audit_entry, panel=MagicMock())
         fake_engine = MagicMock()
@@ -240,7 +240,7 @@ class TestAuditLogMonitor:
 
     def test_handle_entry_prints_pop_first_failure_warning(self, sample_audit_entry) -> None:
         """When pop_first_failure returns a string, console.print emits a yellow-tagged warning."""
-        from cja_audit.alerts import FiredAlert
+        from cja_audit_log_monitor.alerts import FiredAlert
 
         fa = FiredAlert(rule_name="r", message="m", entry=sample_audit_entry, panel=MagicMock())
         fake_engine = MagicMock()

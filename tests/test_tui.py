@@ -5,11 +5,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from textual.widgets import Button, Static
 
-from cja_audit.alerts import FiredAlert
-from cja_audit.models import AlertRule
-from cja_audit.notifications import NotificationManager
-from cja_audit.tui.app import CJAAuditApp, HelpScreen
-from cja_audit.tui.state import AppState
+from cja_audit_log_monitor.alerts import FiredAlert
+from cja_audit_log_monitor.models import AlertRule
+from cja_audit_log_monitor.notifications import NotificationManager
+from cja_audit_log_monitor.tui.app import CJAAuditApp, HelpScreen
+from cja_audit_log_monitor.tui.state import AppState
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -27,10 +27,10 @@ def _make_app(mock_app_state) -> CJAAuditApp:
 # These screens are used as widget factories (compose_content) and are never actually
 # mounted in the Textual DOM, so their workers crash in headless tests.
 _SCREEN_WORKER_PATCHES = [
-    "cja_audit.tui.screens.dashboard.DashboardScreen.on_content_mounted",
-    "cja_audit.tui.screens.log_browser.LogBrowserScreen.on_content_mounted",
-    "cja_audit.tui.screens.settings.SettingsScreen.on_content_mounted",
-    "cja_audit.tui.screens.stats.StatsScreen.on_content_mounted",
+    "cja_audit_log_monitor.tui.screens.dashboard.DashboardScreen.on_content_mounted",
+    "cja_audit_log_monitor.tui.screens.log_browser.LogBrowserScreen.on_content_mounted",
+    "cja_audit_log_monitor.tui.screens.settings.SettingsScreen.on_content_mounted",
+    "cja_audit_log_monitor.tui.screens.stats.StatsScreen.on_content_mounted",
 ]
 
 
@@ -370,7 +370,7 @@ class TestMonitorScreen:
         """When pop_first_failure returns a string, _show_warning is dispatched."""
         from textual.screen import Screen
 
-        from cja_audit.tui.screens.monitor import MonitorScreen
+        from cja_audit_log_monitor.tui.screens.monitor import MonitorScreen
 
         expected_warning = (
             "Notification delivery failed (slack);"
@@ -401,7 +401,7 @@ class TestMonitorScreen:
         """_show_alert renders 'rule_name: message' (not the literal 'Alert triggered')."""
         from textual.screen import Screen
 
-        from cja_audit.tui.screens.monitor import MonitorScreen
+        from cja_audit_log_monitor.tui.screens.monitor import MonitorScreen
 
         state = MagicMock()
         screen = MonitorScreen(state=state)
@@ -500,8 +500,8 @@ class TestSettingsScreen:
         """Settings screen includes a Notifications section showing channel presence."""
         from unittest.mock import MagicMock
 
-        from cja_audit.models import NotificationConfig, WebhookConfig
-        from cja_audit.tui.screens.settings import SettingsScreen
+        from cja_audit_log_monitor.models import NotificationConfig, WebhookConfig
+        from cja_audit_log_monitor.tui.screens.settings import SettingsScreen
 
         state = MagicMock()
         state.settings.notifications = NotificationConfig(
@@ -553,8 +553,8 @@ class TestModals:
     async def test_entry_detail_panel_shows_when_toggled(
         self, mock_app_state, sample_audit_entry
     ):
-        from cja_audit.tui.modals import EntryDetailPanel
-        from cja_audit.tui.widgets import LogTable
+        from cja_audit_log_monitor.tui.modals import EntryDetailPanel
+        from cja_audit_log_monitor.tui.widgets import LogTable
 
         app = _make_app(mock_app_state)
         async with app.run_test() as pilot:
@@ -590,9 +590,9 @@ class TestModals:
         require lifting the screen onto the screen stack, which would
         diverge from how the app actually mounts it.
         """
-        from cja_audit.tui.modals import EntryDetailPanel
-        from cja_audit.tui.screens import LogBrowserScreen
-        from cja_audit.tui.widgets import LogTable
+        from cja_audit_log_monitor.tui.modals import EntryDetailPanel
+        from cja_audit_log_monitor.tui.screens import LogBrowserScreen
+        from cja_audit_log_monitor.tui.widgets import LogTable
 
         app = _make_app(mock_app_state)
         async with app.run_test() as pilot:
@@ -622,8 +622,8 @@ class TestModals:
         a mounted context. We wrap in app.run_test() and load the log browser
         so the panel is properly composed into the DOM before exercising it.
         """
-        from cja_audit.tui.modals import EntryDetailPanel
-        from cja_audit.tui.widgets import LogTable
+        from cja_audit_log_monitor.tui.modals import EntryDetailPanel
+        from cja_audit_log_monitor.tui.widgets import LogTable
 
         entry_a, entry_b = sample_audit_entries[0], sample_audit_entries[1]
         assert entry_a.id != entry_b.id
@@ -666,8 +666,8 @@ class TestModals:
         self, mock_app_state, sample_audit_entries
     ):
         """When the panel is visible, advancing the cursor updates its content live."""
-        from cja_audit.tui.modals import EntryDetailPanel
-        from cja_audit.tui.widgets import LogTable
+        from cja_audit_log_monitor.tui.modals import EntryDetailPanel
+        from cja_audit_log_monitor.tui.widgets import LogTable
 
         # Use two distinct entries so we can assert the panel content changes.
         entry_a, entry_b = sample_audit_entries[0], sample_audit_entries[1]
@@ -707,8 +707,8 @@ class TestModals:
         self, mock_app_state, sample_audit_entry
     ):
         """When the panel is hidden, RowHighlighted handler is a no-op."""
-        from cja_audit.tui.modals import EntryDetailPanel
-        from cja_audit.tui.widgets import LogTable
+        from cja_audit_log_monitor.tui.modals import EntryDetailPanel
+        from cja_audit_log_monitor.tui.widgets import LogTable
 
         app = _make_app(mock_app_state)
         async with app.run_test() as pilot:
@@ -728,7 +728,7 @@ class TestModals:
             assert not panel.is_visible()
 
     async def test_export_dialog_opens_on_e_key(self, mock_app_state):
-        from cja_audit.tui.modals import ExportDialog
+        from cja_audit_log_monitor.tui.modals import ExportDialog
 
         app = _make_app(mock_app_state)
         async with app.run_test() as pilot:
@@ -738,7 +738,7 @@ class TestModals:
             assert isinstance(app.screen, ExportDialog)
 
     async def test_export_dialog_has_format_radio_buttons(self, mock_app_state):
-        from cja_audit.tui.modals import ExportDialog
+        from cja_audit_log_monitor.tui.modals import ExportDialog
 
         app = _make_app(mock_app_state)
         async with app.run_test() as pilot:
@@ -750,7 +750,7 @@ class TestModals:
             assert len(radio_buttons) == 3  # JSON, CSV, TSV
 
     async def test_export_dialog_has_export_button(self, mock_app_state):
-        from cja_audit.tui.modals import ExportDialog
+        from cja_audit_log_monitor.tui.modals import ExportDialog
 
         app = _make_app(mock_app_state)
         async with app.run_test() as pilot:

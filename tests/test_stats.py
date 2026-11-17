@@ -2,8 +2,8 @@
 
 
 
-from cja_audit.models import AuditLogEntry
-from cja_audit.stats import (
+from cja_audit_log_monitor.models import AuditLogEntry
+from cja_audit_log_monitor.stats import (
     calculate_stats,
     get_action_distribution,
     get_daily_distribution,

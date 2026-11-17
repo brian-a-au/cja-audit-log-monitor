@@ -8,18 +8,18 @@ A powerful TUI (Text User Interface) application for monitoring and analyzing Ad
 - **Real-Time Updates**: Monitor audit logs as they happen with configurable polling
 - **Smart Filtering**: Search by user, action type, component, and text
 - **Visual Analytics**: Bar charts for action distribution and activity patterns
-- **Alert & Anomaly Detection & Delivery**: Configurable rules for bulk deletes, exports, and suspicious patterns; optional Slack/webhook delivery (anomaly delivery via `cja-audit cli anomalies`; opt-in by setting `notify_on_anomalies: true`, default `false`)
+- **Alert & Anomaly Detection & Delivery**: Configurable rules for bulk deletes, exports, and suspicious patterns; optional Slack/webhook delivery (anomaly delivery via `cja-audit-log-monitor cli anomalies`; opt-in by setting `notify_on_anomalies: true`, default `false`)
 - **Export Options**: Save filtered logs to JSON, CSV, or TSV
 - **Connection Status**: Live API connection monitoring
 
 ## Quick Start
 
-> Prefix commands with `uv run` (e.g. `uv run cja-audit`), or activate the venv first (`source .venv/bin/activate`) and run them directly.
+> Prefix commands with `uv run` (e.g. `uv run cja-audit-log-monitor`), or activate the venv first (`source .venv/bin/activate`) and run them directly.
 
 ```bash
 # 1. Clone
-git clone https://github.com/brian-a-au/cja_audit_log_monitor
-cd cja_audit_log_monitor
+git clone https://github.com/brian-a-au/cja-audit-log-monitor
+cd cja-audit-log-monitor
 
 # 2. Install uv (skip if you already have it)
 curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -32,11 +32,11 @@ cp .env.example .env
 # Edit .env with your Adobe ORG_ID, CLIENT_ID, SECRET, SCOPES
 
 # 5. Launch the TUI
-uv run cja-audit
+uv run cja-audit-log-monitor
 
 # Or run a CLI command — e.g. watch for anomalies and dispatch to Slack
 # (delivery is opt-in: set notify_on_anomalies: true in your notifications block)
-cja-audit cli anomalies --watch
+cja-audit-log-monitor cli anomalies --watch
 ```
 
 That's it! The interactive TUI will launch with a dashboard showing your audit log activity.
@@ -107,7 +107,7 @@ Setup, scripting, and reference material live under [`docs/`](docs/):
 |---|---|
 | Configure Adobe OAuth credentials and verify | [docs/configuration.md](docs/configuration.md) |
 | OAuth errors, setup checklist, security notes | [docs/troubleshooting.md](docs/troubleshooting.md) |
-| Full CLI command reference (`cja-audit cli ...`) | [docs/cli.md](docs/cli.md) |
+| Full CLI command reference (`cja-audit-log-monitor cli ...`) | [docs/cli.md](docs/cli.md) |
 | Alert-rule schema and tuning | [docs/alert-rules.md](docs/alert-rules.md) |
 | Action types, component types, upstream API | [docs/reference.md](docs/reference.md) |
 | Tests, lint, project layout | [docs/development.md](docs/development.md) |

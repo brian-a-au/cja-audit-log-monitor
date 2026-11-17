@@ -16,8 +16,8 @@ The Settings screen is a read-only view of the active configuration plus a one-c
 
 ## What you can do
 
-- **Verify the API end-to-end** with `Verify Connection` — runs the same OAuth handshake and ping that the CLI's `cja-audit cli verify` uses, but right inside the TUI.
-- **Refresh settings** after editing `.env` or `~/.cja-audit/config.yaml` — `Refresh Settings` re-instantiates the client without needing to quit and restart the TUI.
+- **Verify the API end-to-end** with `Verify Connection` — runs the same OAuth handshake and ping that the CLI's `cja-audit-log-monitor cli verify` uses, but right inside the TUI.
+- **Refresh settings** after editing `.env` or `~/.cja-audit-log-monitor/config.yaml` — `Refresh Settings` re-instantiates the client without needing to quit and restart the TUI.
 - **Confirm credential precedence**: the displayed org ID and client ID prefixes tell you which credentials the app actually loaded — useful when env vars and config files might both be in play.
 - **Sanity-check the API target** before assuming a bug is in the tool — wrong API base URL is a common misconfiguration.
 

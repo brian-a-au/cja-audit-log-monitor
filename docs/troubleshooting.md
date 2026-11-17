@@ -37,7 +37,7 @@ After permission changes in Admin Console, allow **5–10 minutes** for propagat
 | Alert fires in TUI but nothing reaches Slack/webhook | `notify_on_alerts: false` set, or `notifications:` block missing | Set `notify_on_alerts: true` and confirm at least one of `slack_webhook_url` / `webhooks[]` is populated |
 | Slow polling cycles when Slack is slow | Default 30 s webhook timeout > 5 s polling interval | Either raise the polling interval or lower per-webhook `timeout` |
 
-**Anomaly delivery silently disabled.** If `cja-audit cli anomalies` runs but
+**Anomaly delivery silently disabled.** If `cja-audit-log-monitor cli anomalies` runs but
 nothing reaches Slack/webhook, check that `notify_on_anomalies: true` is set
 in your `notifications:` block. The default is `false`.
 

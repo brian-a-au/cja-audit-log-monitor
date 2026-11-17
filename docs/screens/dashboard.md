@@ -10,7 +10,7 @@ The Dashboard is the home screen of the TUI — your at-a-glance situational vie
 - **Stat cards**: total entries pulled, the date range covered, count of active users, and a count of recent anomalies (highlighted in warning color when non-zero).
 - **Action distribution chart**: a horizontal bar chart of the top eight action types (CREATE / EDIT / DELETE / SHARE / EXPORT / etc.), color-coded to match the rest of the TUI.
 - **Top 5 active users**: the most active accounts in the last 7 days with their action counts.
-- **Recent anomalies**: up to five auto-detected unusual patterns (bulk deletes, off-hours activity, exports) flagged from the same window. The Dashboard shows recent anomalies as a passive review surface — the TUI does not dispatch them. To dispatch anomalies to Slack/webhooks, run `cja-audit cli anomalies [--watch]` (see [CLI Reference → `anomalies`](../cli.md#anomalies--detect-and-deliver-anomalies) and [Alert Rules → Anomaly delivery](../alert-rules.md#anomaly-delivery)).
+- **Recent anomalies**: up to five auto-detected unusual patterns (bulk deletes, off-hours activity, exports) flagged from the same window. The Dashboard shows recent anomalies as a passive review surface — the TUI does not dispatch them. To dispatch anomalies to Slack/webhooks, run `cja-audit-log-monitor cli anomalies [--watch]` (see [CLI Reference → `anomalies`](../cli.md#anomalies--detect-and-deliver-anomalies) and [Alert Rules → Anomaly delivery](../alert-rules.md#anomaly-delivery)).
 - **Last updated** timestamp and a `refresh` button.
 
 ## What you can do

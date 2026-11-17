@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime
 
-from cja_audit.models import (
+from cja_audit_log_monitor.models import (
     ActionType,
     AuditLogEntry,
     AuditLogQuery,

@@ -38,4 +38,4 @@ Ruff settings: line-length 100, target Python 3.11+. Selected rules: `E`, `F`, `
 
 ## Project layout
 
-The package lives in `src/cja_audit/`. Core modules: `cli.py`, `auth.py`, `client.py`, `config.py`, `models.py`, `alerts.py`, `monitor.py`, `formatters.py`, `stats.py`, `export.py`. The TUI lives under `src/cja_audit/tui/` (app, state, styles, screens, widgets, modals).
+The package lives in `src/cja_audit_log_monitor/`. Core modules: `cli.py`, `auth.py`, `client.py`, `config.py`, `models.py`, `alerts.py`, `monitor.py`, `formatters.py`, `stats.py`, `export.py`. The TUI lives under `src/cja_audit_log_monitor/tui/` (app, state, styles, screens, widgets, modals).

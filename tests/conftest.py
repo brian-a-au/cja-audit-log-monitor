@@ -5,9 +5,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from cja_audit.config import CJASettings
-from cja_audit.models import AuditLogEntry, AuditLogResponse
-from cja_audit.tui.state import AppState
+from cja_audit_log_monitor.config import CJASettings
+from cja_audit_log_monitor.models import AuditLogEntry, AuditLogResponse
+from cja_audit_log_monitor.tui.state import AppState
 
 
 @pytest.fixture
