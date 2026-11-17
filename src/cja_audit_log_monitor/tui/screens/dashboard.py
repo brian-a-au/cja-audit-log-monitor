@@ -153,7 +153,9 @@ class DashboardScreen(ContentView):
         self.query_one("#hourly-chart", HourlyChart).update_data(hourly)
 
         if top_users:
-            name_width = 28
+            top_users_widget = self.query_one("#top-users", Static)
+            # Fit "name count" on one line: count takes 6 cells (space + 5 digits).
+            name_width = max(8, min(28, top_users_widget.content_region.width - 6))
             lines = []
             for user, count in top_users[:8]:
                 name = user if len(user) <= name_width else user[: name_width - 1] + "…"

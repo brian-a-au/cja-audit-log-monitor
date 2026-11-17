@@ -6,16 +6,14 @@ The Statistics screen runs deeper analytics over a configurable date window — 
 
 ## What you see
 
-- **Window control**: a `Days to analyze` input and an `Update` button. Default is 7 days.
-- **Summary panel**: total entries, unique users, unique components, and the date range actually covered by the result.
-- **Action distribution chart**: a horizontal bar chart of every action type in the window, color-coded.
-- **Hourly activity chart**: a 24-bucket distribution showing which hours of the day produce the most activity.
-- **Daily activity chart**: a sparkline-style bar per day for the last 14 days inside the window.
-- **User activity ranking**: the top 10 users by action count, ranked.
+- **Window control**: a `days` input and an `update` button. Default is 7 days. It stays visible even when the window has no activity, so you can widen it.
+- **Stat cards**: total entries, active users, and the period actually covered by the result.
+- **Action distribution** and **hourly activity** charts side by side. The busiest hour is highlighted.
+- **Daily activity** (one bar per day, last 14 days in the window) and the **user ranking** (top 10 by action count) side by side.
 
 ## What you can do
 
-- **Adjust the window** by typing a number and clicking `Update` (or press `r` to refresh the current window).
+- **Adjust the window** by typing a number and clicking `update` (or press `r` to refresh the current window).
 - **Compare patterns over time** by stepping the window up (30 / 60 / 90 days) — the daily chart adapts automatically.
 - **Identify peak hours** in the hourly chart to spot off-hours work or batch jobs.
 - **Find power users and outliers** in the ranking — useful when the dashboard's top-5 isn't enough resolution.

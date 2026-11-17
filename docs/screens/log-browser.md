@@ -6,10 +6,10 @@ The Log Browser is the workhorse for triage and forensic lookups — a paginated
 
 ## What you see
 
-- **Filter bar** at the top: free-text search, user (email), action type, and component type pickers. Filters apply server-side where supported and client-side for free-text.
+- **Filter bar** (one row) at the top: free-text search, user (email), action type, and component type pickers. Filters apply server-side where supported and client-side for free-text.
 - **Log table**: timestamp, action, component type, component name/ID, user email, and IP. Action cells are color-coded so DELETE/EXPORT stand out at a glance.
 - **Detail side panel** (toggle with `Enter`): full raw payload for the highlighted row — every field the API returned, including descriptions and IDs that don't fit in the table.
-- **Pagination controls**: `◀ prev` / `next ▶` buttons and a "Page X of Y / Total: N entries" counter.
+- **Pagination controls**: `◀ prev` / `next ▶` buttons and a "page X of Y · N entries" counter, all on one row.
 
 ## What you can do
 

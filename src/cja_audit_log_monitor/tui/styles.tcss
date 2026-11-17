@@ -160,6 +160,7 @@ AlertCard,
 /* ---- Log table ---- */
 LogTable {
     height: 1fr;
+    overflow-x: hidden;
     background: $background;
     color: $text;
 }
@@ -198,9 +199,9 @@ FilterBar Input {
     margin: 0 1 0 0;
 }
 
-FilterBar #filter-user { width: 24; }
-FilterBar #filter-action { width: 16; }
-FilterBar #filter-component { width: 22; }
+FilterBar #filter-user { width: 1fr; max-width: 32; }
+FilterBar #filter-action { width: 14; }
+FilterBar #filter-component { width: 18; }
 
 FilterBar Select {
     margin: 0 1 0 0;

@@ -125,6 +125,8 @@ class LogTable(DataTable):
         for entry in entries:
             row_key = self.add_row(*self._build_row(entry), key=entry.id)
             self._entries[row_key] = entry
+        # Rows may have brought in the vertical scrollbar, narrowing the table.
+        self.call_after_refresh(self._fit_columns)
 
     def get_selected_entry(self) -> AuditLogEntry | None:
         """Get the currently selected entry."""
@@ -137,3 +139,4 @@ class LogTable(DataTable):
         """Append a new entry to the table (used by live monitor)."""
         row_key = self.add_row(*self._build_row(entry), key=entry.id)
         self._entries[row_key] = entry
+        self.call_after_refresh(self._fit_columns)

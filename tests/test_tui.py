@@ -386,6 +386,22 @@ class TestEmptyStatesAndLayout:
             assert left.y == right.y
             assert right.x > left.x
 
+    async def test_top_users_fit_column_at_100_cols(self, mock_app_state, sample_audit_entry):
+        entries = [
+            sample_audit_entry.model_copy(
+                update={"id": f"e{i}", "user_email": f"someone.with.long.name{i}@example.com"}
+            )
+            for i in range(5)
+        ]
+        mock_app_state.client.get_all_logs.return_value = entries
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(100, 30)) as pilot:
+            view = await _show_and_load(app, pilot, "d")
+            top = view.query_one("#top-users", Static)
+            lines = str(top.render()).splitlines()
+            assert lines
+            assert all(len(line) <= top.content_region.width for line in lines)
+
     async def test_stats_empty_state_zero_entries(self, mock_app_state):
         mock_app_state.client.get_all_logs.return_value = []
         app = _make_app(mock_app_state)
@@ -429,6 +445,35 @@ class TestTableFit:
             table.load_entries(sample_audit_entries)
             await pilot.pause()
             assert table.virtual_size.width <= table.scrollable_content_region.width
+
+    @pytest.mark.parametrize("size", [(100, 30), (140, 42)])
+    async def test_no_horizontal_scrollbar_when_rows_overflow(
+        self, mock_app_state, sample_audit_entry, size
+    ):
+        from cja_audit_log_monitor.tui.widgets import LogTable
+
+        many = [sample_audit_entry.model_copy(update={"id": f"e{i}"}) for i in range(80)]
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=size) as pilot:
+            await pilot.press("l")
+            await pilot.pause()
+            table = app.query_one("#log-table", LogTable)
+            table.load_entries(many)
+            await pilot.pause()
+            await pilot.pause()
+            assert table.show_vertical_scrollbar
+            assert not table.show_horizontal_scrollbar
+
+    async def test_filter_bar_search_usable_at_100_cols(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(100, 30)) as pilot:
+            await pilot.press("l")
+            await pilot.pause()
+            search = app.query_one("#filter-search")
+            reset = app.query_one("#filter-reset")
+            bar = app.query_one("#filter-bar")
+            assert search.region.width >= 12
+            assert reset.region.right <= bar.region.right
 
     async def test_name_column_takes_remaining_width(self, mock_app_state, sample_audit_entries):
         from cja_audit_log_monitor.tui.widgets import LogTable

@@ -53,7 +53,7 @@ A rule fires when **`threshold_count` or more matching events** occur within **`
 uv run cja-audit-log-monitor cli alerts test --days 1
 ```
 
-Or open the [Alerts screen](screens/alerts.md) in the TUI and click `Test Rules`. Either path runs every enabled rule against the last 24 hours of audit data and reports what would have fired.
+Or open the [Alerts screen](screens/alerts.md) in the TUI and click `test rules`. Either path runs every enabled rule against the last 24 hours of audit data and reports what would have fired.
 
 ## Tips
 

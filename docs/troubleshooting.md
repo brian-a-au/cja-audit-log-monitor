@@ -48,4 +48,4 @@ the next successful send to that channel.
 
 ## Where to look first
 
-If something is off and you don't know which screen to suspect, open the [Settings screen](screens/settings.md) inside the TUI and click **Verify Connection** — a red status with an error string is almost always more actionable than a silent empty result elsewhere.
+If something is off and you don't know which screen to suspect, open the [Settings screen](screens/settings.md) inside the TUI and click **verify connection** — a red status with an error string is almost always more actionable than a silent empty result elsewhere.

@@ -18,7 +18,8 @@ This directory contains SVG screenshots of the CJA Audit Log Monitor TUI applica
 To regenerate all screenshots, run:
 
 ```bash
-python scripts/capture_screenshots.py
+uv run python scripts/capture_screenshots.py            # 140x42, into docs/screenshots
+uv run python scripts/capture_screenshots.py --size 100x30 --out /tmp/shots
 ```
 
-This uses Textual's test mode to capture SVG screenshots of each screen.
+This runs the real app headless (Textual's test mode) with only the API client mocked, so each SVG shows what a user actually sees.
