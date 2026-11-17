@@ -49,6 +49,10 @@ class LogBrowserScreen(ContentView):
             id="log-browser-container",
         )
 
+    def default_focus(self) -> Widget | None:
+        """Focus the table so enter / n / p / escape work right away."""
+        return self.query_one("#log-table", LogTable)
+
     def on_content_mounted(self) -> None:
         """Called after compose_content widgets are mounted."""
         self.refresh_data()

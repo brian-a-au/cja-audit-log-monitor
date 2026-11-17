@@ -558,6 +558,86 @@ class TestViewLayouts:
 
 
 # ---------------------------------------------------------------------------
+# TestViewFocusAndScroll — regressions from moving views off textual Screen
+# ---------------------------------------------------------------------------
+
+
+class TestViewFocusAndScroll:
+    """Views scroll when short, own their keys, and never leave focus hidden."""
+
+    @pytest.mark.parametrize("key", ["s", "c"])
+    async def test_tall_view_body_scrolls_at_100x30(self, mock_app_state, key):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(100, 30)) as pilot:
+            view = await _show_and_load(app, pilot, key)
+            body = view.query_one("#view-body")
+            assert body.max_scroll_y > 0
+
+    @pytest.mark.parametrize("key", ["s", "d"])
+    async def test_charts_do_not_wrap_at_100_cols(self, mock_app_state, sample_audit_entry, key):
+        from datetime import UTC, datetime
+
+        from cja_audit_log_monitor.tui.widgets import ActionBarChart, HourlyChart
+
+        entries = [
+            sample_audit_entry.model_copy(
+                update={
+                    "id": f"e{i}",
+                    "action": ["CREATE", "DELETE", "APPROVE"][i % 3],
+                    "timestamp": datetime(2025, 1, 20, i % 24, 0, tzinfo=UTC),
+                }
+            )
+            for i in range(48)
+        ]
+        mock_app_state.client.get_all_logs.return_value = entries
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(100, 30)) as pilot:
+            view = await _show_and_load(app, pilot, key)
+            for chart in (view.query_one(ActionBarChart), view.query_one(HourlyChart)):
+                width = chart.content_region.width
+                lines = str(chart.render()).splitlines()
+                assert lines
+                assert all(len(line.rstrip()) <= width for line in lines), (chart.id, width)
+
+    async def test_switching_view_does_not_leave_focus_in_hidden_input(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.press("slash")
+            await pilot.pause()
+            await app._show_screen("dashboard")
+            await pilot.pause()
+            await pilot.press("s")
+            await pilot.pause()
+            assert app._current_screen == "stats"
+            assert app._screens["logs"].query_one("#filter-user").value == ""
+
+    async def test_n_pages_logs_right_after_l(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.press("l")
+            await pilot.pause()
+            await pilot.press("n")
+            await pilot.pause()
+            assert mock_app_state.filters.page == 1
+
+    async def test_space_starts_monitor_right_after_m(self, mock_app_state):
+        from cja_audit_log_monitor.tui.screens.monitor import MonitorScreen
+
+        async def _no_loop(self):
+            return None
+
+        app = _make_app(mock_app_state)
+        with patch.object(MonitorScreen, "_monitoring_loop", _no_loop):
+            async with app.run_test(size=(140, 40)) as pilot:
+                await pilot.press("m")
+                await pilot.pause()
+                await pilot.press("space")
+                await pilot.pause()
+                assert mock_app_state.monitor.is_running
+                app._screens["monitor"]._stop_monitoring()
+
+
+# ---------------------------------------------------------------------------
 # TestNavigation
 # ---------------------------------------------------------------------------
 

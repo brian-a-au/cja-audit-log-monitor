@@ -539,8 +539,15 @@ ContentView LoadingIndicator {
     border-left: heavy $primary;
 }
 
+/* The body scrolls when a view is taller than the terminal. Logs and
+ * monitor still fill the space because their tables are 1fr. */
 #view-body {
     height: 1fr;
+    overflow-y: auto;
+}
+
+#settings-container, #alerts-container, #stats-container {
+    height: auto;
 }
 
 /* ---- Dashboard columns ---- */

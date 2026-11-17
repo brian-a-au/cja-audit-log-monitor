@@ -14,6 +14,7 @@ class ActionBarChart(Static):
         """Initialize ActionBarChart."""
         super().__init__(**kwargs)
         self._data: dict[str, int] = {}
+        self._max_width = 30
 
     def update_data(self, data: dict[str, int], width: int = 30) -> None:
         """Update chart data.
@@ -23,7 +24,21 @@ class ActionBarChart(Static):
             width: Width in cells of the longest bar.
         """
         self._data = data
-        self.update(self.build_markup(data, width))
+        self._max_width = width
+        self._redraw()
+
+    def on_resize(self) -> None:
+        """Redraw so bars fit the new width."""
+        self._redraw()
+
+    def _redraw(self) -> None:
+        available = self.content_region.width
+        width = self._max_width
+        if available > 0 and self._data:
+            label_width = max(len(action) for action in self._data)
+            # label, 2 spaces, bar, space, 5-digit count, 2 spaces, 5-char pct
+            width = max(4, min(width, available - label_width - 15))
+        self.update(self.build_markup(self._data, width))
 
     @staticmethod
     def build_markup(data: dict[str, int], width: int = 30) -> str:
@@ -63,11 +78,23 @@ class HourlyChart(Static):
             data: Mapping of hour (0-23) to count.
         """
         self._data = data
-        self.update(self.build_markup(data))
+        self._redraw()
+
+    def on_resize(self) -> None:
+        """Redraw with narrow columns when the widget is too small for wide ones."""
+        self._redraw()
+
+    def _redraw(self) -> None:
+        available = self.content_region.width
+        cell = 1 if 0 < available < 48 else 2
+        self.update(self.build_markup(self._data, cell))
 
     @classmethod
-    def build_markup(cls, data: dict[int, int]) -> str:
-        """Build the chart as Rich markup: ``ROWS`` bar rows plus an axis row."""
+    def build_markup(cls, data: dict[int, int], cell: int = 2) -> str:
+        """Build the chart as Rich markup: ``ROWS`` bar rows plus an axis row.
+
+        Each hour takes ``cell`` columns: 2 (bar plus gap) or 1 (bar only).
+        """
         counts = [data.get(hour, 0) for hour in range(24)]
         peak = max(counts) if counts else 0
         if peak <= 0:
@@ -83,10 +110,12 @@ class HourlyChart(Static):
                     eighths = 1  # keep nonzero hours visible
                 color = primary if counts[hour] == peak else _MUTED
                 glyph = cls._LEVELS[eighths]
-                cells.append(f"[{color}]{glyph}[/{color}] " if eighths else "  ")
+                gap = " " * (cell - 1)
+                cells.append(f"[{color}]{glyph}[/{color}]{gap}" if eighths else " " * cell)
             lines.append("".join(cells).rstrip())
-        axis = [" "] * 48
-        for hour in (0, 6, 12, 18, 23):
-            axis[hour * 2 : hour * 2 + 2] = f"{hour:02d}"
+        axis = [" "] * (24 * cell + 1)
+        # At one cell per hour a two-digit label covers two hours, so skip the 23 label.
+        for hour in (0, 6, 12, 18) if cell == 1 else (0, 6, 12, 18, 23):
+            axis[hour * cell : hour * cell + 2] = f"{hour:02d}"
         lines.append(f"[{_MUTED}]{''.join(axis).rstrip()}[/{_MUTED}]")
         return "\n".join(lines)

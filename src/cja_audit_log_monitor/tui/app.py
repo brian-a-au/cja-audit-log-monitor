@@ -227,6 +227,10 @@ class CJAAuditApp(App):
         else:
             switcher.current = view.id
 
+        # Move focus into the shown view (or clear it), so keys never land in
+        # an input inside a hidden view, and the view's own bindings work.
+        self.set_focus(view.default_focus())
+
         self._current_screen = screen_name
 
     async def on_click(self, event: events.Click) -> None:

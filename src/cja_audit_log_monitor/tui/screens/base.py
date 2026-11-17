@@ -75,6 +75,13 @@ class ContentView(Vertical):
         """Yield the view's widgets."""
         raise NotImplementedError
 
+    def default_focus(self) -> Widget | None:
+        """Widget to focus when the view is shown, so the view's own keys work.
+
+        Return None to clear focus (nothing in a hidden view keeps it).
+        """
+        return None
+
     def set_empty_state(self, message: str | None) -> None:
         """Show ``message`` in place of the view body, or restore the body when None."""
         empty = self.query_one("#empty-state", Static)

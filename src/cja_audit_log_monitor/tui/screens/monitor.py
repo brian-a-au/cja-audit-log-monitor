@@ -25,8 +25,11 @@ class MonitorScreen(ContentView):
     """Screen for real-time audit log monitoring."""
 
     BINDINGS = [
-        ("space", "toggle_monitor", "Start/Stop"),
+        ("space", "toggle_monitor", "start/stop"),
     ]
+
+    # The view itself takes focus so `space` works as soon as it is shown.
+    can_focus = True
 
     def __init__(self, state: AppState, **kwargs) -> None:
         """Initialize MonitorScreen.
@@ -75,6 +78,10 @@ class MonitorScreen(ContentView):
             AlertSummary(id="alert-summary"),
             id="monitor-container",
         )
+
+    def default_focus(self) -> Widget | None:
+        """Focus the view so `space` toggles monitoring right away."""
+        return self
 
     def refresh_data(self) -> None:
         """Refresh monitor data for the active screen."""
