@@ -23,9 +23,9 @@ def _make_app(mock_app_state) -> CJAAuditApp:
     return app
 
 
-# Patch on_content_mounted on screens that launch workers via run_worker / call_from_thread.
-# These screens are used as widget factories (compose_content) and are never actually
-# mounted in the Textual DOM, so their workers crash in headless tests.
+# Patch on_content_mounted on views that launch data-loading workers, so tests that only
+# check layout/navigation don't race background threads. Tests that need real workers
+# run them explicitly.
 _SCREEN_WORKER_PATCHES = [
     "cja_audit_log_monitor.tui.screens.dashboard.DashboardScreen.on_content_mounted",
     "cja_audit_log_monitor.tui.screens.log_browser.LogBrowserScreen.on_content_mounted",
@@ -137,12 +137,14 @@ class TestAppLifecycle:
             nav_items = app.query("#sidebar .nav-item")
             assert len(nav_items) == 6
 
-    async def test_main_content_mounts_active_screen_widget(self, mock_app_state):
+    async def test_main_content_shows_dashboard_view(self, mock_app_state):
+        from textual.widgets import ContentSwitcher
+
         app = _make_app(mock_app_state)
         async with app.run_test() as pilot:
             await pilot.pause()
-            mounted_screens = app.query("#main-content Screen")
-            assert len(mounted_screens) == 1
+            switcher = app.query_one("#main-content", ContentSwitcher)
+            assert switcher.current == "view-dashboard"
 
     async def test_quit_calls_state_close(self, mock_app_state):
         mock_app_state.close = MagicMock()
@@ -150,6 +152,65 @@ class TestAppLifecycle:
         async with app.run_test() as _pilot:
             app.action_quit()
             mock_app_state.close.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# TestViewRendering — regression for blank main pane (views had zero region)
+# ---------------------------------------------------------------------------
+
+
+class TestViewRendering:
+    """Views must be laid out with a real, nonzero region."""
+
+    @pytest.mark.parametrize(
+        "key,name",
+        [
+            ("d", "dashboard"),
+            ("l", "logs"),
+            ("m", "monitor"),
+            ("s", "stats"),
+            ("a", "alerts"),
+            ("c", "settings"),
+        ],
+    )
+    async def test_each_view_has_nonzero_region(self, mock_app_state, key, name):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.press(key)
+            await pilot.pause()
+            assert app._screens[name].region.area > 0
+
+    async def test_revisit_keeps_same_instance_no_remount(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test() as pilot:
+            for key in ("l", "d", "l"):
+                await pilot.press(key)
+                await pilot.pause()
+            views = app.query("#main-content > #view-logs")
+            assert len(views) == 1
+            assert views.first() is app._screens["logs"]
+
+    async def test_on_content_mounted_called_once_per_view(self, mock_app_state):
+        hook = MagicMock()
+        with patch(
+            "cja_audit_log_monitor.tui.screens.log_browser.LogBrowserScreen.on_content_mounted",
+            hook,
+        ):
+            app = _make_app(mock_app_state)
+            async with app.run_test() as pilot:
+                for key in ("l", "d", "l"):
+                    await pilot.press(key)
+                    await pilot.pause()
+        assert hook.call_count == 1
+
+    async def test_slash_from_dashboard_focuses_logs_search(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("slash")
+            await pilot.pause()
+            assert app._current_screen == "logs"
+            assert app.focused is not None and app.focused.id == "filter-search"
 
 
 # ---------------------------------------------------------------------------
@@ -368,8 +429,6 @@ class TestMonitorScreen:
 
     def test_monitor_surfaces_pop_first_failure_warning(self):
         """When pop_first_failure returns a string, _show_warning is dispatched."""
-        from textual.screen import Screen
-
         from cja_audit_log_monitor.tui.screens.monitor import MonitorScreen
 
         expected_warning = (
@@ -383,7 +442,9 @@ class TestMonitorScreen:
         screen = MonitorScreen(state=state)
         mock_app = MagicMock()
 
-        with patch.object(Screen, "app", new_callable=lambda: property(lambda self: mock_app)):
+        with patch.object(
+            MonitorScreen, "app", new_callable=lambda: property(lambda self: mock_app)
+        ):
             # Directly exercise the warning-surface idiom as it appears in production code.
             warning = screen._state.notification_manager.pop_first_failure()
             if warning:
@@ -399,8 +460,6 @@ class TestMonitorScreen:
 
     def test_monitor_show_alert_uses_rule_name(self):
         """_show_alert renders 'rule_name: message' (not the literal 'Alert triggered')."""
-        from textual.screen import Screen
-
         from cja_audit_log_monitor.tui.screens.monitor import MonitorScreen
 
         state = MagicMock()
@@ -409,7 +468,9 @@ class TestMonitorScreen:
         alert_summary = MagicMock()
         screen.query_one = MagicMock(return_value=alert_summary)
 
-        with patch.object(Screen, "app", new_callable=lambda: property(lambda self: mock_app)):
+        with patch.object(
+            MonitorScreen, "app", new_callable=lambda: property(lambda self: mock_app)
+        ):
             screen._show_alert("bulk_delete", "Multiple delete operations: 5 events in 60 minutes")
 
         # Toast text contains both rule_name and message

@@ -2,9 +2,7 @@
 
 from collections.abc import Iterator
 
-from textual.app import ComposeResult
 from textual.containers import Container, Horizontal, Vertical
-from textual.screen import Screen
 from textual.widget import Widget
 from textual.widgets import Button, Input, Label, LoadingIndicator, Static
 from textual.worker import get_current_worker
@@ -18,9 +16,10 @@ from ...stats import (
 )
 from ..state import AppState
 from ..widgets import ActionBarChart, HourlyChart, StatsPanel
+from .base import ContentView
 
 
-class StatsScreen(Screen):
+class StatsScreen(ContentView):
     """Screen for viewing statistics and analytics."""
 
     def __init__(self, state: AppState, **kwargs) -> None:
@@ -30,13 +29,8 @@ class StatsScreen(Screen):
             state: Application state.
             **kwargs: Additional arguments for Screen.
         """
-        super().__init__(**kwargs)
-        self._state = state
+        super().__init__(state, **kwargs)
         self._days = 7
-
-    def compose(self) -> ComposeResult:
-        """Compose the screen."""
-        yield from self.compose_content()
 
     def compose_content(self) -> Iterator[Widget]:
         """Yield widgets for embedding in main content area.

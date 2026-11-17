@@ -3,9 +3,7 @@
 from collections.abc import Iterator
 from datetime import datetime
 
-from textual.app import ComposeResult
 from textual.containers import Container, Horizontal, Vertical
-from textual.screen import Screen
 from textual.widget import Widget
 from textual.widgets import Button, LoadingIndicator, Static
 from textual.worker import get_current_worker
@@ -14,9 +12,10 @@ from ...alerts import analyze_for_anomalies
 from ...formatters import ACTION_COLORS, TCSS_TOKEN_HEX, resolve_tcss_markup
 from ...stats import build_date_range_query, calculate_stats
 from ..state import AppState
+from .base import ContentView
 
 
-class DashboardScreen(Screen):
+class DashboardScreen(ContentView):
     """Dashboard screen with summary view."""
 
     def __init__(self, state: AppState, **kwargs) -> None:
@@ -26,13 +25,8 @@ class DashboardScreen(Screen):
             state: Application state.
             **kwargs: Additional arguments for Screen.
         """
-        super().__init__(**kwargs)
-        self._state = state
+        super().__init__(state, **kwargs)
         self._stats: dict = {}
-
-    def compose(self) -> ComposeResult:
-        """Compose the screen."""
-        yield from self.compose_content()
 
     def compose_content(self) -> Iterator[Widget]:
         """Yield widgets for embedding in main content area.

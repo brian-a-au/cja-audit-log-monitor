@@ -2,34 +2,18 @@
 
 from collections.abc import Iterator
 
-from textual.app import ComposeResult
 from textual.containers import Container, Horizontal, Vertical
-from textual.screen import Screen
 from textual.widget import Widget
 from textual.widgets import Button, Checkbox, LoadingIndicator, Static
 from textual.worker import get_current_worker
 
 from ...formatters import resolve_tcss_markup
 from ...stats import build_date_range_query
-from ..state import AppState
+from .base import ContentView
 
 
-class AlertsScreen(Screen):
+class AlertsScreen(ContentView):
     """Screen for managing alert rules."""
-
-    def __init__(self, state: AppState, **kwargs) -> None:
-        """Initialize AlertsScreen.
-
-        Args:
-            state: Application state.
-            **kwargs: Additional arguments for Screen.
-        """
-        super().__init__(**kwargs)
-        self._state = state
-
-    def compose(self) -> ComposeResult:
-        """Compose the screen."""
-        yield from self.compose_content()
 
     def compose_content(self) -> Iterator[Widget]:
         """Yield widgets for embedding in main content area.

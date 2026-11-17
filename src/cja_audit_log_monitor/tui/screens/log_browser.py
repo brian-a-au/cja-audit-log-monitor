@@ -2,21 +2,19 @@
 
 from collections.abc import Iterator
 
-from textual.app import ComposeResult
 from textual.containers import Container, Horizontal
 from textual.css.query import NoMatches
-from textual.screen import Screen
 from textual.widget import Widget
 from textual.widgets import Button, Label, LoadingIndicator, Static
 from textual.worker import get_current_worker
 
 from ...models import ActionType, ComponentType
 from ..modals import EntryDetailPanel
-from ..state import AppState
 from ..widgets import FilterBar, LogTable
+from .base import ContentView
 
 
-class LogBrowserScreen(Screen):
+class LogBrowserScreen(ContentView):
     """Screen for browsing and filtering audit logs."""
 
     BINDINGS = [
@@ -25,20 +23,6 @@ class LogBrowserScreen(Screen):
         ("n", "next_page", "next page"),
         ("p", "prev_page", "prev page"),
     ]
-
-    def __init__(self, state: AppState, **kwargs) -> None:
-        """Initialize LogBrowserScreen.
-
-        Args:
-            state: Application state.
-            **kwargs: Additional arguments for Screen.
-        """
-        super().__init__(**kwargs)
-        self._state = state
-
-    def compose(self) -> ComposeResult:
-        """Compose the screen."""
-        yield from self.compose_content()
 
     def compose_content(self) -> Iterator[Widget]:
         """Yield widgets for embedding in main content area."""
