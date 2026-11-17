@@ -17,6 +17,11 @@ logger = logging.getLogger(__name__)
 MAX_PAGE_SIZE = 1000
 
 
+def _is_final_page(page: int, response: AuditLogResponse) -> bool:
+    """True when ``page`` is the last page by the API's own page count."""
+    return response.total_pages > 0 and page + 1 >= response.total_pages
+
+
 class APIError(Exception):
     """Raised when API request fails."""
 
@@ -188,7 +193,12 @@ class AuditLogsClient:
 
             pages_fetched += 1
 
-            if response.last or (max_pages and pages_fetched >= max_pages):
+            if (
+                response.last
+                or not response.content
+                or _is_final_page(page, response)
+                or (max_pages and pages_fetched >= max_pages)
+            ):
                 break
 
             page += 1
@@ -241,7 +251,7 @@ class AuditLogsClient:
             response = self.get_logs(base)
             total = response.total_elements
             entries.extend(response.content)
-            if response.last or not response.content:
+            if response.last or not response.content or _is_final_page(page, response):
                 break
             page += 1
         return entries[:max_entries], total

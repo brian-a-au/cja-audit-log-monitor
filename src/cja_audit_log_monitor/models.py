@@ -47,6 +47,15 @@ class ComponentType(str, Enum):
     USER_GROUP = "USER_GROUP"
 
 
+# Suffixes of IMS user ids seen in live audit logs, e.g. "ABC@82462040631c0cd4495ca6.e".
+_IMS_ID_SUFFIXES = (".e", "@techacct.adobe.com", "@AdobeID")
+
+
+def is_ims_user_id(value: str) -> bool:
+    """True when ``value`` is an IMS user id rather than an email address."""
+    return "@" not in value or value.endswith(_IMS_ID_SUFFIXES)
+
+
 class AuditLogEntry(BaseModel):
     """Single audit log entry from the API."""
 
@@ -138,8 +147,9 @@ class AuditLogQuery(BaseModel):
 
     def to_query_params(self) -> dict[str, Any]:
         """Convert to API query parameters."""
+        # The live API pages with "pageNumber"; it silently ignores "page".
         params: dict[str, Any] = {
-            "page": self.page,
+            "pageNumber": self.page,
             "pageSize": self.page_size,
         }
 
@@ -156,7 +166,9 @@ class AuditLogQuery(BaseModel):
             params["component"] = [c.value for c in self.components]
 
         if self.user_id:
-            params["userId"] = self.user_id
+            # The API matches userId only against IMS ids; emails need userEmail.
+            key = "userId" if is_ims_user_id(self.user_id) else "userEmail"
+            params[key] = self.user_id
 
         if self.user_type:
             params["userType"] = self.user_type

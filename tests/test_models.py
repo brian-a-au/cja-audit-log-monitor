@@ -124,7 +124,8 @@ class TestAuditLogQuery:
 
         assert params["pageSize"] == 50
         assert params["action"] == ["CREATE", "DELETE"]
-        assert params["page"] == 0
+        assert params["pageNumber"] == 0
+        assert "page" not in params
 
     def test_to_query_params_with_dates(self) -> None:
         """Test query params with date range."""
@@ -220,3 +221,28 @@ class TestLiveApiShape:
         )
         assert entry.user_email == "a@example.com"
         assert entry.component_type == "PROJECT"
+
+
+class TestQueryParamsMatchLiveApi:
+    """Parameter names the live API honors (checked against a real org)."""
+
+    def test_page_is_sent_as_page_number(self):
+        params = AuditLogQuery(page=3, page_size=10).to_query_params()
+        assert params["pageNumber"] == 3
+        assert "page" not in params
+
+    def test_email_is_sent_as_user_email(self):
+        params = AuditLogQuery(user_id="pat@example.com").to_query_params()
+        assert params["userEmail"] == "pat@example.com"
+        assert "userId" not in params
+
+    def test_ims_ids_are_sent_as_user_id(self):
+        for value in (
+            "ABC123@82462040631c0cd4495ca6.e",
+            "ABC123@techacct.adobe.com",
+            "ABC123@AdobeID",
+            "ABC123",
+        ):
+            params = AuditLogQuery(user_id=value).to_query_params()
+            assert params["userId"] == value, value
+            assert "userEmail" not in params

@@ -244,3 +244,45 @@ class TestGetLogsSample:
             client.get_logs_sample(query, max_entries=1000)
         assert query.page_size == 50
         assert query.page == 0
+
+
+class TestPagingStops:
+    """Paging must end even if the API never reports a last page."""
+
+    def test_paginated_stops_at_total_pages(self, client, httpx_mock) -> None:
+        import re
+
+        httpx_mock.add_response(
+            url=re.compile(r"https://cja\.adobe\.io/auditlogs/api/v1/auditlogs.*"),
+            json={"content": [{"id": "a"}], "totalElements": 2, "totalPages": 2, "last": False},
+            is_reusable=True,
+        )
+        with client:
+            entries = list(client.get_logs_paginated())
+        assert len(entries) == 2
+
+    def test_paginated_requests_page_number(self, client, httpx_mock) -> None:
+        import re
+
+        httpx_mock.add_response(
+            url=re.compile(r"https://cja\.adobe\.io/auditlogs/api/v1/auditlogs.*"),
+            json={"content": [{"id": "a"}], "totalElements": 2, "totalPages": 2, "last": False},
+            is_reusable=True,
+        )
+        with client:
+            list(client.get_logs_paginated())
+        urls = [str(r.url) for r in httpx_mock.get_requests() if "auditlogs" in str(r.url)]
+        assert "pageNumber=0" in urls[0] and "pageNumber=1" in urls[1]
+
+    def test_sample_stops_at_total_pages(self, client, httpx_mock) -> None:
+        import re
+
+        httpx_mock.add_response(
+            url=re.compile(r"https://cja\.adobe\.io/auditlogs/api/v1/auditlogs.*"),
+            json={"content": [{"id": "a"}], "totalElements": 2, "totalPages": 2, "last": False},
+            is_reusable=True,
+        )
+        with client:
+            entries, total = client.get_logs_sample(max_entries=1000)
+        assert len(entries) == 2
+        assert total == 2
