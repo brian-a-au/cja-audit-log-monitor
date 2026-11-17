@@ -10,7 +10,16 @@ from ...utils import get_user_identifier
 
 
 class LogTable(DataTable):
-    """DataTable widget for displaying audit log entries."""
+    """DataTable widget for displaying audit log entries.
+
+    Fixed columns keep their preferred width; the ``name`` column takes whatever
+    width is left. On narrow terminals ``user`` and ``component`` shrink first.
+    """
+
+    COLUMN_WIDTHS = {"timestamp": 19, "user": 28, "action": 12, "component": 18}
+    DETAIL_WIDTHS = {"description": 35, "ip": 15}
+    MIN_WIDTHS = {"user": 16, "component": 12, "name": 12}
+    NAME_FLOOR = 6
 
     def __init__(self, show_details: bool = False, **kwargs) -> None:
         """Initialize LogTable.
@@ -27,15 +36,53 @@ class LogTable(DataTable):
 
     def on_mount(self) -> None:
         """Set up table columns on mount."""
-        self.add_column("timestamp", width=20, key="timestamp")
-        self.add_column("user", width=25, key="user")
-        self.add_column("action", width=14, key="action")
-        self.add_column("component", width=18, key="component")
-        self.add_column("name", width=30, key="name")
-
+        for key, width in self.COLUMN_WIDTHS.items():
+            self.add_column(key, width=width, key=key)
+        self.add_column("name", width=self.MIN_WIDTHS["name"], key="name")
         if self._show_details:
-            self.add_column("description", width=35, key="description")
-            self.add_column("ip", width=15, key="ip")
+            for key, width in self.DETAIL_WIDTHS.items():
+                self.add_column(key, width=width, key=key)
+        self._fit_columns()
+
+    def on_resize(self) -> None:
+        """Refit columns to the new width."""
+        self._fit_columns()
+
+    def _fit_columns(self) -> None:
+        """Give ``name`` the remaining width; shrink user/component when space is short."""
+        if "name" not in self.columns:
+            return
+        available = self.scrollable_content_region.width
+        if available <= 0:
+            return
+        widths = dict(self.COLUMN_WIDTHS)
+        if self._show_details:
+            widths.update(self.DETAIL_WIDTHS)
+        padding = 2 * self.cell_padding * (len(widths) + 1)
+        free = available - padding - sum(widths.values())
+        for key in ("user", "component"):
+            if free >= self.MIN_WIDTHS["name"]:
+                break
+            take = min(widths[key] - self.MIN_WIDTHS[key], self.MIN_WIDTHS["name"] - free)
+            widths[key] -= take
+            free += take
+        # Never scroll sideways: below the preferred minimum, name gets what's left.
+        widths["name"] = max(self.NAME_FLOOR, free)
+        changed = False
+        for key, width in widths.items():
+            column = self.columns[key]
+            if column.width != width or column.auto_width:
+                column.width = width
+                column.auto_width = False
+                changed = True
+        if changed:
+            self._require_update_dimensions = True
+            self.refresh(layout=True)
+
+    @staticmethod
+    def _truncate(text: str, width: int) -> str:
+        """Shorten ``text`` to ``width`` cells, ending with an ellipsis when cut."""
+        return text if len(text) <= width else text[: width - 1] + "…"
 
     def _format_action_cell(self, action: str | None) -> Text:
         """Render `<icon> <action>` with the severity color as a Rich Text object.
@@ -54,7 +101,7 @@ class LogTable(DataTable):
     def _build_row(self, entry: AuditLogEntry) -> list:
         row_data = [
             format_timestamp(entry.timestamp),
-            get_user_identifier(entry, default="-"),
+            self._truncate(get_user_identifier(entry, default="-"), self.COLUMN_WIDTHS["user"]),
             self._format_action_cell(entry.action),
             entry.component_type or "-",
             entry.component_name or entry.component_id or "-",

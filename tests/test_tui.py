@@ -408,6 +408,53 @@ class TestEmptyStatesAndLayout:
 
 
 # ---------------------------------------------------------------------------
+# TestTableFit
+# ---------------------------------------------------------------------------
+
+
+class TestTableFit:
+    """Log tables fill the width without horizontal scrolling."""
+
+    @pytest.mark.parametrize("size", [(100, 30), (140, 42)])
+    async def test_log_table_has_no_horizontal_overflow(
+        self, mock_app_state, sample_audit_entries, size
+    ):
+        from cja_audit_log_monitor.tui.widgets import LogTable
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=size) as pilot:
+            await pilot.press("l")
+            await pilot.pause()
+            table = app.query_one("#log-table", LogTable)
+            table.load_entries(sample_audit_entries)
+            await pilot.pause()
+            assert table.virtual_size.width <= table.scrollable_content_region.width
+
+    async def test_name_column_takes_remaining_width(self, mock_app_state, sample_audit_entries):
+        from cja_audit_log_monitor.tui.widgets import LogTable
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(160, 40)) as pilot:
+            await pilot.press("l")
+            await pilot.pause()
+            table = app.query_one("#log-table", LogTable)
+            table.load_entries(sample_audit_entries)
+            await pilot.pause()
+            assert table.columns["name"].width > 30
+
+    def test_long_user_truncated_with_ellipsis(self, sample_audit_entry):
+        from cja_audit_log_monitor.tui.widgets import LogTable
+
+        entry = sample_audit_entry.model_copy(
+            update={"user_email": "a.very.long.user.name.for.testing@example-company.com"}
+        )
+        row = LogTable()._build_row(entry)
+        user_cell = str(row[1])
+        assert user_cell.endswith("…")
+        assert len(user_cell) == LogTable.COLUMN_WIDTHS["user"]
+
+
+# ---------------------------------------------------------------------------
 # TestNavigation
 # ---------------------------------------------------------------------------
 
