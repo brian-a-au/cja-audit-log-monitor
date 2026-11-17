@@ -36,6 +36,25 @@ uv run ruff check src tests --fix
 
 Ruff settings: line-length 100, target Python 3.11+. Selected rules: `E`, `F`, `I`, `N`, `W`, `UP`.
 
+## Full CI run
+
+```bash
+# All supported versions (3.11 to 3.14)
+scripts/ci.sh
+
+# Only some versions
+scripts/ci.sh 3.11 3.14
+```
+
+The script runs the same steps as `.github/workflows/ci.yml`:
+- lint and tests on each Python version, each in its own environment under `.ci/`
+- a build of the sdist and wheel
+- a test install of the wheel, which then runs `cja-audit-log-monitor --help`
+
+Your normal `.venv` is not changed. uv downloads any Python version you do not have.
+
+The GitHub CI jobs are skipped while the repository is private, because Actions minutes are limited for private repositories. Run `scripts/ci.sh` before you merge to `main`. The GitHub jobs run again on their own once the repository is public.
+
 ## Project layout
 
 The package lives in `src/cja_audit_log_monitor/`. Core modules: `cli.py`, `auth.py`, `client.py`, `config.py`, `models.py`, `alerts.py`, `monitor.py`, `formatters.py`, `stats.py`, `export.py`. The TUI lives under `src/cja_audit_log_monitor/tui/` (app, state, styles, screens, widgets, modals).

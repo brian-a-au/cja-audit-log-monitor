@@ -36,6 +36,14 @@ uv run pytest
 uv run ruff check src tests scripts
 ```
 
+Before you merge, run the full CI checks on your machine:
+
+```bash
+scripts/ci.sh
+```
+
+This script runs the linter and the tests on Python 3.11 to 3.14, builds the package, and checks that the wheel installs. It runs the same steps as `.github/workflows/ci.yml`. The GitHub CI jobs are skipped while the repository is private, so this script is the CI check until then.
+
 If you change how the TUI looks, regenerate the screenshots and include them in your pull request:
 
 ```bash

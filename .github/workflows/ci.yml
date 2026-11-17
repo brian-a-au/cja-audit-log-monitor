@@ -11,6 +11,9 @@ permissions:
 jobs:
   test:
     name: Test (Python ${{ matrix.python-version }})
+    # Skipped while the repo is private (Actions minutes are limited).
+    # Run scripts/ci.sh locally instead.
+    if: ${{ !github.event.repository.private }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -30,6 +33,9 @@ jobs:
 
   build:
     name: Build package
+    # Skipped while the repo is private (Actions minutes are limited).
+    # Run scripts/ci.sh locally instead.
+    if: ${{ !github.event.repository.private }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
