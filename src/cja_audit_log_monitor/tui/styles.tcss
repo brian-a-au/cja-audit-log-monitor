@@ -114,10 +114,8 @@ FooterKey:hover {
  * Accent edge uses `heavy` (box-drawing ┃) so it renders as a continuous line. */
 .card,
 .stat-card,
-.stats-section,
 .settings-section,
 .rule-card,
-StatsPanel,
 AlertCard,
 #monitor-status {
     height: auto;
@@ -130,6 +128,11 @@ AlertCard,
 .card.-warning, .stat-card.severity-warning { border-left: heavy $warning; }
 .card.-success, .stat-card.severity-success { border-left: heavy $success; }
 .card.-muted { border-left: heavy #6e7480; }
+
+/* Section labels that open a card sit on its first row. */
+.settings-section > .section-label {
+    margin: 0;
+}
 
 /* ---- Stat cards ---- */
 .dashboard-stats {
@@ -209,19 +212,15 @@ FilterBar Button {
 
 
 /* ---- Stats panel ---- */
-StatsPanel {
-    margin: 1 0;
+.stats-row {
+    height: auto;
+    margin: 1 0 0 0;
 }
 
-.stats-grid {
-    layout: grid;
-    grid-size: 2;
-    grid-gutter: 1;
-}
-
-.stats-section {
-    padding: 0 2;
-    margin: 1 1 1 0;
+.stats-column {
+    width: 1fr;
+    height: auto;
+    margin: 0 2 0 0;
 }
 
 .bar-chart {
@@ -258,10 +257,19 @@ AlertSummary {
 }
 
 #monitor-status {
-    height: 3;
+    height: 1;
     padding: 0 2;
-    margin: 1 0;
-    background: $surface;
+    margin: 0 0 1 0;
+}
+
+#status-indicator {
+    width: auto;
+    margin: 0 2 0 0;
+}
+
+#stats-info {
+    width: 1fr;
+    color: $text-muted;
 }
 
 .monitor-running {
@@ -270,6 +278,10 @@ AlertSummary {
 
 .monitor-stopped {
     border-left: heavy $danger;
+}
+
+#alert-summary {
+    max-height: 8;
 }
 
 #monitor-log {
@@ -365,13 +377,20 @@ ExportDialog Input {
 }
 
 /* ---- Settings ---- */
+#settings-grid {
+    layout: grid;
+    grid-size: 2;
+    grid-gutter: 1 2;
+    height: auto;
+    margin: 1 0 0 0;
+}
+
 .settings-section {
-    margin: 1 0;
+    margin: 0;
 }
 
 .settings-row {
     height: auto;
-    margin: 0 0 1 0;
 }
 
 .settings-label {
@@ -386,8 +405,27 @@ ExportDialog Input {
 
 /* ---- Alerts management ---- */
 .rule-card {
-    margin: 1 0;
+    margin: 0 0 1 0;
+    padding: 0 2;
     border-left: heavy #6e7480;
+}
+
+#rules-list {
+    height: auto;
+    margin: 1 0 0 0;
+}
+
+.rule-header {
+    height: 1;
+}
+
+.rule-header Checkbox {
+    width: auto;
+    margin: 0 2 0 0;
+}
+
+.rule-description {
+    width: 1fr;
 }
 
 .rule-card.rule-enabled {

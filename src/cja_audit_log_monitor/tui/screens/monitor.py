@@ -61,7 +61,7 @@ class MonitorScreen(ContentView):
 
         status = Horizontal(
             Static(resolve_tcss_markup("[$danger]● stopped[/$danger]"), id="status-indicator"),
-            Static("", id="stats-info"),
+            Static("last check — · new 0 · alerts 0", id="stats-info"),
             id="monitor-status",
             classes="monitor-stopped",
         )
@@ -307,11 +307,11 @@ class MonitorScreen(ContentView):
     def _update_stats_display(self) -> None:
         """Update the stats display."""
         monitor = self._state.monitor
-        last_check = monitor.last_check.strftime("%H:%M:%S") if monitor.last_check else "Never"
+        last_check = monitor.last_check.strftime("%H:%M:%S") if monitor.last_check else "—"
         self.query_one("#stats-info", Static).update(
-            f"Last check: {last_check} | "
-            f"New entries: {monitor.entries_since_start} | "
-            f"Alerts: {monitor.alerts_triggered}"
+            f"last check {last_check} · "
+            f"new {monitor.entries_since_start} · "
+            f"alerts {monitor.alerts_triggered}"
         )
 
     def _show_error(self, error: str) -> None:

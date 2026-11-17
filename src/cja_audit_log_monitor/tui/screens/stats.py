@@ -2,11 +2,12 @@
 
 from collections.abc import Iterator
 
-from textual.containers import Container, Horizontal, Vertical
+from textual.containers import Horizontal, Vertical
 from textual.widget import Widget
 from textual.widgets import Button, Input, Label, LoadingIndicator, Static
 from textual.worker import get_current_worker
 
+from ...formatters import TCSS_TOKEN_HEX, render_bar
 from ...stats import (
     build_date_range_query,
     calculate_stats,
@@ -15,9 +16,8 @@ from ...stats import (
     get_user_activity,
 )
 from ..state import AppState
-from ..widgets import ActionBarChart, HourlyChart, StatsPanel
-from .base import ContentView
-from .dashboard import no_activity_message
+from ..widgets import ActionBarChart, HourlyChart
+from .base import ContentView, no_activity_message, not_connected_message, stat_card
 
 
 class StatsScreen(ContentView):
@@ -33,13 +33,10 @@ class StatsScreen(ContentView):
         super().__init__(state, **kwargs)
         self._days = 7
 
-    def compose_content(self) -> Iterator[Widget]:
-        """Yield widgets for embedding in main content area.
-
-        Yields:
-            Widgets for the stats content.
-        """
-        controls = Horizontal(
+    def compose_header(self) -> Iterator[Widget]:
+        """Title and window control stay visible, so an empty window can be widened."""
+        yield Static("statistics", id="stats-title", classes="section-label view-title")
+        yield Horizontal(
             Label("days"),
             Input(value="7", id="days-input", type="integer", compact=True),
             Button("update", id="update-button", variant="primary", compact=True),
@@ -47,31 +44,40 @@ class StatsScreen(ContentView):
             classes="toolbar",
         )
 
-        action_section = Vertical(
-            Static("ACTION DISTRIBUTION", classes="section-label"),
-            ActionBarChart(id="action-chart"),
-            classes="stats-section",
+    def compose_content(self) -> Iterator[Widget]:
+        """Yield widgets for the stats body."""
+        yield LoadingIndicator(id="loading")
+        yield Horizontal(
+            stat_card("total entries", "stats-total"),
+            stat_card("active users", "stats-users"),
+            stat_card("period", "stats-period"),
+            classes="dashboard-stats",
         )
-
-        hourly_section = Vertical(
-            Static("HOURLY ACTIVITY", classes="section-label"),
-            HourlyChart(id="hourly-chart"),
-            classes="stats-section",
+        yield Horizontal(
+            Vertical(
+                Static("ACTION DISTRIBUTION", classes="section-label"),
+                ActionBarChart(id="action-chart"),
+                classes="stats-column",
+            ),
+            Vertical(
+                Static("HOURLY ACTIVITY", classes="section-label"),
+                HourlyChart(id="hourly-chart"),
+                classes="stats-column",
+            ),
+            classes="stats-row",
         )
-
-        charts_row = Horizontal(action_section, hourly_section)
-
-        yield Container(
-            Static("statistics", id="stats-title", classes="section-label"),
-            controls,
-            StatsPanel(id="stats-summary"),
-            charts_row,
-            Static("DAILY ACTIVITY", classes="section-label"),
-            Static(id="daily-chart"),
-            Static("USER ACTIVITY RANKING", classes="section-label"),
-            Static(id="user-ranking"),
-            LoadingIndicator(id="loading"),
-            id="stats-container",
+        yield Horizontal(
+            Vertical(
+                Static("DAILY ACTIVITY", classes="section-label"),
+                Static(id="daily-chart"),
+                classes="stats-column",
+            ),
+            Vertical(
+                Static("USER RANKING", classes="section-label"),
+                Static(id="user-ranking"),
+                classes="stats-column",
+            ),
+            classes="stats-row",
         )
 
     def on_content_mounted(self) -> None:
@@ -119,7 +125,7 @@ class StatsScreen(ContentView):
             self.app.call_from_thread(self._update_display, stats, hourly, daily, users)
 
         except Exception as e:
-            self.app.call_from_thread(self._show_error, str(e))
+            self.app.call_from_thread(self.set_empty_state, not_connected_message(str(e)))
         finally:
             self.app.call_from_thread(self.set_loading, False)
 
@@ -132,40 +138,38 @@ class StatsScreen(ContentView):
     ) -> None:
         """Update all statistics displays."""
         self.set_empty_state(None)
-        # Update summary panel
-        stats_panel = self.query_one("#stats-summary", StatsPanel)
-        stats_panel.update_stats(stats)
 
-        # Update action chart
-        action_chart = self.query_one("#action-chart", ActionBarChart)
-        action_chart.update_data(stats.get("action_counts", {}))
+        self.query_one("#stats-total", Static).update(f"{stats.get('total_entries', 0):,}")
+        self.query_one("#stats-users", Static).update(f"{len(users):,}")
+        date_range = stats.get("date_range")
+        self.query_one("#stats-period", Static).update(
+            f"{date_range['start'][:10]} → {date_range['end'][:10]}" if date_range else "n/a"
+        )
 
-        # Update hourly chart
-        hourly_chart = self.query_one("#hourly-chart", HourlyChart)
-        hourly_chart.update_data(hourly)
+        self.query_one("#action-chart", ActionBarChart).update_data(
+            stats.get("action_counts", {}), width=20
+        )
+        self.query_one("#hourly-chart", HourlyChart).update_data(hourly)
 
-        # Update daily chart
-        if daily:
-            max_daily = max(daily.values()) if daily else 1
-            daily_lines = []
-            for date, count in sorted(daily.items())[-14:]:  # Last 14 days
-                bar_width = int((count / max_daily) * 30) if max_daily > 0 else 0
-                bar = "█" * bar_width
-                daily_lines.append(f"  {date} │ {bar} {count}")
-            self.query_one("#daily-chart", Static).update("\n".join(daily_lines))
-        else:
-            self.query_one("#daily-chart", Static).update("[dim]No data[/dim]")
+        primary = TCSS_TOKEN_HEX["$primary"]
+        recent_days = sorted(daily.items())[-14:]
+        max_daily = max((count for _, count in recent_days), default=0)
+        daily_lines = [
+            f"{day[5:]}  [{primary}]{render_bar(count, max_daily, 24).ljust(24)}[/{primary}] "
+            f"{count:>5,}"
+            for day, count in recent_days
+        ]
+        self.query_one("#daily-chart", Static).update(
+            "\n".join(daily_lines) or no_activity_message(self._days)
+        )
 
-        # Update user ranking
-        if users:
-            user_lines = []
-            for i, (user, count) in enumerate(users[:10], 1):
-                user_lines.append(f"  {i:2}. {user[:40]:40} {count:,} actions")
-            self.query_one("#user-ranking", Static).update("\n".join(user_lines))
-        else:
-            self.query_one("#user-ranking", Static).update("[dim]No data[/dim]")
+        name_width = 32
+        user_lines = []
+        for rank, (user, count) in enumerate(users[:10], 1):
+            name = user if len(user) <= name_width else user[: name_width - 1] + "…"
+            user_lines.append(f"{rank:>2}. {name:<{name_width}} {count:>5,}")
+        self.query_one("#user-ranking", Static).update(
+            "\n".join(user_lines) or no_activity_message(self._days)
+        )
 
-    def _show_error(self, error: str) -> None:
-        """Show error message."""
-        self.app.notify(f"Error: {error}", severity="error")
 

@@ -1,6 +1,21 @@
 """Shared utilities for CJA Audit CLI."""
 
+from pathlib import Path
+
 from .models import AuditLogEntry
+
+
+def display_path(path: Path | str) -> str:
+    """Return ``path`` as text with the home directory shown as ``~``.
+
+    Keeps the user's home folder (and username) out of the UI and screenshots.
+    """
+    path = Path(path)
+    try:
+        relative = path.relative_to(Path.home())
+    except ValueError:
+        return str(path)
+    return "~" if str(relative) == "." else f"~/{relative}"
 
 
 def get_user_identifier(entry: AuditLogEntry, default: str = "unknown") -> str:

@@ -3,7 +3,7 @@
 from .alert_card import AlertCard, AlertSummary
 from .filter_bar import FilterBar
 from .log_table import LogTable
-from .stats_panel import ActionBarChart, HourlyChart, StatsPanel
+from .stats_panel import ActionBarChart, HourlyChart
 
 __all__ = [
     "ActionBarChart",
@@ -12,5 +12,4 @@ __all__ = [
     "FilterBar",
     "HourlyChart",
     "LogTable",
-    "StatsPanel",
 ]

@@ -13,33 +13,9 @@ from ...formatters import resolve_tcss_markup
 from ...stats import build_date_range_query, calculate_stats, get_hourly_distribution
 from ..state import AppState
 from ..widgets import ActionBarChart, HourlyChart
-from .base import ContentView
+from .base import ContentView, no_activity_message, not_connected_message, stat_card
 
 DASHBOARD_DAYS = 7
-
-
-def not_connected_message(error: str) -> str:
-    """Empty-state copy shown when the API connection fails."""
-    return resolve_tcss_markup(
-        f"[$danger]●[/$danger] not connected · {error}\n"
-        "[$text-muted]press c to open config, or run: "
-        "cja-audit-log-monitor cli verify[/$text-muted]"
-    )
-
-
-def no_activity_message(days: int) -> str:
-    """Empty-state copy shown when a time window has no entries."""
-    return resolve_tcss_markup(
-        f"[$text-muted]no audit activity in the last {days} days[/$text-muted]"
-    )
-
-
-def _stat_card(label: str, value_id: str) -> Vertical:
-    return Vertical(
-        Static(label, classes="stat-label"),
-        Static("-", id=value_id, classes="stat-value"),
-        classes="stat-card",
-    )
 
 
 class DashboardScreen(ContentView):
@@ -55,15 +31,18 @@ class DashboardScreen(ContentView):
         super().__init__(state, **kwargs)
         self._stats: dict = {}
 
+    def compose_header(self) -> Iterator[Widget]:
+        """Title stays visible above the empty state."""
+        yield Static("dashboard", id="dashboard-title", classes="section-label view-title")
+
     def compose_content(self) -> Iterator[Widget]:
         """Yield widgets for the dashboard."""
         yield LoadingIndicator(id="loading")
-        yield Static("dashboard", id="dashboard-title", classes="section-label")
         yield Horizontal(
-            _stat_card("total entries", "stat-total"),
-            _stat_card("active users", "stat-users"),
-            _stat_card("anomalies", "stat-alerts"),
-            _stat_card(f"window · last {DASHBOARD_DAYS} days", "stat-range"),
+            stat_card("total entries", "stat-total"),
+            stat_card("active users", "stat-users"),
+            stat_card("anomalies", "stat-alerts"),
+            stat_card(f"window · last {DASHBOARD_DAYS} days", "stat-range"),
             classes="dashboard-stats",
         )
         yield Horizontal(

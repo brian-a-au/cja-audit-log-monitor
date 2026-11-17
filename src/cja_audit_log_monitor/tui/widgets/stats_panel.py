@@ -1,70 +1,10 @@
-"""Statistics panel widget."""
+"""Chart widgets for statistics."""
 
-from textual.app import ComposeResult
-from textual.containers import Vertical
 from textual.widgets import Static
 
-from ...formatters import ACTION_COLORS, TCSS_TOKEN_HEX, render_bar, resolve_tcss_markup
+from ...formatters import ACTION_COLORS, TCSS_TOKEN_HEX, render_bar
 
 _MUTED = TCSS_TOKEN_HEX["$text-muted"]
-
-
-class StatsPanel(Static):
-    """Widget for displaying statistics summary."""
-
-    def __init__(self, **kwargs) -> None:
-        """Initialize StatsPanel."""
-        super().__init__(**kwargs)
-        self._stats: dict = {}
-
-    def compose(self) -> ComposeResult:
-        """Compose stats panel widgets."""
-        with Vertical(classes="stats-grid"):
-            yield Static(id="stats-total")
-            yield Static(id="stats-date-range")
-            yield Static(id="stats-actions")
-            yield Static(id="stats-top-users")
-
-    def update_stats(self, stats: dict) -> None:
-        """Update displayed statistics."""
-        self._stats = stats
-
-        total = stats.get("total_entries", 0)
-        self.query_one("#stats-total", Static).update(
-            resolve_tcss_markup(
-                f"[$text-muted]total entries[/$text-muted] [$text-strong]{total:,}[/$text-strong]"
-            )
-        )
-
-        date_range = stats.get("date_range")
-        if date_range:
-            self.query_one("#stats-date-range", Static).update(
-                resolve_tcss_markup(
-                    f"[$text-muted]period[/$text-muted] "
-                    f"[$text-strong]{date_range['start']}[/$text-strong] to "
-                    f"[$text-strong]{date_range['end']}[/$text-strong]"
-                )
-            )
-        else:
-            self.query_one("#stats-date-range", Static).update(
-                resolve_tcss_markup(
-                    "[$text-muted]period[/$text-muted] [$text-muted]N/A[/$text-muted]"
-                )
-            )
-
-        actions = stats.get("action_counts", {})
-        action_lines = [resolve_tcss_markup("[$text-muted]actions[/$text-muted]")]
-        for action, count in sorted(actions.items(), key=lambda x: -x[1])[:5]:
-            token = ACTION_COLORS.get(action, "$text-muted")
-            color = TCSS_TOKEN_HEX.get(token, token)
-            action_lines.append(f"  [{color}]{action}[/{color}]: {count:,}")
-        self.query_one("#stats-actions", Static).update("\n".join(action_lines))
-
-        top_users = stats.get("top_users", [])
-        user_lines = [resolve_tcss_markup("[$text-muted]top users[/$text-muted]")]
-        for user, count in top_users[:5]:
-            user_lines.append(f"  {user}: {count:,}")
-        self.query_one("#stats-top-users", Static).update("\n".join(user_lines))
 
 
 class ActionBarChart(Static):

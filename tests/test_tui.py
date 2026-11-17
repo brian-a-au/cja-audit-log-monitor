@@ -455,6 +455,64 @@ class TestTableFit:
 
 
 # ---------------------------------------------------------------------------
+# TestViewLayouts
+# ---------------------------------------------------------------------------
+
+
+class TestViewLayouts:
+    """Stats, alerts and settings layouts use space well."""
+
+    async def test_settings_shows_tilde_path(self, mock_app_state):
+        from pathlib import Path
+
+        mock_app_state._config_path = Path.home() / ".cja-audit-log-monitor" / "config.yaml"
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.press("c")
+            await pilot.pause()
+            view = app._screens["settings"]
+            texts = [str(w.render()) for w in view.query(Static)]
+            assert not any(str(Path.home()) in t for t in texts)
+            assert any("~/.cja-audit-log-monitor/config.yaml" in t for t in texts)
+
+    async def test_stats_charts_side_by_side(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, "s")
+            action = view.query_one("#action-chart").region
+            hourly = view.query_one("#hourly-chart").region
+            assert action.y == hourly.y
+            assert hourly.x > action.x
+
+    async def test_rule_card_height_at_most_4(self, mock_app_state):
+        from cja_audit_log_monitor.models import ActionType
+
+        mock_app_state._alert_engine.rules = [
+            AlertRule(
+                name="bulk_delete",
+                description="Alert on multiple delete operations",
+                enabled=True,
+                actions=[ActionType.DELETE],
+                threshold_count=5,
+                threshold_window_minutes=60,
+            )
+        ]
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.press("a")
+            await pilot.pause()
+            card = app._screens["alerts"].query_one("#card-bulk_delete")
+            assert 0 < card.region.height <= 4
+
+    async def test_monitor_stream_fills_space(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.press("m")
+            await pilot.pause()
+            assert app._screens["monitor"].query_one("#monitor-log").region.height >= 15
+
+
+# ---------------------------------------------------------------------------
 # TestNavigation
 # ---------------------------------------------------------------------------
 

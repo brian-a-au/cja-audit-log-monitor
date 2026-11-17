@@ -31,7 +31,7 @@ class AlertsScreen(ContentView):
         )
 
         yield Container(
-            Static("alert rules", id="alerts-title", classes="section-label"),
+            Static("alert rules", id="alerts-title", classes="section-label view-title"),
             Static(
                 resolve_tcss_markup(
                     "[$text-muted]toggle rules on/off or test against recent data[/$text-muted]"
@@ -40,7 +40,14 @@ class AlertsScreen(ContentView):
             rules_list,
             buttons,
             Static("TEST RESULTS", classes="section-label"),
-            Static(id="test-results"),
+            Static(
+                resolve_tcss_markup(
+                    "[$text-muted]press test rules to check them against the last 24 hours"
+                    "[/$text-muted]"
+                ),
+                id="test-results",
+                classes="card",
+            ),
             LoadingIndicator(id="loading"),
             id="alerts-container",
         )
@@ -71,23 +78,29 @@ class AlertsScreen(ContentView):
             Container with rule card content.
         """
         enabled_class = "rule-enabled" if rule.enabled else "rule-disabled"
-        actions_str = ", ".join(a.value for a in rule.actions) if rule.actions else "All"
-        components_str = ", ".join(c.value for c in rule.components) if rule.components else "All"
+        actions = (
+            ", ".join(a.value for a in rule.actions).lower() if rule.actions else "all actions"
+        )
+        components = (
+            ", ".join(c.value for c in rule.components).lower()
+            if rule.components
+            else "all components"
+        )
+        if len(components) > 40:
+            components = components[:39] + "…"
+        window = f"{rule.threshold_count} events / {rule.threshold_window_minutes} min"
+        details = f"{window} · {actions} · {components}"
 
         return Vertical(
             Horizontal(
-                Checkbox(rule.name, value=rule.enabled, id=f"rule-{rule.name}"),
-                Static(f"[dim]{rule.description or ''}[/dim]"),
+                Checkbox(rule.name, value=rule.enabled, id=f"rule-{rule.name}", compact=True),
+                Static(
+                    resolve_tcss_markup(f"[$text-muted]{rule.description or ''}[/$text-muted]"),
+                    classes="rule-description",
+                ),
+                classes="rule-header",
             ),
-            Static(
-                f"  Threshold: {rule.threshold_count} events in "
-                f"{rule.threshold_window_minutes} minutes"
-            ),
-            Static(f"  Actions: {actions_str}"),
-            Static(
-                f"  Components: {components_str[:50]}"
-                f"{'...' if len(components_str) > 50 else ''}"
-            ),
+            Static(resolve_tcss_markup(f"[$text-muted]{details}[/$text-muted]")),
             classes=f"rule-card {enabled_class}",
             id=f"card-{rule.name}",
         )
