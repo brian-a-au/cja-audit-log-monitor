@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class ActionType(str, Enum):
@@ -54,6 +54,7 @@ class AuditLogEntry(BaseModel):
     timestamp: datetime | None = Field(None, alias="dateCreated")
     user_id: str | None = Field(None, alias="userId")
     user_email: str | None = Field(None, alias="userEmail")
+    user_name: str | None = Field(None, alias="userName")
     action: str | None = None
     component_type: str | None = Field(None, alias="componentType")
     component_id: str | None = Field(None, alias="componentId")
@@ -64,6 +65,31 @@ class AuditLogEntry(BaseModel):
     changes: dict[str, Any] | None = None
 
     model_config = {"populate_by_name": True}
+
+    @model_validator(mode="before")
+    @classmethod
+    def _flatten_live_api_shape(cls, data: Any) -> Any:
+        """Map the live API's nested objects onto the flat fields.
+
+        The CJA Audit Logs API returns ``user`` and ``component`` as objects
+        and the org as ``imsOrgId``. Flat keys, when present, take priority.
+        """
+        if not isinstance(data, dict):
+            return data
+        data = dict(data)
+        user = data.pop("user", None)
+        if isinstance(user, dict):
+            data.setdefault("userId", user.get("id"))
+            data.setdefault("userEmail", user.get("email"))
+            data.setdefault("userName", user.get("name"))
+        component = data.pop("component", None)
+        if isinstance(component, dict):
+            data.setdefault("componentType", component.get("idType"))
+            data.setdefault("componentId", component.get("id"))
+            data.setdefault("componentName", component.get("name"))
+        if "imsOrgId" in data:
+            data.setdefault("orgId", data.pop("imsOrgId"))
+        return data
 
 
 class PaginationInfo(BaseModel):

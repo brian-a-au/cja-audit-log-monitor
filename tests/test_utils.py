@@ -16,3 +16,11 @@ class TestDisplayPath:
 
     def test_display_path_other_unchanged(self):
         assert display_path(Path("/etc/x")) == "/etc/x"
+
+
+def test_user_identifier_falls_back_to_name_before_id():
+    from cja_audit_log_monitor.models import AuditLogEntry
+    from cja_audit_log_monitor.utils import get_user_identifier
+
+    entry = AuditLogEntry(user_id="ABCDEF@AdobeID", user_name="Pat Example")
+    assert get_user_identifier(entry) == "Pat Example"

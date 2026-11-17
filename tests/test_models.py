@@ -155,3 +155,68 @@ class TestAuditLogResponse:
         response = AuditLogResponse()
         assert response.content == []
         assert response.total_elements == 0
+
+
+# Shape of an entry as the live CJA Audit Logs API returns it (values made up).
+LIVE_API_ENTRY = {
+    "id": "6afce25938051732907b1022",
+    "dateCreated": "2026-11-17T23:25:13.000+00:00",
+    "action": "EDIT",
+    "description": "Updated data view",
+    "imsOrgId": "ABC123@AdobeOrg",
+    "user": {
+        "id": "ABCDEF1234@AdobeID",
+        "idType": "IMS",
+        "name": "Pat Example",
+        "email": "pat@example.com",
+    },
+    "component": {
+        "id": "dv_123",
+        "idType": "DATA_VIEW",
+        "name": "Production View",
+    },
+}
+
+
+class TestLiveApiShape:
+    """The live API nests user and component objects; the model must read them."""
+
+    def test_reads_nested_user(self):
+        entry = AuditLogEntry.model_validate(LIVE_API_ENTRY)
+        assert entry.user_id == "ABCDEF1234@AdobeID"
+        assert entry.user_email == "pat@example.com"
+        assert entry.user_name == "Pat Example"
+
+    def test_reads_nested_component(self):
+        entry = AuditLogEntry.model_validate(LIVE_API_ENTRY)
+        assert entry.component_type == "DATA_VIEW"
+        assert entry.component_id == "dv_123"
+        assert entry.component_name == "Production View"
+
+    def test_reads_ims_org_id(self):
+        entry = AuditLogEntry.model_validate(LIVE_API_ENTRY)
+        assert entry.org_id == "ABC123@AdobeOrg"
+
+    def test_response_parses_live_entries(self):
+        response = AuditLogResponse.model_validate(
+            {"content": [LIVE_API_ENTRY], "totalElements": 1, "totalPages": 1}
+        )
+        assert response.content[0].user_email == "pat@example.com"
+        assert response.content[0].component_type == "DATA_VIEW"
+
+    def test_missing_nested_objects_leave_fields_empty(self):
+        entry = AuditLogEntry.model_validate({"id": "x", "action": "EDIT"})
+        assert entry.user_email is None
+        assert entry.component_type is None
+
+    def test_null_nested_objects_are_ignored(self):
+        entry = AuditLogEntry.model_validate({"id": "x", "user": None, "component": None})
+        assert entry.user_id is None
+        assert entry.component_id is None
+
+    def test_flat_fields_still_work(self):
+        entry = AuditLogEntry.model_validate(
+            {"id": "x", "userEmail": "a@example.com", "componentType": "PROJECT"}
+        )
+        assert entry.user_email == "a@example.com"
+        assert entry.component_type == "PROJECT"

@@ -21,7 +21,7 @@ def display_path(path: Path | str) -> str:
 def get_user_identifier(entry: AuditLogEntry, default: str = "unknown") -> str:
     """Get the user identifier from an audit log entry.
 
-    Prefers user_email over user_id, with configurable default for missing values.
+    Prefers user_email, then user_name, then user_id, with configurable default for missing values.
 
     Args:
         entry: The audit log entry.
@@ -30,4 +30,4 @@ def get_user_identifier(entry: AuditLogEntry, default: str = "unknown") -> str:
     Returns:
         User email, user ID, or default value.
     """
-    return entry.user_email or entry.user_id or default
+    return entry.user_email or entry.user_name or entry.user_id or default

@@ -82,6 +82,7 @@ class EntryDetailPanel(Container):
             self._row("user", get_user_identifier(entry, default="-")),
             self._row("user id", entry.user_id or "-"),
             self._row("user email", entry.user_email or "-"),
+            self._row("user name", entry.user_name or "-"),
             self._row("action", f"[{color}]{action}[/{color}]"),
             self._row("component", entry.component_type or "-"),
             self._row("component id", entry.component_id or "-"),
