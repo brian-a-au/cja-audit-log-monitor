@@ -11,6 +11,7 @@ from textual.worker import Worker
 
 from ...formatters import resolve_tcss_markup
 from ...models import AuditLogQuery
+from ...utils import to_local
 from ..state import AppState
 from ..widgets import AlertSummary, LogTable
 from .base import ContentView
@@ -314,7 +315,7 @@ class MonitorScreen(ContentView):
     def _update_stats_display(self) -> None:
         """Update the stats display."""
         monitor = self._state.monitor
-        last_check = monitor.last_check.strftime("%H:%M:%S") if monitor.last_check else "—"
+        last_check = f"{to_local(monitor.last_check):%H:%M:%S}" if monitor.last_check else "—"
         self.query_one("#stats-info", Static).update(
             f"last check {last_check} · "
             f"new {monitor.entries_since_start} · "

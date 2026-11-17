@@ -8,7 +8,7 @@ from textual.widgets import Static
 
 from ...formatters import format_timestamp, get_action_color, get_action_icon, resolve_tcss_markup
 from ...models import AuditLogEntry
-from ...utils import get_user_identifier
+from ...utils import get_user_identifier, local_tz_name
 
 
 class EntryDetailPanel(Container):
@@ -78,7 +78,9 @@ class EntryDetailPanel(Container):
 
         body_lines = [
             self._row("id", entry.id or "-"),
-            self._row("timestamp", format_timestamp(entry.timestamp)),
+            self._row(
+                "timestamp", f"{format_timestamp(entry.timestamp, local=True)} {local_tz_name()}"
+            ),
             self._row("user", get_user_identifier(entry, default="-")),
             self._row("user id", entry.user_id or "-"),
             self._row("user email", entry.user_email or "-"),

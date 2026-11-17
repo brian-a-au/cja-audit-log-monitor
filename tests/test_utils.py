@@ -24,3 +24,25 @@ def test_user_identifier_falls_back_to_name_before_id():
 
     entry = AuditLogEntry(user_id="ABCDEF@AdobeID", user_name="Pat Example")
     assert get_user_identifier(entry) == "Pat Example"
+
+
+class TestLocalTime:
+    def test_to_local_converts_utc(self, los_angeles_tz):
+        from datetime import UTC, datetime
+
+        from cja_audit_log_monitor.utils import to_local
+
+        local = to_local(datetime(2026, 11, 17, 23, 25, tzinfo=UTC))
+        assert (local.day, local.hour) == (17, 15)
+
+    def test_to_local_treats_naive_as_utc(self, los_angeles_tz):
+        from datetime import datetime
+
+        from cja_audit_log_monitor.utils import to_local
+
+        assert to_local(datetime(2026, 11, 17, 23, 25)).hour == 15
+
+    def test_local_tz_name(self, los_angeles_tz):
+        from cja_audit_log_monitor.utils import local_tz_name
+
+        assert local_tz_name() in ("PST", "PDT")

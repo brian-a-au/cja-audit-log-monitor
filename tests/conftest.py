@@ -130,3 +130,15 @@ def mock_app_state(sample_settings, sample_audit_entries) -> AppState:
     state._alert_engine = mock_alert_engine
 
     return state
+
+
+@pytest.fixture
+def los_angeles_tz(monkeypatch):
+    """Run a test with the local time zone set to America/Los_Angeles."""
+    import time
+
+    monkeypatch.setenv("TZ", "America/Los_Angeles")
+    time.tzset()
+    yield
+    monkeypatch.undo()
+    time.tzset()

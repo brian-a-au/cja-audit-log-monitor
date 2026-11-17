@@ -1447,3 +1447,80 @@ class TestFooterBindings:
             await pilot.press("escape")
             await pilot.pause()
             assert view.check_action("dismiss_details", ()) is False
+
+
+class TestLocalTimes:
+    """The TUI shows local time and names the zone."""
+
+    async def test_log_table_header_names_zone(self, mock_app_state, los_angeles_tz):
+        from cja_audit_log_monitor.tui.widgets.log_table import LogTable
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, "l")
+            table = view.query_one(LogTable)
+            labels = [str(col.label) for col in table.columns.values()]
+            assert labels[0] in ("time (PST)", "time (PDT)")
+
+    async def test_log_table_shows_local_time(
+        self, mock_app_state, sample_audit_entry, los_angeles_tz
+    ):
+        from datetime import UTC, datetime
+
+        from cja_audit_log_monitor.tui.widgets.log_table import LogTable
+
+        entry = sample_audit_entry.model_copy(
+            update={"timestamp": datetime(2026, 11, 17, 23, 25, 13, tzinfo=UTC)}
+        )
+        mock_app_state.client.get_logs.return_value.content = [entry]
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, "l")
+            table = view.query_one(LogTable)
+            assert str(table.get_row_at(0)[0]) == "2026-11-17 15:25:13"
+
+
+class TestLocalWindows:
+    """Window cards show the queried window in local dates; chart labels name the zone."""
+
+    async def test_dashboard_window_is_last_7_local_days(self, mock_app_state, los_angeles_tz):
+        from datetime import datetime, timedelta
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, "d")
+            now = datetime.now().astimezone()
+            expected = f"{(now - timedelta(days=7)):%m-%d} → {now:%m-%d}"
+            assert str(view.query_one("#stat-range", Static).render()) == expected
+
+    async def test_stats_period_is_queried_window(self, mock_app_state, los_angeles_tz):
+        from datetime import datetime, timedelta
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, "s")
+            now = datetime.now().astimezone()
+            expected = f"{(now - timedelta(days=7)):%Y-%m-%d} → {now:%Y-%m-%d}"
+            assert str(view.query_one("#stats-period", Static).render()) == expected
+
+    @pytest.mark.parametrize("key", ["d", "s"])
+    async def test_hourly_label_names_zone(self, mock_app_state, los_angeles_tz, key):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, key)
+            labels = [str(s.render()) for s in view.query(".section-label")]
+            hourly = next(label for label in labels if label.startswith("HOURLY ACTIVITY"))
+            assert hourly.endswith(("PST", "PDT"))
+
+    async def test_monitor_last_check_is_local(self, mock_app_state, los_angeles_tz):
+        from datetime import UTC, datetime
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.press("m")
+            await pilot.pause()
+            view = app._screens["monitor"]
+            mock_app_state.monitor.last_check = datetime(2026, 11, 17, 23, 25, 13, tzinfo=UTC)
+            view._update_stats_display()
+            await pilot.pause()
+            assert "last check 15:25:13" in str(view.query_one("#stats-info", Static).render())

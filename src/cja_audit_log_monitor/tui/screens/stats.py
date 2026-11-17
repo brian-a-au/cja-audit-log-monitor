@@ -1,6 +1,7 @@
 """Statistics screen for analytics and visualizations."""
 
 from collections.abc import Iterator
+from datetime import datetime, timedelta
 
 from textual.containers import Horizontal, Vertical
 from textual.widget import Widget
@@ -15,6 +16,7 @@ from ...stats import (
     get_hourly_distribution,
     get_user_activity,
 )
+from ...utils import local_tz_name
 from ..state import AppState
 from ..widgets import ActionBarChart, HourlyChart
 from .base import (
@@ -70,7 +72,7 @@ class StatsScreen(ContentView):
                 classes="stats-column",
             ),
             Vertical(
-                Static("HOURLY ACTIVITY", classes="section-label"),
+                Static(f"HOURLY ACTIVITY · {local_tz_name()}", classes="section-label"),
                 HourlyChart(id="hourly-chart"),
                 classes="stats-column",
             ),
@@ -78,7 +80,7 @@ class StatsScreen(ContentView):
         )
         yield Horizontal(
             Vertical(
-                Static("DAILY ACTIVITY", classes="section-label"),
+                Static(f"DAILY ACTIVITY · {local_tz_name()}", classes="section-label"),
                 Static(id="daily-chart"),
                 classes="stats-column",
             ),
@@ -128,8 +130,8 @@ class StatsScreen(ContentView):
 
             # Calculate all statistics
             stats = calculate_stats(entries)
-            hourly = get_hourly_distribution(entries)
-            daily = get_daily_distribution(entries)
+            hourly = get_hourly_distribution(entries, local=True)
+            daily = get_daily_distribution(entries, local=True)
             users = get_user_activity(entries)
 
             self.app.call_from_thread(self._update_display, stats, hourly, daily, users, total)
@@ -155,10 +157,9 @@ class StatsScreen(ContentView):
         self.query_one("#stats-total", Static).update(f"{total:,}")
         show_sample_note(self, shown, total)
         self.query_one("#stats-users", Static).update(f"{len(users):,}")
-        date_range = stats.get("date_range")
-        self.query_one("#stats-period", Static).update(
-            f"{date_range['start'][:10]} → {date_range['end'][:10]}" if date_range else "n/a"
-        )
+        now = datetime.now().astimezone()
+        start = now - timedelta(days=self._days)
+        self.query_one("#stats-period", Static).update(f"{start:%Y-%m-%d} → {now:%Y-%m-%d}")
 
         self.query_one("#action-chart", ActionBarChart).update_data(
             stats.get("action_counts", {}), width=20

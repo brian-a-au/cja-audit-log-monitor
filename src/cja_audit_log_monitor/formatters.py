@@ -9,7 +9,7 @@ from rich.table import Table
 from rich.text import Text
 
 from .models import ActionType, AuditLogEntry
-from .utils import get_user_identifier
+from .utils import get_user_identifier, to_local
 
 # Severity color tokens (matching tui/styles.tcss)
 # - $danger:     destructive
@@ -118,10 +118,12 @@ def get_action_icon(action: str) -> str:
     return ACTION_ICONS.get(action, "·")
 
 
-def format_timestamp(dt: datetime | None) -> str:
-    """Format timestamp for display."""
+def format_timestamp(dt: datetime | None, local: bool = False) -> str:
+    """Format timestamp for display, in local time when ``local`` is True."""
     if dt is None:
         return "-"
+    if local:
+        dt = to_local(dt)
     return dt.strftime("%Y-%m-%d %H:%M:%S")
 
 

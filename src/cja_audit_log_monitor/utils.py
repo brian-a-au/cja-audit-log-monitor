@@ -1,5 +1,6 @@
 """Shared utilities for CJA Audit CLI."""
 
+from datetime import UTC, datetime
 from pathlib import Path
 
 from .models import AuditLogEntry
@@ -31,3 +32,15 @@ def get_user_identifier(entry: AuditLogEntry, default: str = "unknown") -> str:
         User email, user ID, or default value.
     """
     return entry.user_email or entry.user_name or entry.user_id or default
+
+
+def to_local(dt: datetime) -> datetime:
+    """Convert ``dt`` to the local time zone. A naive datetime is taken as UTC."""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return dt.astimezone()
+
+
+def local_tz_name() -> str:
+    """Short name of the local time zone right now, e.g. ``PST``."""
+    return datetime.now(UTC).astimezone().tzname() or "local"
