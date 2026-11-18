@@ -5,7 +5,6 @@ from collections.abc import Iterator
 from textual.containers import Container, Horizontal, Vertical
 from textual.widget import Widget
 from textual.widgets import Button, LoadingIndicator, Static
-from textual.worker import get_current_worker
 
 from ...formatters import literal, resolve_tcss_markup
 from ...utils import display_path
@@ -170,8 +169,13 @@ class SettingsScreen(ContentView):
 
     def refresh_data(self) -> None:
         """Refresh connection status."""
-        self.set_loading(True)
-        self.run_worker(self._check_connection(), exclusive=True, thread=True)
+        self.run_load(
+            self._state.verify_connection,
+            self._update_connection_status,
+            lambda error: self._update_connection_status(
+                {"connected": False, "error": str(error)}
+            ),
+        )
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button presses."""
@@ -180,26 +184,6 @@ class SettingsScreen(ContentView):
         elif event.button.id == "reload-button":
             self._state.refresh_client()
             self.app.notify("Settings refreshed", severity="information")
-
-    async def _check_connection(self) -> None:
-        """Verify API connection."""
-        worker = get_current_worker()
-
-        try:
-            result = self._state.verify_connection()
-
-            if worker.is_cancelled:
-                return
-
-            self.app.call_from_thread(self._update_connection_status, result)
-
-        except Exception as e:
-            self.app.call_from_thread(
-                self._update_connection_status,
-                {"connected": False, "error": str(e)},
-            )
-        finally:
-            self.app.call_from_thread(self.set_loading, False)
 
     def _update_connection_status(self, result: dict) -> None:
         """Update connection status display."""

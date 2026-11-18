@@ -1,12 +1,12 @@
 """Log browser screen for viewing and filtering audit logs."""
 
 from collections.abc import Iterator
+from datetime import datetime
 
 from textual.containers import Container, Horizontal
 from textual.css.query import NoMatches
 from textual.widget import Widget
 from textual.widgets import Button, Label, LoadingIndicator, Static
-from textual.worker import get_current_worker
 
 from ...formatters import resolve_tcss_markup
 from ...models import ActionType, ComponentType
@@ -67,31 +67,20 @@ class LogBrowserScreen(ContentView):
 
     def refresh_data(self) -> None:
         """Refresh log data."""
-        self.set_loading(True)
-        self.run_worker(self._load_data(), exclusive=True, thread=True)
+        self.run_load(self._state.fetch_logs_page, self._show_page)
 
-    async def _load_data(self) -> None:
-        """Load log data based on current filters."""
-        worker = get_current_worker()
-
-        try:
-            entries, total = self._state.fetch_logs_page()
-
-            if worker.is_cancelled:
-                return
-
-            self.app.call_from_thread(self.app.note_api_ok)
-            self.app.call_from_thread(self._update_table, entries, total)
-
-        except Exception as e:
-            self.app.call_from_thread(self._show_error, e)
-        finally:
-            self.app.call_from_thread(self.set_loading, False)
+    def _show_page(self, page: tuple[list, int]) -> None:
+        """Show a fetched page and mark the API connected."""
+        self.app.note_api_ok()
+        self._update_table(*page)
 
     def _update_table(self, entries: list, total: int) -> None:
         """Update the log table with entries."""
         table = self.query_one("#log-table", LogTable)
         table.load_entries(entries)
+        self._state.entries = entries
+        self._state.total_entries = total
+        self._state.last_refresh = datetime.now()
         self._state.page_loaded = True  # the export dialog may now offer "this page"
         if entries:
             self._set_table_message(None)
@@ -120,7 +109,7 @@ class LogBrowserScreen(ContentView):
         self.query_one("#prev-page", Button).disabled = page == 0
         self.query_one("#next-page", Button).disabled = page >= total_pages - 1
 
-    def _show_error(self, error: Exception) -> None:
+    def show_load_error(self, error: Exception) -> None:
         """Show why the table is empty, above it, so the filters stay usable."""
         self.app.note_api_error(error)
         self.query_one("#log-table", LogTable).load_entries([])

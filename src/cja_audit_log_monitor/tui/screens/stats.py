@@ -6,7 +6,6 @@ from datetime import datetime, timedelta
 from textual.containers import Horizontal, Vertical
 from textual.widget import Widget
 from textual.widgets import Button, Input, Label, LoadingIndicator, Static
-from textual.worker import get_current_worker
 
 from ...formatters import TCSS_TOKEN_HEX, literal, render_bar
 from ...stats import (
@@ -21,7 +20,6 @@ from ..state import AppState
 from ..widgets import ActionBarChart, FittedStatic, HourlyChart
 from .base import (
     ContentView,
-    error_message,
     no_activity_message,
     sample_note,
     show_sample_note,
@@ -109,8 +107,8 @@ class StatsScreen(ContentView):
 
     def refresh_data(self) -> None:
         """Refresh statistics data."""
-        self.set_loading(True)
-        self.run_worker(self._load_data(), exclusive=True, thread=True)
+        days = self._days
+        self.run_load(lambda: self._fetch(days), lambda load: self._show_load(days, load))
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button presses."""
@@ -124,40 +122,27 @@ class StatsScreen(ContentView):
 
             self.refresh_data()
 
-    async def _load_data(self) -> None:
-        """Load statistics data."""
-        worker = get_current_worker()
+    def _fetch(self, days: int) -> tuple | None:
+        """Sample and analyze the last ``days`` days (worker thread); None when empty."""
+        query = build_date_range_query(days)
+        entries, total = self._state.client.get_logs_sample(query, max_entries=STATS_SAMPLE)
+        if not entries:
+            return None
+        return (
+            calculate_stats(entries),
+            get_hourly_distribution(entries, local=True),
+            get_daily_distribution(entries, local=True),
+            get_user_activity(entries),
+            total,
+        )
 
-        try:
-            query = build_date_range_query(self._days)
-            entries, total = self._state.client.get_logs_sample(query, max_entries=STATS_SAMPLE)
-
-            if worker.is_cancelled:
-                return
-
-            if not entries:
-                self.app.call_from_thread(self.app.note_api_ok)
-                self.app.call_from_thread(self.set_empty_state, no_activity_message(self._days))
-                return
-
-            # Calculate all statistics
-            stats = calculate_stats(entries)
-            hourly = get_hourly_distribution(entries, local=True)
-            daily = get_daily_distribution(entries, local=True)
-            users = get_user_activity(entries)
-
-            self.app.call_from_thread(self.app.note_api_ok)
-            self.app.call_from_thread(self._update_display, stats, hourly, daily, users, total)
-
-        except Exception as e:
-            self.app.call_from_thread(self._show_error, e)
-        finally:
-            self.app.call_from_thread(self.set_loading, False)
-
-    def _show_error(self, error: Exception) -> None:
-        """Report a failed API call in the view, and in the header if it was a connection."""
-        self.app.note_api_error(error)
-        self.set_empty_state(error_message(error))
+    def _show_load(self, days: int, load: tuple | None) -> None:
+        """Show a finished load, or the no-activity message for an empty window."""
+        self.app.note_api_ok()
+        if load is None:
+            self.set_empty_state(no_activity_message(days))
+        else:
+            self._update_display(*load)
 
     def _update_display(
         self,

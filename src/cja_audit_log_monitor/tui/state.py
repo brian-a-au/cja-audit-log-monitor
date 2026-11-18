@@ -213,17 +213,16 @@ class AppState:
         return self.entries
 
     def fetch_logs_page(self) -> tuple[list[AuditLogEntry], int]:
-        """Fetch a single page of logs.
+        """Fetch the page the filters select, without storing it.
+
+        Runs in worker threads, so it leaves ``entries`` alone: the log browser
+        stores a page only once it is the newest load.
 
         Returns:
             Tuple of (entries list, total count).
         """
-        query = self.filters.to_query()
-        response = self.client.get_logs(query)
-        self.entries = response.content
-        self.total_entries = response.total_elements
-        self.last_refresh = datetime.now()
-        return self.entries, self.total_entries
+        response = self.client.get_logs(self.filters.to_query())
+        return response.content, response.total_elements
 
     def check_alerts(self, entries: list[AuditLogEntry]) -> list[FiredAlert]:
         """Check entries against alert rules and dispatch to notification channels.

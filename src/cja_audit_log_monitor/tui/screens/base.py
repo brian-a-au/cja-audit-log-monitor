@@ -1,7 +1,7 @@
 """Base class for the views shown in the main content area."""
 
-from collections.abc import Iterator
-from typing import Literal
+from collections.abc import Callable, Iterator
+from typing import Literal, TypeVar
 
 from textual.app import ComposeResult
 from textual.containers import Vertical
@@ -12,6 +12,8 @@ from ...auth import AuthenticationError
 from ...client import APIError
 from ...formatters import literal, resolve_tcss_markup
 from ..state import AppState
+
+T = TypeVar("T")
 
 
 def not_connected_message(error: str) -> str:
@@ -132,6 +134,8 @@ class ContentView(Vertical):
         """
         super().__init__(**kwargs)
         self._state = state
+        # Bumped by each run_load; a load whose number is no longer current is stale.
+        self._load_generation = 0
 
     def compose(self) -> ComposeResult:
         """Compose the view: header, an (initially hidden) empty state, then the body."""
@@ -171,6 +175,52 @@ class ContentView(Vertical):
         """Show or hide the view's loading indicator, if it has one."""
         for indicator in self.query(LoadingIndicator):
             indicator.display = loading
+
+    def run_load(
+        self,
+        fetch: Callable[[], T],
+        apply: Callable[[T], None],
+        on_error: Callable[[Exception], None] | None = None,
+    ) -> None:
+        """Load data off the UI thread and show it, unless a newer load started since.
+
+        ``fetch`` runs in a thread worker and must not touch the UI. Its result goes
+        to ``apply`` (or its exception to ``on_error``, default ``show_load_error``)
+        on the UI thread. Each call supersedes the previous one: a superseded load's
+        result or error is dropped, and only the newest load hides the loading
+        indicator.
+        """
+        self._load_generation += 1
+        generation = self._load_generation
+        handle_error = on_error or self.show_load_error
+        self.set_loading(True)
+
+        def deliver(callback: Callable, value: object) -> None:
+            if generation != self._load_generation:
+                return  # superseded by a newer load
+            try:
+                callback(value)
+            except Exception as error:  # a failure while showing data is shown too
+                if callback is handle_error:
+                    raise
+                handle_error(error)
+            finally:
+                self.set_loading(False)
+
+        def work() -> None:
+            try:
+                result = fetch()
+            except Exception as error:
+                self.app.call_from_thread(deliver, handle_error, error)
+            else:
+                self.app.call_from_thread(deliver, apply, result)
+
+        self.run_worker(work, group="load", exclusive=True, thread=True)
+
+    def show_load_error(self, error: Exception) -> None:
+        """Show why a load failed in place of the view body, and in the header."""
+        self.app.note_api_error(error)
+        self.set_empty_state(error_message(error))
 
     def on_content_mounted(self) -> None:
         """Hook called once, the first time the view is shown."""

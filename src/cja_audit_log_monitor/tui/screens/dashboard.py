@@ -1,12 +1,12 @@
 """Dashboard screen showing summary statistics."""
 
 from collections.abc import Iterator
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
 from textual.containers import Horizontal, Vertical
 from textual.widget import Widget
 from textual.widgets import Button, LoadingIndicator, Static
-from textual.worker import get_current_worker
 
 from ...alerts import analyze_for_anomalies
 from ...formatters import literal, resolve_tcss_markup
@@ -16,7 +16,6 @@ from ..state import AppState
 from ..widgets import ActionBarChart, FittedStatic, HourlyChart
 from .base import (
     ContentView,
-    error_message,
     no_activity_message,
     not_connected_message,
     sample_note,
@@ -26,6 +25,18 @@ from .base import (
 
 DASHBOARD_DAYS = 7
 DASHBOARD_SAMPLE = 1000
+
+
+@dataclass
+class _DashboardLoad:
+    """What one dashboard load found. ``stats`` is None when the window was empty."""
+
+    connection: dict
+    stats: dict | None = None
+    anomalies: list = field(default_factory=list)
+    hourly: dict[int, int] = field(default_factory=dict)
+    total: int | None = None
+    error: Exception | None = None
 
 
 class DashboardScreen(ContentView):
@@ -90,57 +101,46 @@ class DashboardScreen(ContentView):
 
     def refresh_data(self) -> None:
         """Refresh dashboard data."""
-        self.set_loading(True)
-        self.run_worker(self._load_data(), exclusive=True, thread=True)
+        self.run_load(self._fetch, self._show_load)
 
-    async def _load_data(self) -> None:
-        """Load dashboard data."""
-        worker = get_current_worker()
-
+    def _fetch(self) -> _DashboardLoad:
+        """Check the connection, then sample and analyze the window (worker thread)."""
+        connection = self._state.verify_connection()
+        if not connection.get("connected"):
+            return _DashboardLoad(connection)
         try:
-            result = self._state.verify_connection()
-
-            if worker.is_cancelled:
-                return
-
-            if not result.get("connected"):
-                error = str(result.get("error", "connection failed"))
-                self.app.call_from_thread(self._show_disconnected, error)
-                return
-
-            self.app.call_from_thread(
-                self.app.set_connection_status,
-                "connected",
-                f"org {result.get('org_id', 'unknown')}",
-            )
-
             query = build_date_range_query(DASHBOARD_DAYS)
-            entries, total = self._state.client.get_logs_sample(query, max_entries=DASHBOARD_SAMPLE)
-
-            if worker.is_cancelled:
-                return
-
+            entries, total = self._state.client.get_logs_sample(
+                query, max_entries=DASHBOARD_SAMPLE
+            )
             if not entries:
-                self.app.call_from_thread(
-                    self.set_empty_state, no_activity_message(DASHBOARD_DAYS)
-                )
-                return
+                return _DashboardLoad(connection)
+            return _DashboardLoad(
+                connection,
+                stats=calculate_stats(entries),
+                anomalies=analyze_for_anomalies(entries, local=True),
+                hourly=get_hourly_distribution(entries, local=True),
+                total=total,
+            )
+        except Exception as error:
+            # The connection worked, so the header says so even though this failed.
+            return _DashboardLoad(connection, error=error)
 
-            stats = calculate_stats(entries)
-            anomalies = analyze_for_anomalies(entries, local=True)
-            hourly = get_hourly_distribution(entries, local=True)
-
-            self.app.call_from_thread(self._update_stats, stats, anomalies, hourly, total)
-
-        except Exception as e:
-            self.app.call_from_thread(self._show_error, e)
-        finally:
-            self.app.call_from_thread(self.set_loading, False)
-
-    def _show_error(self, error: Exception) -> None:
-        """Report a failed API call in the view, and in the header if it was a connection."""
-        self.app.note_api_error(error)
-        self.set_empty_state(error_message(error))
+    def _show_load(self, load: _DashboardLoad) -> None:
+        """Show a finished load: disconnected, an error, no activity, or the stats."""
+        connection = load.connection
+        if not connection.get("connected"):
+            self._show_disconnected(str(connection.get("error", "connection failed")))
+            return
+        self.app.set_connection_status(
+            "connected", f"org {connection.get('org_id', 'unknown')}"
+        )
+        if load.error is not None:
+            self.show_load_error(load.error)
+        elif load.stats is None:
+            self.set_empty_state(no_activity_message(DASHBOARD_DAYS))
+        else:
+            self._update_stats(load.stats, load.anomalies, load.hourly, load.total)
 
     def _show_disconnected(self, error: str) -> None:
         """Report a failed connection in the header and the view."""

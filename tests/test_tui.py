@@ -2356,6 +2356,143 @@ class TestPageLoadedFlag:
             assert "entries" not in str(dialog.query_one("#scope-page").label)
 
 
+class TestStaleLoads:
+    """A load that a newer one superseded must not touch the view (F21)."""
+
+    @staticmethod
+    def _page(entry, page: int, count: int = 50):
+        from cja_audit_log_monitor.models import AuditLogResponse
+
+        entries = [entry.model_copy(update={"id": f"p{page}-{i}"}) for i in range(count)]
+        return AuditLogResponse(
+            content=entries,
+            total_elements=120,
+            total_pages=3,
+            number_of_elements=count,
+            first=page == 0,
+            last=False,
+            number=page,
+            size=50,
+        )
+
+    @staticmethod
+    def _slow_failing_page1(app):
+        """get_logs where page 1 waits for a release, then fails to connect.
+
+        Returns (get_logs, started, release, delivered). ``delivered`` is set once the
+        page 1 thread's first hand-off to the UI thread has run; a cancelled thread
+        worker keeps running after Textual marks it done, so wait_for_complete
+        alone does not cover it.
+        """
+        import threading
+
+        from cja_audit_log_monitor.client import APIError
+
+        started = threading.Event()
+        release = threading.Event()
+        delivered = threading.Event()
+        page1_thread: list[threading.Thread] = []
+        original = app.call_from_thread
+
+        def spy(callback, *args, **kwargs):
+            try:
+                return original(callback, *args, **kwargs)
+            finally:
+                if page1_thread and threading.current_thread() is page1_thread[0]:
+                    delivered.set()
+
+        app.call_from_thread = spy
+
+        def page1():
+            page1_thread.append(threading.current_thread())
+            started.set()
+            release.wait(5)
+            raise APIError("network down")  # no status code: a connection failure
+
+        return page1, started, release, delivered
+
+    async def test_stale_failure_does_not_clear_newer_page(
+        self, mock_app_state, sample_audit_entry
+    ):
+        from cja_audit_log_monitor.tui.widgets import LogTable
+
+        page0 = self._page(sample_audit_entry, 0)
+        app = _make_app(mock_app_state)
+        page1, started, release, delivered = self._slow_failing_page1(app)
+        mock_app_state.client.get_logs.side_effect = (
+            lambda query: page1() if query.page == 1 else page0
+        )
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, "l")
+            table = view.query_one("#log-table", LogTable)
+            assert table.row_count == 50
+            table.focus()
+            await pilot.press("n")
+            assert await _wait_for(started.is_set, pilot)
+            await pilot.press("p")
+            # Page 0 comes back at once; only then does the slow page 1 fail.
+            await app.workers.wait_for_complete()
+            assert await _wait_for(
+                lambda: mock_app_state.client.get_logs.call_count == 3, pilot
+            )
+            release.set()
+            assert await _wait_for(delivered.is_set, pilot)
+            await pilot.pause()
+            assert table.row_count == 50
+            assert app._connection_status == "connected"
+            assert mock_app_state.page_loaded is True
+            assert len(mock_app_state.entries) == 50
+            assert mock_app_state.total_entries == 120
+            assert not view.query_one("#table-message", Static).display
+            assert not view.query_one("#logs-loading").display
+        assert app._exception is None
+
+    async def test_loading_stays_until_newest_load_ends(self, mock_app_state, sample_audit_entry):
+        import threading
+
+        from cja_audit_log_monitor.tui.widgets import LogTable
+
+        page0 = self._page(sample_audit_entry, 0)
+        app = _make_app(mock_app_state)
+        page1, started, release, delivered = self._slow_failing_page1(app)
+        reload_started = threading.Event()
+        release_reload = threading.Event()
+        page0_loads = []
+
+        def get_logs(query):
+            if query.page == 1:
+                return page1()
+            page0_loads.append(query)
+            if len(page0_loads) > 1:  # the reload after "p" is slow too
+                reload_started.set()
+                release_reload.wait(5)
+            return page0
+
+        mock_app_state.client.get_logs.side_effect = get_logs
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, "l")
+            table = view.query_one("#log-table", LogTable)
+            indicator = view.query_one("#logs-loading")
+            table.focus()
+            await pilot.press("n")
+            assert await _wait_for(started.is_set, pilot)
+            await pilot.press("p")
+            assert await _wait_for(reload_started.is_set, pilot)
+            # The superseded page 1 fails while the page 0 reload is still running.
+            release.set()
+            assert await _wait_for(delivered.is_set, pilot)
+            await pilot.pause()
+            assert indicator.display, "a superseded load hid the loading indicator"
+            assert table.row_count == 50
+            assert app._connection_status == "connected"
+            release_reload.set()
+            await app.workers.wait_for_complete()
+            assert await _wait_for(lambda: not indicator.display, pilot)
+            assert table.row_count == 50
+            assert app._connection_status == "connected"
+        assert app._exception is None
+
+
 class TestSwapSuffix:
     def test_empty_and_folder_unchanged(self):
         from cja_audit_log_monitor.tui.modals.export_dialog import swap_suffix
