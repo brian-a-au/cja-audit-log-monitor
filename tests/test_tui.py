@@ -5,7 +5,7 @@ import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from textual.widgets import Button, Static
+from textual.widgets import Button, Checkbox, Static
 
 from cja_audit_log_monitor.alerts import FiredAlert
 from cja_audit_log_monitor.models import AlertRule
@@ -597,7 +597,7 @@ class TestViewLayouts:
         async with app.run_test(size=(140, 40)) as pilot:
             await pilot.press("a")
             await pilot.pause()
-            card = app._screens["alerts"].query_one("#card-bulk_delete")
+            card = app._screens["alerts"].query_one("#card-0")
             assert 0 < card.region.height <= 4
 
     async def test_monitor_stream_fills_space(self, mock_app_state):
@@ -1537,6 +1537,81 @@ class TestAlertsScreen:
             await pilot.pause()
             # Reset should rebuild to default rules without crashing.
             assert len(app.query("#rules-list .rule-card")) > 0
+
+
+class TestAlertsViewRealEngine:
+    """The alerts view against a real engine built from settings."""
+
+    @staticmethod
+    def _state(mock_app_state, rules):
+        mock_app_state.settings.alert_rules = rules
+        mock_app_state._alert_engine = None
+        return mock_app_state
+
+    async def test_rule_name_with_space_and_markup_mounts(self, mock_app_state):
+        state = self._state(
+            mock_app_state,
+            [AlertRule(name="Bulk delete"), AlertRule(name="[red]odd[/red] name")],
+        )
+        app = _make_app(state)
+        async with app.run_test() as pilot:
+            await pilot.press("a")
+            await pilot.pause()
+            assert len(app.query("#rules-list .rule-card")) == 2
+            assert app.query_one("#rule-0", Checkbox)
+
+    async def test_toggle_is_session_only_and_reset_restores(self, mock_app_state):
+        state = self._state(mock_app_state, [AlertRule(name="bulk_delete", enabled=True)])
+        app = _make_app(state)
+        async with app.run_test() as pilot:
+            await pilot.press("a")
+            await pilot.pause()
+            await pilot.click("#rule-0")
+            await pilot.pause()
+            assert state.alert_engine.rules[0].enabled is False
+            assert state.settings.alert_rules[0].enabled is True
+            await pilot.click("#reset-rules")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert state.alert_engine.rules[0].enabled is True
+            assert app.query_one("#rule-0", Checkbox).value is True
+
+    async def test_test_rules_does_not_touch_live_history(self, mock_app_state):
+        state = self._state(mock_app_state, [AlertRule(name="any")])
+        app = _make_app(state)
+        async with app.run_test() as pilot:
+            await pilot.press("a")
+            await pilot.pause()
+            await pilot.click("#test-rules")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert len(state.alert_engine._event_history) == 0
+            assert state._client.get_all_logs.called
+
+    async def test_failed_test_rules_shows_error_in_results(self, mock_app_state):
+        state = self._state(mock_app_state, [AlertRule(name="any")])
+        state._client.get_all_logs.side_effect = RuntimeError("boom [x]")
+        app = _make_app(state)
+        async with app.run_test() as pilot:
+            await pilot.press("a")
+            await pilot.pause()
+            await pilot.click("#test-rules")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert "boom [x]" in _plain(app.query_one("#test-results", Static))
+
+    async def test_refresh_keeps_focus_on_same_rule(self, mock_app_state):
+        state = self._state(mock_app_state, [AlertRule(name="a"), AlertRule(name="b")])
+        app = _make_app(state)
+        async with app.run_test() as pilot:
+            await pilot.press("a")
+            await pilot.pause()
+            app.query_one("#rule-1", Checkbox).focus()
+            await pilot.pause()
+            await pilot.press("r")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert app.focused is not None and app.focused.id == "rule-1"
 
 
 # ---------------------------------------------------------------------------

@@ -95,11 +95,9 @@ class AlertEngine:
         Args:
             rules: Alert rules to use. Defaults to DEFAULT_ALERT_RULES.
         """
-        # Create a copy of rules to avoid sharing state between instances
-        if rules is not None:
-            self.rules = list(rules)
-        else:
-            self.rules = [AlertRule(**rule.model_dump()) for rule in DEFAULT_ALERT_RULES]
+        # Deep-copy so toggling a rule here never changes the caller's rule objects
+        source = DEFAULT_ALERT_RULES if rules is None else rules
+        self.rules = [rule.model_copy(deep=True) for rule in source]
         self._event_history: dict[tuple[str, str], list[tuple[datetime, AuditLogEntry]]] = (
             defaultdict(list)
         )

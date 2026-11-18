@@ -3,6 +3,7 @@
 from collections.abc import Iterator
 
 from textual.containers import Container, Horizontal, Vertical
+from textual.markup import escape
 from textual.widget import Widget
 from textual.widgets import Button, Checkbox, LoadingIndicator, Static
 from textual.worker import get_current_worker
@@ -15,18 +16,23 @@ from .base import ContentView
 class AlertsScreen(ContentView):
     """Screen for managing alert rules."""
 
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        # Widget ids are positional (rule-0, rule-1...) so any rule name is safe.
+        self._rule_names: dict[str, str] = {}
+
     def compose_content(self) -> Iterator[Widget]:
         """Yield widgets for embedding in main content area.
 
         Yields:
             Widgets for the alerts content.
         """
-        rule_cards = [self._create_rule_card(rule) for rule in self._state.alert_engine.rules]
+        rule_cards = self._build_rule_cards()
         rules_list = Vertical(*rule_cards, id="rules-list")
 
         buttons = Horizontal(
             Button("test rules", id="test-rules", variant="primary", compact=True),
-            Button("reset to defaults", id="reset-rules", compact=True),
+            Button("reset rules", id="reset-rules", compact=True),
             classes="toolbar",
         )
 
@@ -36,6 +42,9 @@ class AlertsScreen(ContentView):
                 resolve_tcss_markup(
                     "[$text-muted]toggle rules on/off or test against recent data[/$text-muted]"
                 )
+            ),
+            Static(
+                resolve_tcss_markup("[$text-muted]changes last until you quit[/$text-muted]")
             ),
             rules_list,
             buttons,
@@ -63,15 +72,27 @@ class AlertsScreen(ContentView):
     async def _refresh_rules_list(self) -> None:
         """Rebuild the alert rules list safely."""
         rules_list = self.query_one("#rules-list", Vertical)
+        focused = self.app.focused
+        focused_id = focused.id if focused is not None else None
         await rules_list.remove_children()
-        rule_cards = [self._create_rule_card(rule) for rule in self._state.alert_engine.rules]
+        rule_cards = self._build_rule_cards()
         if rule_cards:
             await rules_list.mount(*rule_cards)
+        if focused_id and focused_id in self._rule_names:
+            # Rebuilding drops focus; put it back on the same rule's checkbox.
+            self.query_one(f"#{focused_id}", Checkbox).focus()
 
-    def _create_rule_card(self, rule) -> Container:
+    def _build_rule_cards(self) -> list[Container]:
+        """Build one card per live rule and refresh the id-to-name map."""
+        rules = list(self._state.alert_engine.rules)
+        self._rule_names = {f"rule-{i}": rule.name for i, rule in enumerate(rules)}
+        return [self._create_rule_card(i, rule) for i, rule in enumerate(rules)]
+
+    def _create_rule_card(self, index: int, rule) -> Container:
         """Create a rule card widget.
 
         Args:
+            index: Position of the rule in the engine; used for widget ids.
             rule: AlertRule to display.
 
         Returns:
@@ -88,40 +109,44 @@ class AlertsScreen(ContentView):
         )
         if len(components) > 40:
             components = components[:39] + "…"
+        name = escape(rule.name)
         noun = "event" if rule.threshold_count == 1 else "events"
         window = f"{rule.threshold_count} {noun} / {rule.threshold_window_minutes} min"
-        details = f"{window} · {actions} · {components}"
+        details = escape(f"{window} · {actions} · {components}")
 
         return Vertical(
             Horizontal(
-                Checkbox(rule.name, value=rule.enabled, id=f"rule-{rule.name}", compact=True),
+                Checkbox(name, value=rule.enabled, id=f"rule-{index}", compact=True),
                 Static(
-                    resolve_tcss_markup(f"[$text-muted]{rule.description or ''}[/$text-muted]"),
+                    resolve_tcss_markup(
+                        f"[$text-muted]{escape(rule.description or '')}[/$text-muted]"
+                    ),
                     classes="rule-description",
                 ),
                 classes="rule-header",
             ),
             Static(resolve_tcss_markup(f"[$text-muted]{details}[/$text-muted]")),
             classes=f"rule-card {enabled_class}",
-            id=f"card-{rule.name}",
+            id=f"card-{index}",
         )
 
     def on_checkbox_changed(self, event: Checkbox.Changed) -> None:
         """Handle rule enable/disable toggle."""
         checkbox_id = event.checkbox.id
-        if checkbox_id and checkbox_id.startswith("rule-"):
-            rule_name = checkbox_id.replace("rule-", "")
-            if event.value:
-                self._state.alert_engine.enable_rule(rule_name)
-                self.app.notify(f"Enabled rule: {rule_name}", severity="information")
-            else:
-                self._state.alert_engine.disable_rule(rule_name)
-                self.app.notify(f"Disabled rule: {rule_name}", severity="information")
+        if checkbox_id not in self._rule_names:
+            return
+        index = int(checkbox_id.removeprefix("rule-"))
+        rules = self._state.alert_engine.rules
+        if index >= len(rules):
+            return
+        rules[index].enabled = event.value
+        verb = "Enabled" if event.value else "Disabled"
+        self.app.notify(f"{verb} rule: {self._rule_names[checkbox_id]}", severity="information")
 
-            # Update card styling
-            card = self.query_one(f"#card-{rule_name}")
-            card.remove_class("rule-enabled", "rule-disabled")
-            card.add_class("rule-enabled" if event.value else "rule-disabled")
+        # Update card styling
+        card = self.query_one(f"#card-{index}")
+        card.remove_class("rule-enabled", "rule-disabled")
+        card.add_class("rule-enabled" if event.value else "rule-disabled")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button presses."""
@@ -132,9 +157,9 @@ class AlertsScreen(ContentView):
             self._reset_rules()
 
     def _reset_rules(self) -> None:
-        """Reset rules to defaults."""
-        self._state._alert_engine = None  # Force recreation
-        self.app.notify("Rules reset to defaults", severity="information")
+        """Rebuild the rules from settings, undoing this session's toggles."""
+        self._state.reset_alert_rules()
+        self.app.notify("Rules reset", severity="information")
         self.refresh_data()
 
     async def _test_rules(self) -> None:
@@ -155,7 +180,7 @@ class AlertsScreen(ContentView):
                 )
                 return
 
-            fired = self._state.alert_engine.check_batch(entries)
+            fired = self._state.new_test_engine().check_batch(entries)
 
             if fired:
                 result_lines = [
@@ -163,7 +188,10 @@ class AlertsScreen(ContentView):
                 ]
                 for fa in fired[:10]:
                     result_lines.append(
-                        resolve_tcss_markup(f"  [$danger]⚠[/$danger] {fa.rule_name}: {fa.message}")
+                        resolve_tcss_markup(
+                            f"  [$danger]⚠[/$danger] "
+                            f"{escape(fa.rule_name)}: {escape(fa.message)}"
+                        )
                     )
                 self.app.call_from_thread(self._show_results, "\n".join(result_lines))
             else:
@@ -186,6 +214,8 @@ class AlertsScreen(ContentView):
         self.query_one("#test-results", Static).update(text)
 
     def _show_error(self, error: str) -> None:
-        """Show error message."""
+        """Show a failed test run in the results box, plus a toast."""
+        self._show_results(
+            resolve_tcss_markup(f"[$danger]test failed:[/$danger] {escape(error)}")
+        )
         self.app.notify(f"Error: {error}", severity="error")
-

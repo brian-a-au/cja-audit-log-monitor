@@ -554,3 +554,13 @@ class TestPerUserRules:
         fired = AlertEngine().check_batch(one)
         assert len(fired) == 1
         assert fired[0].entry.user_id == "AAA11111"
+
+
+class TestEngineCopiesRules:
+    """The engine must not share rule objects with its caller."""
+
+    def test_toggling_a_rule_leaves_the_callers_rule_alone(self):
+        original = AlertRule(name="mine", enabled=True)
+        engine = AlertEngine([original])
+        engine.disable_rule("mine")
+        assert original.enabled is True
