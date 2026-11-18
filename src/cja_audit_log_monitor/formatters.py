@@ -150,12 +150,13 @@ def format_logs_table(
         expand=True,
     )
 
-    # Core columns
-    table.add_column("Timestamp", style="dim", width=20)
-    table.add_column("User", width=25)
-    table.add_column("Action", width=12)
-    table.add_column("Component", width=20)
-    table.add_column("Name", width=30)
+    # Core columns. Time and action never shrink or wrap; the text columns
+    # give way (with an ellipsis) on narrow terminals.
+    table.add_column("Time (UTC)", style="dim", no_wrap=True, min_width=19)
+    table.add_column("User", ratio=2, min_width=10, no_wrap=True, overflow="ellipsis")
+    table.add_column("Action", no_wrap=True, min_width=13)
+    table.add_column("Component", min_width=12, max_width=17, no_wrap=True, overflow="ellipsis")
+    table.add_column("Name", ratio=3, min_width=8, no_wrap=True, overflow="ellipsis")
 
     if show_details:
         table.add_column("Description", width=40)
@@ -196,7 +197,7 @@ def format_single_entry(entry: AuditLogEntry) -> Panel:
     content.append(f"{icon} {entry.action}\n", style=action_color)
 
     content.append("Timestamp: ", style="bold")
-    content.append(f"{format_timestamp(entry.timestamp)}\n")
+    content.append(f"{format_timestamp(entry.timestamp)} UTC\n")
 
     content.append("User: ", style="bold")
     content.append(f"{get_user_identifier(entry, default='-')}\n")
@@ -322,7 +323,7 @@ def format_alert(
     content.append(f"{message}\n\n", style="bold red")
 
     content.append("Time: ", style="bold")
-    content.append(f"{format_timestamp(entry.timestamp)}\n")
+    content.append(f"{format_timestamp(entry.timestamp)} UTC\n")
 
     content.append("User: ", style="bold")
     content.append(f"{get_user_identifier(entry)}\n")

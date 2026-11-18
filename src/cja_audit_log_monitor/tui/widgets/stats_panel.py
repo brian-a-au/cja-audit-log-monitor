@@ -114,8 +114,10 @@ class HourlyChart(Static):
                 cells.append(f"[{color}]{glyph}[/{color}]{gap}" if eighths else " " * cell)
             lines.append("".join(cells).rstrip())
         axis = [" "] * (24 * cell + 1)
-        # At one cell per hour a two-digit label covers two hours, so skip the 23 label.
-        for hour in (0, 6, 12, 18) if cell == 1 else (0, 6, 12, 18, 23):
-            axis[hour * cell : hour * cell + 2] = f"{hour:02d}"
+        for hour in (0, 6, 12, 18, 23):
+            start = hour * cell
+            if cell == 1 and hour == 23:
+                start = 22  # one cell per hour: end the label under hour 23
+            axis[start : start + 2] = f"{hour:02d}"
         lines.append(f"[{_MUTED}]{''.join(axis).rstrip()}[/{_MUTED}]")
         return "\n".join(lines)

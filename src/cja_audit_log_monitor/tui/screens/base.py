@@ -88,14 +88,14 @@ def sample_note_text(shown: int, total: int) -> str | None:
 
 def sample_note() -> Static:
     """An initially hidden line under the stat cards for the sample note."""
-    note = Static("", id="sample-note", classes="sample-note")
+    note = Static("", classes="sample-note")
     note.display = False
     return note
 
 
 def show_sample_note(view: Widget, shown: int, total: int) -> None:
     """Show or hide ``view``'s sample note for ``shown`` of ``total`` entries."""
-    note = view.query_one("#sample-note", Static)
+    note = view.query_one(".sample-note", Static)
     text = sample_note_text(shown, total)
     note.display = text is not None
     note.update(text or "")

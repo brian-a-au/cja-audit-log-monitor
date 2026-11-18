@@ -227,8 +227,13 @@ class AuditLogsClient:
         Returns:
             List of AuditLogEntry objects.
         """
+        # Ask for the largest page the API allows (or just the limit, if smaller),
+        # without changing the caller's query.
+        paged = query.model_copy() if query else AuditLogQuery()
+        paged.page_size = min(MAX_PAGE_SIZE, max_entries) if max_entries else MAX_PAGE_SIZE
+
         entries = []
-        for entry in self.get_logs_paginated(query):
+        for entry in self.get_logs_paginated(paged):
             entries.append(entry)
             if max_entries and len(entries) >= max_entries:
                 break

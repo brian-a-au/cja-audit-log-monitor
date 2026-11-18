@@ -39,6 +39,10 @@ This is the first public release.
 - Paging skips entries repeated across pages when new events arrive mid-fetch.
 - Views name the kind of failure: not connected, access denied, request rejected, or could not load data. The header updates when any view loses or regains the connection.
 - In the TUI, off-hours anomalies use your local hours, and every off-hours anomaly names its time zone.
+- CLI commands that fetch every entry ask for pages of 1,000, the API's largest, so they make about ten times fewer requests.
+- CLI tables, entry details and alerts say their times are in UTC. At 80 columns the CLI table keeps the time, action and component type whole.
+- In the TUI, the top users list, the daily chart and the user ranking fit their column at any width. Long values in the entry detail panel wrap inside their own column.
+- The narrow hourly chart keeps its 23 label, and time zone names refresh on each load.
 
 ### Added in the TUI
 

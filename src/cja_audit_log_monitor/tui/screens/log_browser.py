@@ -53,7 +53,7 @@ class LogBrowserScreen(ContentView):
             table_message,
             table_and_panel,
             pagination,
-            LoadingIndicator(id="loading"),
+            LoadingIndicator(id="logs-loading"),
             id="log-browser-container",
         )
 

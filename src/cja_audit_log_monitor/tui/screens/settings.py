@@ -144,12 +144,12 @@ class SettingsScreen(ContentView):
 
         buttons = Horizontal(
             Button("verify connection", id="verify-button", variant="primary", compact=True),
-            Button("reload settings", id="refresh-button", compact=True),
+            Button("reload settings", id="reload-button", compact=True),
             classes="toolbar",
         )
 
         yield Container(
-            LoadingIndicator(id="loading"),
+            LoadingIndicator(id="settings-loading"),
             Static("configuration", id="settings-title", classes="section-label view-title"),
             Container(
                 connection_section,
@@ -177,7 +177,7 @@ class SettingsScreen(ContentView):
         """Handle button presses."""
         if event.button.id == "verify-button":
             self.refresh_data()
-        elif event.button.id == "refresh-button":
+        elif event.button.id == "reload-button":
             self._state.refresh_client()
             self.app.notify("Settings refreshed", severity="information")
 

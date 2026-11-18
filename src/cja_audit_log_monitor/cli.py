@@ -15,7 +15,7 @@ from rich.markup import escape
 from . import __version__
 from .alerts import AlertEngine, analyze_for_anomalies
 from .auth import AuthenticationError, TokenManager
-from .client import APIError, AuditLogsClient, RateLimitError
+from .client import MAX_PAGE_SIZE, APIError, AuditLogsClient, RateLimitError
 from .config import (
     CJASettings,
     create_default_config,
@@ -551,6 +551,7 @@ def export(
 
         with client:
             if format in {"csv", "tsv"}:
+                query.page_size = MAX_PAGE_SIZE  # fewer requests for a long export
                 entries_iter = client.get_logs_paginated(query)
                 if max_entries is not None:
                     entries_iter = islice(entries_iter, max_entries)

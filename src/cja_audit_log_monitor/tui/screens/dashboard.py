@@ -13,7 +13,7 @@ from ...formatters import resolve_tcss_markup
 from ...stats import build_date_range_query, calculate_stats, get_hourly_distribution
 from ...utils import local_tz_name
 from ..state import AppState
-from ..widgets import ActionBarChart, HourlyChart
+from ..widgets import ActionBarChart, FittedStatic, HourlyChart
 from .base import (
     ContentView,
     error_message,
@@ -40,6 +40,7 @@ class DashboardScreen(ContentView):
         """
         super().__init__(state, **kwargs)
         self._stats: dict = {}
+        self._top_users: list[tuple[str, int]] | None = None  # None until data loads
 
     def compose_header(self) -> Iterator[Widget]:
         """Title stays visible above the empty state."""
@@ -47,7 +48,7 @@ class DashboardScreen(ContentView):
 
     def compose_content(self) -> Iterator[Widget]:
         """Yield widgets for the dashboard."""
-        yield LoadingIndicator(id="loading")
+        yield LoadingIndicator(id="dashboard-loading")
         yield Horizontal(
             stat_card("total entries", "stat-total"),
             stat_card("active users", "stat-users"),
@@ -60,13 +61,17 @@ class DashboardScreen(ContentView):
             Vertical(
                 Static("ACTION DISTRIBUTION", classes="section-label"),
                 ActionBarChart(id="action-chart"),
-                Static(f"HOURLY ACTIVITY · {local_tz_name()}", classes="section-label"),
+                Static(
+                    f"HOURLY ACTIVITY · {local_tz_name()}",
+                    id="dashboard-hourly-label",
+                    classes="section-label",
+                ),
                 HourlyChart(id="hourly-chart"),
                 id="dash-left",
             ),
             Vertical(
                 Static("TOP USERS", classes="section-label"),
-                Static(id="top-users"),
+                FittedStatic(id="top-users", redraw=self._render_top_users),
                 Static("RECENT ANOMALIES", classes="section-label"),
                 Static(id="anomalies"),
                 id="dash-right",
@@ -170,18 +175,13 @@ class DashboardScreen(ContentView):
             stats.get("action_counts", {}), width=24
         )
         self.query_one("#hourly-chart", HourlyChart).update_data(hourly)
+        # Refresh the zone name, which can change (daylight saving) in a long session.
+        self.query_one("#dashboard-hourly-label", Static).update(
+            f"HOURLY ACTIVITY · {local_tz_name()}"
+        )
 
-        if top_users:
-            top_users_widget = self.query_one("#top-users", Static)
-            # Fit "name count" on one line: count takes 6 cells (space + 5 digits).
-            name_width = max(8, min(28, top_users_widget.content_region.width - 6))
-            lines = []
-            for user, count in top_users[:8]:
-                name = user if len(user) <= name_width else user[: name_width - 1] + "…"
-                lines.append(f"{name:<{name_width}} {count:>5,}")
-            self.query_one("#top-users", Static).update("\n".join(lines))
-        else:
-            self.query_one("#top-users", Static).update(no_activity_message(DASHBOARD_DAYS))
+        self._top_users = list(top_users)
+        self._render_top_users()
 
         if anomalies:
             lines = [
@@ -199,6 +199,22 @@ class DashboardScreen(ContentView):
         self.query_one("#last-update", Static).update(
             f"last updated {datetime.now().strftime('%H:%M:%S')}"
         )
+
+    def _render_top_users(self) -> None:
+        """Draw the top users list to fit the column's current width."""
+        if self._top_users is None:
+            return
+        widget = self.query_one("#top-users", Static)
+        if not self._top_users:
+            widget.update(no_activity_message(DASHBOARD_DAYS))
+            return
+        # Fit "name count" on one line: count takes 6 cells (space + 5 digits).
+        name_width = max(8, min(28, widget.content_region.width - 6))
+        lines = []
+        for user, count in self._top_users[:8]:
+            name = user if len(user) <= name_width else user[: name_width - 1] + "…"
+            lines.append(f"{name:<{name_width}} {count:>5,}")
+        widget.update("\n".join(lines))
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button presses."""
