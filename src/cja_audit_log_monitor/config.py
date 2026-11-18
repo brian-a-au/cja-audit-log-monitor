@@ -1,17 +1,36 @@
 """Configuration handling for CJA Audit CLI."""
 
 import os
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
 import yaml
 from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic.fields import FieldInfo
+from pydantic_settings import (
+    BaseSettings,
+    PydanticBaseSettingsSource,
+    SettingsConfigDict,
+)
 
 from .models import AlertRule, NotificationConfig
 
 DEFAULT_CONFIG_DIR = Path.home() / ".cja-audit-log-monitor"
 DEFAULT_CONFIG_FILE = DEFAULT_CONFIG_DIR / "config.yaml"
+
+# Parsed YAML for the load_config call in progress; read by ConfigFileSource.
+_config_file_data: ContextVar[dict[str, Any]] = ContextVar("_config_file_data", default={})
+
+
+class ConfigFileSource(PydanticBaseSettingsSource):
+    """Settings source that serves the YAML data staged by load_config."""
+
+    def get_field_value(self, field: FieldInfo, field_name: str) -> tuple[Any, str, bool]:
+        return _config_file_data.get().get(field_name), field_name, False
+
+    def __call__(self) -> dict[str, Any]:
+        return dict(_config_file_data.get())
 
 
 class CJASettings(BaseSettings):
@@ -56,6 +75,24 @@ class CJASettings(BaseSettings):
     # Notification settings
     notifications: NotificationConfig = Field(default_factory=NotificationConfig)
 
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        """Priority: init kwargs > env vars > .env > config file > defaults."""
+        return (
+            init_settings,
+            env_settings,
+            dotenv_settings,
+            ConfigFileSource(settings_cls),
+            file_secret_settings,
+        )
+
     @field_validator("org_id")
     @classmethod
     def validate_org_id(cls, v: str) -> str:
@@ -75,12 +112,13 @@ class CJASettings(BaseSettings):
 
 
 def load_config(config_path: Path | None = None) -> CJASettings:
-    """Load configuration from file and environment variables.
+    """Load configuration from the config file, .env and environment variables.
 
     Priority (highest to lowest):
     1. Environment variables
-    2. Config file
-    3. Default values
+    2. .env file
+    3. Config file
+    4. Default values
     """
     config_data: dict[str, Any] = {}
 
@@ -95,8 +133,11 @@ def load_config(config_path: Path | None = None) -> CJASettings:
             if yaml_config:
                 config_data.update(yaml_config)
 
-    # Environment variables will override config file values via pydantic-settings
-    return CJASettings(**config_data)
+    token = _config_file_data.set(config_data)
+    try:
+        return CJASettings()
+    finally:
+        _config_file_data.reset(token)
 
 
 def save_config(settings: CJASettings, config_path: Path | None = None) -> None:

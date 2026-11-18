@@ -104,6 +104,34 @@ class TestLoadConfig:
             assert settings.default_page_size == 100  # Default value
 
 
+class TestConfigPriority:
+    """Env vars and .env beat the config file; init kwargs beat everything."""
+
+    def test_env_beats_config_file(self, tmp_path, monkeypatch) -> None:
+        path = tmp_path / "c.yaml"
+        path.write_text("client_id: from_yaml\nmonitor_interval: 10\n")
+        monkeypatch.setenv("CLIENT_ID", "from_env")
+        settings = load_config(path)
+        assert settings.client_id == "from_env"
+        assert settings.monitor_interval == 10
+
+    def test_dotenv_beats_config_file(self, tmp_path) -> None:
+        (tmp_path / ".env").write_text("MONITOR_INTERVAL=77\n")
+        path = tmp_path / "c.yaml"
+        path.write_text("monitor_interval: 10\n")
+        assert load_config(path).monitor_interval == 77
+
+    def test_init_kwargs_beat_env(self, monkeypatch) -> None:
+        monkeypatch.setenv("CLIENT_ID", "from_env")
+        assert CJASettings(client_id="explicit").client_id == "explicit"
+
+    def test_config_file_does_not_leak_between_calls(self, tmp_path) -> None:
+        path = tmp_path / "c.yaml"
+        path.write_text("monitor_interval: 10\n")
+        assert load_config(path).monitor_interval == 10
+        assert CJASettings().monitor_interval == 60
+
+
 class TestSaveConfig:
     """Tests for save_config function."""
 
