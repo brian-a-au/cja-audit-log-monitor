@@ -9,6 +9,21 @@ from cja_audit_log_monitor.config import CJASettings
 from cja_audit_log_monitor.models import AuditLogEntry, AuditLogResponse
 from cja_audit_log_monitor.tui.state import AppState
 
+_ENV_NAMES = (
+    "ORG_ID CLIENT_ID SECRET SCOPES API_BASE_URL IMS_BASE_URL MONITOR_INTERVAL "
+    "DEFAULT_PAGE_SIZE DEFAULT_DAYS OUTPUT_FORMAT CJA_CONFIG_PATH"
+).split()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_env(monkeypatch, tmp_path):
+    """Keep shell env vars, a local .env and the real config file out of every test."""
+    for name in _ENV_NAMES:
+        monkeypatch.delenv(name, raising=False)
+        monkeypatch.delenv(name.lower(), raising=False)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("CJA_CONFIG_PATH", str(tmp_path / "config.yaml"))
+
 
 @pytest.fixture
 def sample_settings() -> CJASettings:
