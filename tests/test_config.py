@@ -118,6 +118,11 @@ class TestBadConfigFile:
         with pytest.raises(ConfigError, match=str(path)):
             load_config(path)
 
+    def test_use_file_false_ignores_the_file(self, tmp_path: Path) -> None:
+        path = tmp_path / "config.yaml"
+        path.write_text("monitor_interval: [1, \n")
+        assert load_config(path, use_file=False).monitor_interval == 60
+
     def test_unknown_key_warns(self, tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
         path = tmp_path / "config.yaml"
         path.write_text("monitor_intervall: 5\n")

@@ -120,7 +120,7 @@ class CJASettings(BaseSettings):
         return bool(self.client_id and self.secret.get_secret_value() and self.org_id)
 
 
-def load_config(config_path: Path | None = None) -> CJASettings:
+def load_config(config_path: Path | None = None, *, use_file: bool = True) -> CJASettings:
     """Load configuration from the config file, .env and environment variables.
 
     Priority (highest to lowest):
@@ -128,6 +128,8 @@ def load_config(config_path: Path | None = None) -> CJASettings:
     2. .env file
     3. Config file
     4. Default values
+
+    With ``use_file=False`` the config file is not read at all.
     """
     config_data: dict[str, Any] = {}
 
@@ -136,7 +138,7 @@ def load_config(config_path: Path | None = None) -> CJASettings:
         config_path = get_config_path()
 
     # Load from YAML config file if it exists
-    if config_path.exists():
+    if use_file and config_path.exists():
         with open(config_path) as f:
             try:
                 yaml_config = yaml.safe_load(f)
@@ -155,7 +157,8 @@ def load_config(config_path: Path | None = None) -> CJASettings:
     try:
         return CJASettings()
     except ValidationError as e:
-        raise ConfigError(f"{config_path}: {e}") from e
+        source = f"{config_path}: " if use_file else "environment: "
+        raise ConfigError(f"{source}{e}") from e
     finally:
         _config_file_data.reset(token)
 

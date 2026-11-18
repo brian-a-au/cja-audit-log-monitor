@@ -109,7 +109,11 @@ class AppState:
                 # Keep the app usable: fall back to env-only settings and
                 # let the header show what is wrong with the file.
                 self.config_error = str(e)
-                self._settings = load_config(Path("/nonexistent/config.yaml"))
+                try:
+                    self._settings = load_config(use_file=False)
+                except ConfigError:
+                    # Env/.env values are invalid too: start on plain defaults.
+                    self._settings = CJASettings.model_construct()
         return self._settings
 
     @property

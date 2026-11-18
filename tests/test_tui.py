@@ -2093,3 +2093,15 @@ def test_state_survives_bad_config_file(tmp_path) -> None:
     state = AppState(path)
     assert state.settings.monitor_interval == 60
     assert str(path) in (state.config_error or "")
+
+
+def test_state_survives_bad_config_file_and_bad_env(tmp_path, monkeypatch) -> None:
+    """Bad YAML plus an invalid env value still yields settings and the file error."""
+    from cja_audit_log_monitor.tui.state import AppState
+
+    path = tmp_path / "config.yaml"
+    path.write_text("monitor_interval: [1, \n")
+    monkeypatch.setenv("MONITOR_INTERVAL", "abc")
+    state = AppState(path)
+    assert state.settings.monitor_interval == 60
+    assert str(path) in (state.config_error or "")
