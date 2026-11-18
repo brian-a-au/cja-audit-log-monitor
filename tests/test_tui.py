@@ -1,5 +1,6 @@
 """Tests for the TUI module."""
 
+import io
 import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -345,7 +346,7 @@ def _plain(widget) -> str:
     """A Static's content as plain text, whether it holds markup or a Rich renderable."""
     from rich.console import Console
 
-    console = Console(width=200, record=True, color_system=None)
+    console = Console(file=io.StringIO(), width=200, record=True, color_system=None)
     console.print(widget.content)
     return console.export_text()
 
@@ -1439,23 +1440,27 @@ class TestExportScope:
         assert kwargs["max_entries"] == 10_000
 
     async def test_dialog_closes_itself_after_export_without_crashing(
-        self, mock_app_state, sample_audit_entries, tmp_path
+        self, mock_app_state, sample_audit_entries, tmp_path, monkeypatch
     ):
         from cja_audit_log_monitor.tui.modals import ExportDialog
 
         mock_app_state.entries = sample_audit_entries
         app = _make_app(mock_app_state)
+        monkeypatch.setattr(ExportDialog, "AUTO_CLOSE_SECONDS", 0.05)
         async with app.run_test(size=(120, 40)) as pilot:
             dialog = await self._open(app, pilot)
             dialog.query_one("#output-path").value = str(tmp_path / "x.json")
             await pilot.click("#export-button")
-            await pilot.pause(2.0)
+            await pilot.pause(0.15)
             assert not isinstance(app.screen, ExportDialog)
         assert app._exception is None
 
     async def test_closing_before_auto_close_does_not_crash(
-        self, mock_app_state, sample_audit_entries, tmp_path
+        self, mock_app_state, sample_audit_entries, tmp_path, monkeypatch
     ):
+        from cja_audit_log_monitor.tui.modals import ExportDialog
+
+        monkeypatch.setattr(ExportDialog, "AUTO_CLOSE_SECONDS", 0.05)
         mock_app_state.entries = sample_audit_entries
         app = _make_app(mock_app_state)
         async with app.run_test(size=(120, 40)) as pilot:
@@ -1464,7 +1469,7 @@ class TestExportScope:
             await pilot.click("#export-button")
             await pilot.pause()
             await pilot.press("escape")
-            await pilot.pause(2.0)
+            await pilot.pause(0.15)
         assert app._exception is None
 
     async def test_dialog_uses_lowercase_labels(self, mock_app_state):
@@ -2006,7 +2011,7 @@ def test_detail_values_wrap_inside_their_column():
         id="6afce25938051732907b1022",
         component_name="Report for dv_67c2101db641e334f220bc0a and a long tail of words",
     )
-    console = Console(width=44, record=True, color_system=None)
+    console = Console(file=io.StringIO(), width=44, record=True, color_system=None)
     console.print(build_detail_table(entry))
     lines = console.export_text().splitlines()
     start = next(i for i, ln in enumerate(lines) if ln.startswith("component name"))
