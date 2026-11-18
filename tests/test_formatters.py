@@ -1,5 +1,6 @@
 """Tests for formatters module."""
 
+import io
 from datetime import UTC, datetime
 
 from rich.table import Table
@@ -272,7 +273,7 @@ class TestCliTableAt80Columns:
             component_type="CALCULATED_METRIC",
             component_name="Report for dv_67c2101db641e334f220bc0a",
         )
-        console = Console(width=width, record=True, color_system=None)
+        console = Console(file=io.StringIO(), width=width, record=True, color_system=None)
         console.print(format_logs_table([entry]))
         return console.export_text()
 
@@ -295,7 +296,7 @@ def test_entry_detail_time_names_utc():
     from cja_audit_log_monitor.models import AuditLogEntry
 
     entry = AuditLogEntry(id="1", timestamp=datetime(2026, 11, 17, 23, 25, 13, tzinfo=UTC))
-    console = Console(width=100, record=True, color_system=None)
+    console = Console(file=io.StringIO(), width=100, record=True, color_system=None)
     console.print(format_single_entry(entry))
     assert "2026-11-17 23:25:13 UTC" in console.export_text()
 
@@ -309,6 +310,6 @@ def test_alert_time_names_utc():
     from cja_audit_log_monitor.models import AuditLogEntry
 
     entry = AuditLogEntry(id="1", timestamp=datetime(2026, 11, 17, 23, 25, 13, tzinfo=UTC))
-    console = Console(width=100, record=True, color_system=None)
+    console = Console(file=io.StringIO(), width=100, record=True, color_system=None)
     console.print(format_alert(entry, "rule", "fired"))
     assert "2026-11-17 23:25:13 UTC" in console.export_text()

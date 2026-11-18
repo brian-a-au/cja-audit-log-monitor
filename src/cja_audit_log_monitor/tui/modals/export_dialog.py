@@ -26,6 +26,8 @@ class ExportDialog(ModalScreen):
         ("escape", "dismiss", "cancel"),
     ]
 
+    AUTO_CLOSE_SECONDS: float = 1.5
+
     def __init__(self, state: AppState, **kwargs) -> None:
         """Initialize ExportDialog.
 
@@ -161,7 +163,7 @@ class ExportDialog(ModalScreen):
         """Report a finished export and close the dialog shortly after."""
         self._set_status(f"[$success]exported {count:,} entries to {output_path}[/$success]")
         self.app.notify(f"exported {count:,} entries to {output_path}")
-        self.set_timer(1.5, self._close_if_open)
+        self.set_timer(self.AUTO_CLOSE_SECONDS, self._close_if_open)
 
     def _close_if_open(self) -> None:
         """Close the dialog after a successful export, unless the user already did.

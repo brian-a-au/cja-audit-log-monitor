@@ -105,8 +105,11 @@ class TestAuditLogsClient:
         client: AuditLogsClient,
         sample_api_response: dict,
         httpx_mock: HTTPXMock,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Test that rate limiting triggers retry."""
+        sleeps: list[float] = []
+        monkeypatch.setattr("cja_audit_log_monitor.client.time.sleep", sleeps.append)
         # First request returns 429
         httpx_mock.add_response(
             url="https://cja.adobe.io/auditlogs/api/v1/auditlogs",
@@ -124,6 +127,7 @@ class TestAuditLogsClient:
 
         assert response is not None
         assert len(httpx_mock.get_requests()) == 3  # Token + 2 API calls
+        assert sleeps == [1]
 
     def test_api_error(
         self,
