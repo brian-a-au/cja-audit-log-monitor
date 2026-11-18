@@ -95,7 +95,7 @@ class CJAAuditApp(App):
     CSS_PATH = "styles.tcss"
     # Width classes on the screen (-narrow / -normal / -wide) drive layout in styles.tcss.
     HORIZONTAL_BREAKPOINTS = [(0, "-narrow"), (100, "-normal"), (160, "-wide")]
-    _NARROW_BELOW = 100
+    _NARROW_BELOW = HORIZONTAL_BREAKPOINTS[1][0]
 
     BINDINGS = [
         Binding("d", "switch_screen('dashboard')", "dashboard", show=False),
@@ -150,7 +150,7 @@ class CJAAuditApp(App):
                 Static("NAVIGATE", classes="nav-section-label"),
                 *(
                     Static(
-                        self._nav_text(nav_id, nav_id == "nav-dashboard"),
+                        self._nav_text(nav_id, nav_id == "nav-dashboard", self.size.width),
                         id=nav_id,
                         classes="nav-item active" if nav_id == "nav-dashboard" else "nav-item",
                     )
@@ -162,10 +162,10 @@ class CJAAuditApp(App):
         )
         yield Footer(show_command_palette=False)
 
-    def _nav_text(self, nav_id: str, active: bool) -> str:
+    def _nav_text(self, nav_id: str, active: bool, width: int) -> str:
         """Sidebar label: active marker, the view's key, then its name."""
         key = self.NAV_KEYS[nav_id]
-        if self.size.width < self._NARROW_BELOW:
+        if width < self._NARROW_BELOW:
             # Compact sidebar: just the key letter (the marker is the active style).
             return resolve_tcss_markup(f"[$primary]{key}[/$primary]")
         prefix = "▸ " if active else "  "
@@ -245,20 +245,19 @@ class CJAAuditApp(App):
         # Show dashboard by default
         await self._show_screen("dashboard")
 
-    async def _on_resize(self, event: events.Resize) -> None:
+    def on_resize(self, event: events.Resize) -> None:
         """Re-render the sidebar labels when the width crosses the narrow breakpoint.
 
-        Textual's own handler stops the event before a plain ``on_resize`` would run,
-        so this extends it. Nav items are looked up on the base screen, because
+        This runs before Textual's own handler updates ``self.size``, so it uses
+        ``event.size``. Nav items are looked up on the base screen, because
         ``App.query`` only sees the active screen (a modal may be open).
         """
-        await super()._on_resize(event)
         narrow = event.size.width < self._NARROW_BELOW
         if narrow == self._nav_narrow:
             return
         self._nav_narrow = narrow
         for item in self.screen_stack[0].query("#sidebar .nav-item"):
-            item.update(self._nav_text(item.id, item.has_class("active")))
+            item.update(self._nav_text(item.id, item.has_class("active"), event.size.width))
 
     async def _show_screen(self, screen_name: str) -> None:
         """Show a screen in the main content area.
@@ -273,7 +272,7 @@ class CJAAuditApp(App):
         for item in self.query("#sidebar .nav-item"):
             is_active = item.id == f"nav-{screen_name}"
             item.set_class(is_active, "active")
-            item.update(self._nav_text(item.id, is_active))
+            item.update(self._nav_text(item.id, is_active, self.size.width))
 
         view = self._screens.get(screen_name)
         if view is None:
