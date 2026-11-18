@@ -1,5 +1,6 @@
 """Shared utilities for CJA Audit CLI."""
 
+from collections import defaultdict
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -44,3 +45,43 @@ def to_local(dt: datetime) -> datetime:
 def local_tz_name() -> str:
     """Short name of the local time zone right now, e.g. ``PST``."""
     return datetime.now(UTC).astimezone().tzname() or "local"
+
+
+def get_user_key(entry: AuditLogEntry) -> str:
+    """A stable key for the account behind ``entry``, for grouping and counting.
+
+    Display names are not unique (two integrations can share one), so the
+    IMS user id comes first.
+    """
+    return entry.user_id or entry.user_email or entry.user_name or "unknown"
+
+
+def user_identities(entry: AuditLogEntry) -> set[str]:
+    """Every value that identifies the user of ``entry``: id, email and name."""
+    return {v for v in (entry.user_id, entry.user_email, entry.user_name) if v}
+
+
+def group_by_user(entries: list[AuditLogEntry]) -> dict[str, list[AuditLogEntry]]:
+    """Group entries by account, keyed by a display label that is unique per account.
+
+    The label is the usual user identifier. When two accounts share it, each
+    gets the start of its id appended, e.g. ``Integration (AAA11111)``.
+    """
+    labels: dict[str, str] = {}
+    groups: dict[str, list[AuditLogEntry]] = defaultdict(list)
+    for entry in entries:
+        key = get_user_key(entry)
+        labels.setdefault(key, get_user_identifier(entry))
+        groups[key].append(entry)
+
+    keys_per_label: dict[str, int] = defaultdict(int)
+    for label in labels.values():
+        keys_per_label[label] += 1
+
+    result: dict[str, list[AuditLogEntry]] = {}
+    for key, group in groups.items():
+        label = labels[key]
+        if keys_per_label[label] > 1:
+            label = f"{label} ({key[:8]})"
+        result[label] = group
+    return result

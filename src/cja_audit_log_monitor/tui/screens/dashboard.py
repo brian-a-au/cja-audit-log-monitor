@@ -153,7 +153,7 @@ class DashboardScreen(ContentView):
         self.query_one("#stat-range", Static).update(f"{start:%m-%d} → {now:%m-%d}")
 
         top_users = stats.get("top_users", [])
-        self.query_one("#stat-users", Static).update(str(len(top_users)))
+        self.query_one("#stat-users", Static).update(f"{stats.get('user_count', 0):,}")
 
         alert_count = len(anomalies)
         self.query_one("#stat-alerts", Static).update(

@@ -18,6 +18,9 @@ from .base import ContentView, not_connected_message
 class LogBrowserScreen(ContentView):
     """Screen for browsing and filtering audit logs."""
 
+    # Page count from the last load; bounds the n key like the next button.
+    _total_pages: int = 1
+
     BINDINGS = [
         ("enter", "view_details", "details"),
         ("escape", "dismiss_details", "close details"),
@@ -106,6 +109,7 @@ class LogBrowserScreen(ContentView):
         page = self._state.filters.page
         page_size = self._state.filters.page_size
         total_pages = max(1, (total + page_size - 1) // page_size)
+        self._total_pages = total_pages
 
         self.query_one("#page-info", Label).update(f"page {page + 1} of {total_pages}")
         self.query_one("#entry-count", Static).update(f"· {total:,} entries")
@@ -172,7 +176,9 @@ class LogBrowserScreen(ContentView):
             self.action_next_page()
 
     def action_next_page(self) -> None:
-        """Go to next page."""
+        """Go to the next page, if there is one."""
+        if self._state.filters.page + 1 >= self._total_pages:
+            return
         self._state.filters.page += 1
         self.refresh_data()
 

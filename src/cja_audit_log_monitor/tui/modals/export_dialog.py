@@ -99,52 +99,66 @@ class ExportDialog(ModalScreen):
         return (pressed.id if pressed else "format-json").removeprefix("format-")
 
     def _do_export(self) -> None:
-        """Export the chosen entries."""
+        """Export the chosen entries in a worker, so the UI stays responsive."""
         output_path = Path(self.query_one("#output-path", Input).value).expanduser()
         export_format = self._selected_format()
+        fetch_all = self.query_one("#scope-all", RadioButton).value
 
-        if self.query_one("#scope-all", RadioButton).value:
-            self.query_one("#export-button", Button).disabled = True
-            self._set_status("[$text-muted]fetching matching entries…[/$text-muted]")
-            self.run_worker(
-                lambda: self._fetch_and_write(output_path, export_format),
-                thread=True,
-                exclusive=True,
-            )
-            return
-
-        if not self._state.entries:
+        if not fetch_all and not self._state.entries:
             self._set_status("[$warning]no entries to export[/$warning]")
             return
-        self._write(self._state.entries, output_path, export_format)
 
-    def _fetch_and_write(self, output_path: Path, export_format: str) -> None:
-        """Worker: fetch every matching entry, then write the file on the UI thread."""
+        self.query_one("#export-button", Button).disabled = True
+        self._set_status(
+            "[$text-muted]fetching matching entries…[/$text-muted]"
+            if fetch_all
+            else "[$text-muted]writing…[/$text-muted]"
+        )
+        page_entries = list(self._state.entries)
+        self.run_worker(
+            lambda: self._export_in_worker(fetch_all, page_entries, output_path, export_format),
+            thread=True,
+            exclusive=True,
+        )
+
+    def _export_in_worker(
+        self,
+        fetch_all: bool,
+        page_entries: list[AuditLogEntry],
+        output_path: Path,
+        export_format: str,
+    ) -> None:
+        """Worker: fetch (for "all matching"), write the file, then report on the UI thread."""
         worker = get_current_worker()
+        if fetch_all:
+            try:
+                entries, _ = self._state.client.get_logs_sample(
+                    self._state.filters.to_query(), max_entries=EXPORT_MAX
+                )
+            except Exception as e:
+                self.app.call_from_thread(self._fail, f"could not fetch entries: {e}")
+                return
+        else:
+            entries = page_entries
+        if worker.is_cancelled:
+            return
+        if not entries:
+            self.app.call_from_thread(self._fail, "no entries to export")
+            return
         try:
-            entries, _ = self._state.client.get_logs_sample(
-                self._state.filters.to_query(), max_entries=EXPORT_MAX
-            )
+            count = export_entries(entries, output_path, output_format=export_format, pretty=True)
         except Exception as e:
-            self.app.call_from_thread(self._fail, f"could not fetch entries: {e}")
+            self.app.call_from_thread(self._fail, f"export failed: {e}")
             return
         if not worker.is_cancelled:
-            self.app.call_from_thread(self._write, entries, output_path, export_format)
+            self.app.call_from_thread(self._done, count, output_path)
 
     def _fail(self, message: str) -> None:
         self.query_one("#export-button", Button).disabled = False
         self._set_status(f"[$danger]{message}[/$danger]")
 
-    def _write(self, entries: list[AuditLogEntry], output_path: Path, export_format: str) -> None:
-        """Write ``entries`` to ``output_path`` and report the result."""
-        if not entries:
-            self._fail("no entries to export")
-            return
-        try:
-            count = export_entries(entries, output_path, output_format=export_format, pretty=True)
-        except Exception as e:
-            self._fail(f"export failed: {e}")
-            return
+    def _done(self, count: int, output_path: Path) -> None:
+        """Report a finished export and close the dialog shortly after."""
         self._set_status(f"[$success]exported {count:,} entries to {output_path}[/$success]")
         self.app.notify(f"exported {count:,} entries to {output_path}")
         self.set_timer(1.5, self._close_if_open)

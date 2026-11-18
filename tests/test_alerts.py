@@ -346,3 +346,44 @@ class TestOffHoursZone:
         ]
         off = [a for a in analyze_for_anomalies(entries) if a["type"] == "off_hours_activity"]
         assert off[0]["description"].startswith("Unusual activity at 03:00 UTC")
+
+
+class TestAccountMatching:
+    def _rule(self, users):
+        return AlertRule(
+            name="r", description="d", actions=[ActionType.DELETE], users=users,
+            threshold_count=1, threshold_window_minutes=60,
+        )
+
+    @pytest.mark.parametrize(
+        "listed", ["ABC@techacct.adobe.com", "My Integration"]
+    )
+    def test_rule_matches_ims_id_or_name(self, listed):
+        engine = AlertEngine(rules=[])
+        entry = AuditLogEntry(
+            id="1", action="DELETE", user_id="ABC@techacct.adobe.com", user_name="My Integration"
+        )
+        assert engine._matches_rule(entry, self._rule([listed]))
+
+    def test_rule_matches_email(self):
+        engine = AlertEngine(rules=[])
+        entry = AuditLogEntry(
+            id="1", action="DELETE", user_id="X@abc.e", user_email="pat@example.com"
+        )
+        assert engine._matches_rule(entry, self._rule(["pat@example.com"]))
+        assert engine._matches_rule(entry, self._rule(["X@abc.e"]))
+
+    def test_anomalies_do_not_merge_accounts_with_same_name(self):
+        entries = [
+            AuditLogEntry(id=f"a{i}", user_id="A@techacct.adobe.com", user_name="Integration")
+            for i in range(5)
+        ] + [
+            AuditLogEntry(id=f"b{i}", user_id="B@techacct.adobe.com", user_name="Integration")
+            for i in range(5)
+        ] + [
+            AuditLogEntry(id=f"c{i}", user_id=f"C{i}@x.e", user_email=f"c{i}@example.com")
+            for i in range(4)
+        ]
+        high = [a for a in analyze_for_anomalies(entries) if a["type"] == "high_activity_user"]
+        # 14 actions over 6 accounts: average 2.3, so no account has 3x the average.
+        assert high == []

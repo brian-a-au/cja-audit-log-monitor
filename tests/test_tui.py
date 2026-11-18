@@ -612,10 +612,10 @@ class TestViewFocusAndScroll:
             assert app._screens["logs"].query_one("#filter-user").value == ""
 
     async def test_n_pages_logs_right_after_l(self, mock_app_state):
+        mock_app_state.client.get_logs.return_value.total_elements = 120  # 3 pages
         app = _make_app(mock_app_state)
         async with app.run_test(size=(140, 40)) as pilot:
-            await pilot.press("l")
-            await pilot.pause()
+            await _show_and_load(app, pilot, "l")
             await pilot.press("n")
             await pilot.pause()
             assert mock_app_state.filters.page == 1
@@ -1657,3 +1657,56 @@ async def test_dashboard_anomalies_use_local_hours(mock_app_state, monkeypatch):
     async with app.run_test(size=(140, 40)) as pilot:
         await _show_and_load(app, pilot, "d")
     assert calls and all(calls)
+
+
+class TestReviewFixes:
+    async def test_n_on_last_page_stays(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await _show_and_load(app, pilot, "l")
+            assert mock_app_state.filters.page == 0
+            await pilot.press("n")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert mock_app_state.filters.page == 0
+
+    async def test_dashboard_active_users_counts_every_account(
+        self, mock_app_state, sample_audit_entry
+    ):
+        entries = [
+            sample_audit_entry.model_copy(
+                update={"id": f"e{i}", "user_id": f"U{i}@x.e", "user_email": f"u{i}@example.com"}
+            )
+            for i in range(25)
+        ]
+        mock_app_state.client.get_logs_sample.return_value = (entries, 25)
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, "d")
+            assert str(view.query_one("#stat-users", Static).render()) == "25"
+
+    async def test_export_writes_off_the_ui_thread(
+        self, mock_app_state, sample_audit_entries, tmp_path, monkeypatch
+    ):
+        import threading
+
+        from cja_audit_log_monitor.tui.modals import export_dialog
+
+        threads = []
+        real = export_dialog.export_entries
+
+        def recording(*args, **kwargs):
+            threads.append(threading.current_thread() is threading.main_thread())
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(export_dialog, "export_entries", recording)
+        mock_app_state.entries = sample_audit_entries
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.press("e")
+            await pilot.pause()
+            app.screen.query_one("#output-path").value = str(tmp_path / "x.json")
+            await pilot.click("#export-button")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+        assert threads == [False]

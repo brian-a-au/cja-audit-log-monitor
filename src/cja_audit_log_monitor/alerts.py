@@ -10,7 +10,7 @@ from rich.panel import Panel
 
 from .formatters import format_alert
 from .models import ActionType, AlertRule, AuditLogEntry, ComponentType
-from .utils import get_user_identifier, local_tz_name, to_local
+from .utils import get_user_identifier, group_by_user, local_tz_name, to_local, user_identities
 
 logger = logging.getLogger(__name__)
 
@@ -184,8 +184,8 @@ class AlertEngine:
 
         # Check user match
         if rule.users:
-            user = get_user_identifier(entry)
-            if user not in rule.users:
+            # A rule may name a user by IMS id, email or display name.
+            if not user_identities(entry) & set(rule.users):
                 return False
 
         return True
@@ -305,10 +305,7 @@ def analyze_for_anomalies(
         return anomalies
 
     # Group by user
-    user_actions: dict[str, list[AuditLogEntry]] = defaultdict(list)
-    for entry in entries:
-        user = get_user_identifier(entry)
-        user_actions[user].append(entry)
+    user_actions = group_by_user(entries)
 
     # Check for users with unusually high activity
     total_actions = len(entries)
@@ -327,7 +324,7 @@ def analyze_for_anomalies(
     # Check for concentrated delete activity
     delete_entries = [e for e in entries if e.action == ActionType.DELETE.value]
     if len(delete_entries) > 10:
-        delete_users = set(get_user_identifier(e) for e in delete_entries)
+        delete_users = set(group_by_user(delete_entries))
         if len(delete_users) == 1:
             anomalies.append({
                 "type": "bulk_delete_single_user",

@@ -4,7 +4,7 @@ from collections import Counter
 from datetime import UTC, datetime, timedelta
 
 from .models import AuditLogEntry, AuditLogQuery
-from .utils import get_user_identifier, to_local
+from .utils import group_by_user, to_local
 
 
 def calculate_stats(entries: list[AuditLogEntry]) -> dict:
@@ -25,11 +25,10 @@ def calculate_stats(entries: list[AuditLogEntry]) -> dict:
             "date_range": None,
         }
 
-    # Count by user
-    user_counter: Counter[str] = Counter()
-    for entry in entries:
-        user = get_user_identifier(entry)
-        user_counter[user] += 1
+    # Count by account (labels stay unique when two accounts share a name)
+    user_counter: Counter[str] = Counter(
+        {label: len(group) for label, group in group_by_user(entries).items()}
+    )
 
     # Count by action
     action_counter: Counter[str] = Counter()
@@ -57,6 +56,7 @@ def calculate_stats(entries: list[AuditLogEntry]) -> dict:
     return {
         "total_entries": len(entries),
         "top_users": user_counter.most_common(10),
+        "user_count": len(user_counter),
         "action_counts": dict(action_counter),
         "component_counts": dict(component_counter),
         "date_range": date_range,
@@ -113,11 +113,9 @@ def get_user_activity(entries: list[AuditLogEntry]) -> list[tuple[str, int]]:
     Returns:
         List of (user, count) tuples sorted by count descending.
     """
-    user_counter: Counter[str] = Counter()
-    for entry in entries:
-        user = get_user_identifier(entry)
-        user_counter[user] += 1
-
+    user_counter: Counter[str] = Counter(
+        {label: len(group) for label, group in group_by_user(entries).items()}
+    )
     return user_counter.most_common()
 
 
