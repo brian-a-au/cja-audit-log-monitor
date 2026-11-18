@@ -53,7 +53,7 @@ _url_redactor = _RedactWebhookUrls()
 logging.getLogger("httpx").addFilter(_url_redactor)
 
 
-def _describe_error(error: httpx.HTTPError) -> str:
+def _describe_error(error: Exception) -> str:
     """Describe a request error without its message, which may contain the URL."""
     response = getattr(error, "response", None)
     status = getattr(response, "status_code", None)
@@ -171,7 +171,7 @@ class NotificationManager:
                 "type": "header",
                 "text": {
                     "type": "plain_text",
-                    "text": f"CJA Audit Alert: {slack_escape(rule_name)}",
+                    "text": f"CJA Audit Alert: {rule_name}",
                 },
             },
             {
@@ -256,6 +256,7 @@ class NotificationManager:
             if webhook.headers:
                 headers.update(webhook.headers)
 
+            _url_redactor.add(webhook.url)
             response = self.client.request(
                 method=webhook.method,
                 url=webhook.url,
@@ -268,7 +269,7 @@ class NotificationManager:
             self._mark_success(webhook.url)
             return True
 
-        except httpx.HTTPError as e:
+        except (httpx.HTTPError, httpx.InvalidURL) as e:
             # str(e) can embed the full URL, so log only the type, status and host.
             label = redact_url(webhook.url)
             logger.error("Failed to send webhook to %s: %s", label, _describe_error(e))
@@ -301,6 +302,7 @@ class NotificationManager:
         url = self.config.slack_webhook_url
         if not url:
             return False
+        _url_redactor.add(url)
         try:
             response = self.client.post(
                 url,
@@ -312,7 +314,7 @@ class NotificationManager:
             self._mark_success("slack")
             return True
 
-        except httpx.HTTPError as e:
+        except (httpx.HTTPError, httpx.InvalidURL) as e:
             logger.error("Failed to send Slack notification: %s", _describe_error(e))
             self._mark_failure("slack", f"slack, {redact_url(url)}")
             return False

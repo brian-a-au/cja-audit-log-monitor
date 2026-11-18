@@ -5,6 +5,7 @@ import logging
 from datetime import UTC, datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 
 from cja_audit_log_monitor.models import AuditLogEntry, NotificationConfig, WebhookConfig
@@ -447,8 +448,6 @@ class TestNoSecretLeaks:
         assert "hook.example.com" in warning
 
     def test_webhook_connection_error_hides_secret(self, httpx_mock, caplog):
-        import httpx
-
         url = "https://hook.example.com/h?token=SECRET"
         webhook = WebhookConfig(url=url)
         manager = NotificationManager(NotificationConfig(webhooks=[webhook]))
@@ -477,9 +476,12 @@ class TestSlackEscaping:
 
         manager.send_slack("rule <!here>", "msg <@U1>", entry)
         body = json.loads(httpx_mock.get_requests()[0].content)
-        text = json.dumps(body)
-        assert "&lt;!channel&gt; &lt;https://evil|x&gt;" in text
-        assert "<!channel>" not in text and "<!here>" not in text and "<@U1>" not in text
+        header = body["blocks"][0]["text"]
+        assert header == {"type": "plain_text", "text": "CJA Audit Alert: rule <!here>"}
+        mrkdwn = json.dumps([b for b in body["blocks"][1:]])
+        assert "&lt;!channel&gt; &lt;https://evil|x&gt;" in mrkdwn
+        assert "<!channel>" not in mrkdwn and "<@U1>" not in mrkdwn
+        assert "msg &lt;@U1&gt;" in mrkdwn
 
     def test_anomaly_description_escaped(self, httpx_mock):
         url = "https://hooks.slack.com/x"
@@ -504,3 +506,63 @@ class TestSlackEscaping:
         )
         payload = NotificationManager()._build_slack_payload("r", "m", entry)
         assert "2026-01-01 07:00:00 UTC" in json.dumps(payload)
+
+
+class TestLogFilterAndBadUrls:
+    """The httpx log filter covers late URLs and leaves other records alone."""
+
+    def test_url_added_after_client_creation_is_redacted(self, httpx_mock, caplog):
+        manager = NotificationManager(NotificationConfig())
+        _ = manager.client  # client exists before the webhook does
+        url = "https://late.example.com/h?token=SECRET"
+        webhook = WebhookConfig(url=url)
+        httpx_mock.add_response(url=url, status_code=200)
+
+        with caplog.at_level(logging.DEBUG):
+            assert manager.send_webhook(webhook, {"x": 1}) is True
+        assert "SECRET" not in caplog.text
+
+    def test_late_slack_url_is_redacted(self, httpx_mock, caplog):
+        manager = NotificationManager(NotificationConfig())
+        _ = manager.client
+        url = "https://hooks.slack.com/services/T0/B0/SECRET"
+        manager.config = NotificationConfig(slack_webhook_url=url)
+        httpx_mock.add_response(url=url, status_code=200)
+
+        with caplog.at_level(logging.DEBUG):
+            assert manager.send_slack("r", "m") is True
+        assert "SECRET" not in caplog.text
+
+    def test_other_urls_pass_through_unchanged(self):
+        from cja_audit_log_monitor.notifications import _url_redactor
+
+        api = "https://cja.adobe.io/auditlogs/api/v1/auditlogs"
+        record = logging.LogRecord(
+            "httpx", logging.INFO, "f", 1, "HTTP Request: %s %s", ("GET", api), None
+        )
+        assert _url_redactor.filter(record) is True
+        assert record.args == ("GET", api)
+
+    def test_invalid_webhook_url_is_a_failure_without_leak(self, caplog):
+        webhook = WebhookConfig(url="https://hook.example.com/h")
+        manager = NotificationManager(NotificationConfig(webhooks=[webhook]))
+        manager._client = MagicMock()
+        manager._client.request.side_effect = httpx.InvalidURL("SECRET")
+
+        with caplog.at_level(logging.DEBUG):
+            assert manager.send_webhook(webhook, {"x": 1}) is False
+        assert "SECRET" not in caplog.text
+        warning = manager.pop_first_failure()
+        assert warning is not None and "SECRET" not in warning
+
+    def test_invalid_slack_url_is_a_failure_without_leak(self, caplog):
+        manager = NotificationManager(
+            NotificationConfig(slack_webhook_url="https://hooks.slack.com/services/SECRET")
+        )
+        manager._client = MagicMock()
+        manager._client.post.side_effect = httpx.InvalidURL("SECRET")
+
+        with caplog.at_level(logging.DEBUG):
+            assert manager.send_slack("r", "m") is False
+        assert "SECRET" not in caplog.text
+        assert "SECRET" not in (manager.pop_first_failure() or "")
