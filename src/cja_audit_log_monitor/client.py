@@ -62,9 +62,9 @@ class APIError(Exception):
 class RateLimitError(APIError):
     """Raised when rate limited by API."""
 
-    def __init__(self, retry_after: int | None = None) -> None:
+    def __init__(self, retry_after: float | None = None) -> None:
         super().__init__("Rate limited by API", status_code=429)
-        self.retry_after = retry_after or 30
+        self.retry_after = 30 if retry_after is None else retry_after
 
 
 class AuditLogsClient:
@@ -138,7 +138,7 @@ class AuditLogsClient:
                         )
                         time.sleep(retry_after)
                         continue
-                    raise RateLimitError(retry_after=int(retry_after))
+                    raise RateLimitError(retry_after=retry_after)
 
                 if response.status_code in RETRYABLE_STATUS and attempt < retry_count - 1:
                     delay = _retry_delay(None, attempt)
@@ -211,6 +211,11 @@ class AuditLogsClient:
 
         logger.debug("Fetching audit logs with params: %s", params)
         data = self._request("GET", self.AUDIT_LOGS_PATH, params=params)
+        if not isinstance(data, dict):
+            raise APIError(
+                f"API returned an unexpected response (expected a JSON object, "
+                f"got {type(data).__name__})"
+            )
 
         return AuditLogResponse.model_validate(data)
 

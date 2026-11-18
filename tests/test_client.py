@@ -10,7 +10,7 @@ import pytest
 from pytest_httpx import HTTPXMock
 
 from cja_audit_log_monitor.auth import TokenManager
-from cja_audit_log_monitor.client import APIError, AuditLogsClient, _retry_delay
+from cja_audit_log_monitor.client import APIError, AuditLogsClient, RateLimitError, _retry_delay
 from cja_audit_log_monitor.config import CJASettings
 from cja_audit_log_monitor.models import AuditLogQuery
 
@@ -468,6 +468,38 @@ class TestResilience:
         with client, pytest.raises(APIError) as info:
             client.get_logs()
         assert str(info.value).startswith("API returned a non-JSON response")
+
+    def test_non_dict_json_raises_api_error(self, client, httpx_mock, monkeypatch) -> None:
+        monkeypatch.setattr("cja_audit_log_monitor.client.time.sleep", lambda s: None)
+        httpx_mock.add_response(url=self.URL, json=[])
+        with client, pytest.raises(APIError) as info:
+            client.get_logs()
+        assert str(info.value).startswith("API returned an unexpected response")
+
+    def test_null_json_raises_api_error(self, client, httpx_mock, monkeypatch) -> None:
+        monkeypatch.setattr("cja_audit_log_monitor.client.time.sleep", lambda s: None)
+        httpx_mock.add_response(url=self.URL, text="null")
+        with client, pytest.raises(APIError) as info:
+            client.get_logs()
+        assert str(info.value).startswith("API returned an unexpected response")
+
+    def test_final_429_reports_clamped_retry_after(self, client, httpx_mock, monkeypatch) -> None:
+        sleeps: list[float] = []
+        monkeypatch.setattr("cja_audit_log_monitor.client.time.sleep", sleeps.append)
+        httpx_mock.add_response(url=self.URL, status_code=429, headers={"Retry-After": "3600"})
+        with client, pytest.raises(RateLimitError) as info:
+            client.get_logs()
+        assert sleeps == [60.0, 60.0]
+        assert info.value.retry_after == 60
+
+    def test_final_429_with_zero_retry_after_stays_zero(
+        self, client, httpx_mock, monkeypatch
+    ) -> None:
+        monkeypatch.setattr("cja_audit_log_monitor.client.time.sleep", lambda s: None)
+        httpx_mock.add_response(url=self.URL, status_code=429, headers={"Retry-After": "0"})
+        with client, pytest.raises(RateLimitError) as info:
+            client.get_logs()
+        assert info.value.retry_after == 0
 
 
 class TestThreadSafety:
