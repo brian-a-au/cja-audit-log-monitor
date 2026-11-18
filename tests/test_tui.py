@@ -540,6 +540,79 @@ class TestTableFit:
             await pilot.pause()
             assert table.columns["name"].width > 30
 
+    @pytest.mark.parametrize("size", [(80, 24), (100, 30)])
+    async def test_log_browser_fits_small_terminals(
+        self, mock_app_state, sample_audit_entries, size
+    ):
+        from cja_audit_log_monitor.tui.widgets import LogTable
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=size) as pilot:
+            await pilot.press("l")
+            await pilot.pause()
+            view = app._screens["logs"]
+            view._update_table(sample_audit_entries, 150)
+            await pilot.pause()
+            await pilot.pause()
+            assert app.query_one("#filter-search").region.width >= 12
+            assert app.query_one("#filter-user").region.width >= 12
+            bar = app.query_one("#filter-bar")
+            assert app.query_one("#filter-reset").region.right <= bar.region.right
+            table = app.query_one("#log-table", LogTable)
+            assert table.virtual_size.width <= table.scrollable_content_region.width
+            count = app.query_one("#entry-count", Static)
+            assert "150 entries" in _plain(count)
+            assert count.region.right <= app.query_one("#pagination").region.right
+
+    async def test_detail_panel_covers_table_at_80_cols(
+        self, mock_app_state, sample_audit_entries
+    ):
+        from cja_audit_log_monitor.tui.modals import EntryDetailPanel
+        from cja_audit_log_monitor.tui.widgets import LogTable
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.press("l")
+            await pilot.pause()
+            app._screens["logs"]._update_table(sample_audit_entries, 10)
+            await pilot.pause()
+            app.query_one("#log-table", LogTable).focus()
+            await pilot.press("enter")
+            await pilot.pause()
+            panel = app.query_one("#entry-detail-panel", EntryDetailPanel)
+            assert panel.is_visible()
+            assert panel.region.width >= 60
+
+    def test_fit_columns_hides_component_name_then_type(self):
+        from cja_audit_log_monitor.tui.widgets import LogTable
+
+        table = LogTable()
+        assert table._visible_columns(100) == ["timestamp", "user", "action", "component", "name"]
+        narrow = table._visible_columns(70)
+        assert "name" not in narrow and "component" in narrow
+        assert table._visible_columns(45) == ["timestamp", "user", "action"]
+
+    def test_truncate_uses_width_and_is_plain(self):
+        from cja_audit_log_monitor.tui.widgets import LogTable
+
+        assert LogTable._truncate("abcdefghij", 5) == "abcd…"
+        assert LogTable._truncate("abc", 5) == "abc"
+        assert LogTable._truncate("[bold]x[/bold]yyyy", 6) == "[bold…"
+
+    async def test_monitor_stream_fits_80_cols(self, mock_app_state, sample_audit_entries):
+        from cja_audit_log_monitor.tui.widgets import LogTable
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.press("m")
+            await pilot.pause()
+            table = app.query_one("#monitor-log", LogTable)
+            table.append_entries(sample_audit_entries, 100)
+            await pilot.pause()
+            await pilot.pause()
+            assert table.row_count == len(sample_audit_entries)
+            assert table.virtual_size.width <= table.scrollable_content_region.width
+
     def test_long_user_truncated_with_ellipsis(self, sample_audit_entry):
         from cja_audit_log_monitor.tui.widgets import LogTable
 

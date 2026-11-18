@@ -203,6 +203,7 @@ FilterBar {
     height: 2;
     dock: top;
     padding: 0 1;
+    layout: horizontal;
     background: $background;
     border-bottom: solid rgba(255, 255, 255, 0.06);
 }
@@ -210,6 +211,9 @@ FilterBar {
 FilterBar Horizontal {
     height: 1;
 }
+
+FilterBar #filter-text-row { width: 1fr; }
+FilterBar #filter-select-row { width: auto; }
 
 FilterBar Input {
     width: 1fr;
@@ -227,6 +231,20 @@ FilterBar Select {
 FilterBar Button {
     margin: 0;
 }
+
+/* Narrow terminals: two rows, search and user above the selects and reset. */
+Screen.-narrow FilterBar {
+    height: 3;
+    layout: vertical;
+}
+
+Screen.-narrow FilterBar Horizontal {
+    width: 100%;
+}
+
+Screen.-narrow FilterBar #filter-user { max-width: 100%; }
+Screen.-narrow FilterBar #filter-action { width: 1fr; }
+Screen.-narrow FilterBar #filter-component { width: 1fr; }
 
 
 /* ---- Stats panel ---- */
@@ -306,6 +324,11 @@ AlertSummary {
 
 #entry-detail-panel.hidden {
     display: none;
+}
+
+/* Narrow terminals: the panel covers the table instead of squeezing it to nothing. */
+Screen.-narrow #entry-detail-panel {
+    width: 100%;
 }
 
 #entry-detail-panel .modal-title {

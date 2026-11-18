@@ -23,7 +23,12 @@ class LogTable(DataTable):
 
     COLUMN_WIDTHS = {"timestamp": 19, "user": 28, "action": 13, "component": 18}
     DETAIL_WIDTHS = {"description": 35, "ip": 15}
-    MIN_WIDTHS = {"user": 16, "component": 12, "name": 12}
+    # Narrowest each column may get before it is shrunk or hidden. ``name`` is hidden first,
+    # then ``component`` (the type); the other columns always stay.
+    MIN_WIDTHS = {"timestamp": 19, "user": 16, "action": 13, "component": 12, "name": 12}
+    HIDE_ORDER = ("name", "component")
+    # Columns whose text is cut to the column width, so the cut ends with an ellipsis.
+    TRUNCATED = ("user", "component", "name")
     NAME_FLOOR = 6
 
     def __init__(self, show_details: bool = False, **kwargs) -> None:
@@ -36,59 +41,104 @@ class LogTable(DataTable):
         super().__init__(**kwargs)
         self._show_details = show_details
         self._entries: dict[RowKey, AuditLogEntry] = {}
+        self._shown: list[str] = []  # keys of the columns currently in the table
         self.cursor_type = "row"
         self.zebra_stripes = False  # quieter rows; severity does the work
 
+    def _all_columns(self) -> list[str]:
+        keys = [*self.COLUMN_WIDTHS, "name"]
+        if self._show_details:
+            keys.extend(self.DETAIL_WIDTHS)
+        return keys
+
+    def _add_columns(self, widths: dict[str, int]) -> None:
+        labels = {"timestamp": f"time ({local_tz_name()})"}
+        for key, width in widths.items():
+            self.add_column(labels.get(key, key), width=width, key=key)
+        self._shown = list(widths)
+
     def on_mount(self) -> None:
         """Set up table columns on mount."""
-        labels = {"timestamp": f"time ({local_tz_name()})"}
-        for key, width in self.COLUMN_WIDTHS.items():
-            self.add_column(labels.get(key, key), width=width, key=key)
-        self.add_column("name", width=self.MIN_WIDTHS["name"], key="name")
+        widths = {**self.COLUMN_WIDTHS, "name": self.MIN_WIDTHS["name"]}
         if self._show_details:
-            for key, width in self.DETAIL_WIDTHS.items():
-                self.add_column(key, width=width, key=key)
+            widths.update(self.DETAIL_WIDTHS)
+        self._add_columns(widths)
         self._fit_columns()
 
     def on_resize(self) -> None:
         """Refit columns to the new width."""
         self._fit_columns()
 
+    def _visible_columns(self, available: int) -> list[str]:
+        """Column keys that fit in ``available`` cells at their minimum widths."""
+        keys = self._all_columns()
+        minimum = {**self.COLUMN_WIDTHS, **self.DETAIL_WIDTHS, **self.MIN_WIDTHS}
+
+        def needed() -> int:
+            return sum(minimum[k] + 2 * self.cell_padding for k in keys)
+
+        for hidden in self.HIDE_ORDER:
+            if needed() <= available:
+                break
+            keys.remove(hidden)
+        return keys
+
     def _fit_columns(self) -> None:
-        """Give ``name`` the remaining width; shrink user/component when space is short."""
-        if "name" not in self.columns:
-            return
+        """Hide columns that cannot fit, then give ``name`` the remaining width.
+
+        ``user`` and ``component`` shrink toward their minimum before ``name`` does.
+        Never scrolls sideways: the widths always add up to the available width.
+        """
+        if not self._shown:
+            return  # not mounted yet
         available = self.scrollable_content_region.width
         if available <= 0:
             return
-        widths = dict(self.COLUMN_WIDTHS)
-        if self._show_details:
-            widths.update(self.DETAIL_WIDTHS)
-        padding = 2 * self.cell_padding * (len(widths) + 1)
+        keys = self._visible_columns(available)
+        widths = {k: {**self.COLUMN_WIDTHS, **self.DETAIL_WIDTHS}.get(k, 0) for k in keys}
+        padding = 2 * self.cell_padding * len(keys)
         free = available - padding - sum(widths.values())
+        # Shrink user, then component, until ``name`` has its minimum (or nothing is left over).
+        target = self.MIN_WIDTHS["name"] if "name" in keys else 0
         for key in ("user", "component"):
-            if free >= self.MIN_WIDTHS["name"]:
-                break
-            take = min(widths[key] - self.MIN_WIDTHS[key], self.MIN_WIDTHS["name"] - free)
-            widths[key] -= take
-            free += take
-        # Never scroll sideways: below the preferred minimum, name gets what's left.
-        widths["name"] = max(self.NAME_FLOOR, free)
-        changed = False
-        for key, width in widths.items():
-            column = self.columns[key]
-            if column.width != width or column.auto_width:
-                column.width = width
-                column.auto_width = False
-                changed = True
-        if changed:
-            self._require_update_dimensions = True
-            self.refresh(layout=True)
+            if key in keys and free < target:
+                take = min(widths[key] - self.MIN_WIDTHS[key], target - free)
+                widths[key] -= take
+                free += take
+        if "name" in keys:
+            widths["name"] = max(self.NAME_FLOOR, free)
+        current = {k: self.columns[k].width for k in self._shown if k in self.columns}
+        if keys != self._shown or current != widths:
+            self._rebuild(widths)
+
+    def _rebuild(self, widths: dict[str, int]) -> None:
+        """Recreate the columns and rows at ``widths``, keeping entries and the cursor row."""
+        rows = [(key.value, entry) for key, entry in self._entries.items()]
+        cursor = self.cursor_row
+        DataTable.clear(self, columns=True)
+        self._entries = {}
+        self._add_columns(widths)
+        for key, entry in rows:
+            self._entries[self.add_row(*self._build_row(entry), key=key)] = entry
+        if rows:
+            self.move_cursor(row=min(cursor, len(rows) - 1), animate=False)
+        self.refresh(layout=True)
 
     @staticmethod
     def _truncate(text: str, width: int) -> str:
-        """Shorten ``text`` to ``width`` cells, ending with an ellipsis when cut."""
+        """Shorten ``text`` to ``width`` cells, ending with an ellipsis when cut.
+
+        Works on the plain string, so square brackets in the text are never markup.
+        """
+        if width < 1:
+            return ""
         return text if len(text) <= width else text[: width - 1] + "…"
+
+    def _width_of(self, key: str) -> int:
+        """Current width of column ``key``, or its preferred width before the table is laid out."""
+        if key in self.columns:
+            return self.columns[key].width
+        return self.COLUMN_WIDTHS.get(key, self.MIN_WIDTHS.get(key, 0))
 
     def _format_action_cell(self, action: str | None) -> Text:
         """Render `<icon> <action>` with the severity color as a Rich Text object.
@@ -105,22 +155,28 @@ class LogTable(DataTable):
         return text
 
     def _build_row(self, entry: AuditLogEntry) -> list:
-        row_data = [
-            Text(format_timestamp(entry.timestamp, local=True), no_wrap=True),
-            Text(
-                self._truncate(get_user_identifier(entry, default="-"), self.COLUMN_WIDTHS["user"]),
+        """Cells for ``entry``, only for the columns currently shown."""
+        cells = {
+            "timestamp": Text(format_timestamp(entry.timestamp, local=True), no_wrap=True),
+            "user": Text(
+                self._truncate(get_user_identifier(entry, default="-"), self._width_of("user")),
                 no_wrap=True,
             ),
-            self._format_action_cell(entry.action),
-            Text(entry.component_type or "-", no_wrap=True),
-            Text(entry.component_name or entry.component_id or "-", no_wrap=True),
-        ]
-        if self._show_details:
-            row_data.extend([
-                Text((entry.description or "-")[:35], no_wrap=True),
-                Text(entry.ip_address or "-", no_wrap=True),
-            ])
-        return row_data
+            "action": self._format_action_cell(entry.action),
+            "component": Text(
+                self._truncate(entry.component_type or "-", self._width_of("component")),
+                no_wrap=True,
+            ),
+            "name": Text(
+                self._truncate(
+                    entry.component_name or entry.component_id or "-", self._width_of("name")
+                ),
+                no_wrap=True,
+            ),
+            "description": Text((entry.description or "-")[:35], no_wrap=True),
+            "ip": Text(entry.ip_address or "-", no_wrap=True),
+        }
+        return [cells[key] for key in (self._shown or self._all_columns())]
 
     def clear(self, columns: bool = False) -> "LogTable":
         """Remove all rows (and the entries behind them)."""
