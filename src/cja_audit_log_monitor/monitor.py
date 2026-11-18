@@ -4,22 +4,27 @@ import logging
 import signal
 import time
 from collections.abc import Callable
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from rich.console import Console
+from rich.status import Status
 from rich.text import Text
 
 from .alerts import AlertEngine
-from .client import AuditLogsClient
+from .auth import AuthenticationError
+from .client import APIError, AuditLogsClient
 from .formatters import get_action_color
 from .models import AuditLogEntry, AuditLogQuery
 from .notifications import NotificationManager
-from .utils import get_user_identifier
+from .utils import RecentIds, entry_key, get_user_identifier
 
 logger = logging.getLogger(__name__)
 
 _MONITOR_PAGE_SIZE = 100
 _MAX_POLL_PAGES = 20
+
+# API statuses that retrying will not fix: the monitor stops instead of looping.
+FATAL_STATUS = frozenset({400, 401, 403, 404})
 
 # Each poll re-reads this much before the last poll, so late-arriving events are not missed.
 POLL_OVERLAP = timedelta(minutes=5)
@@ -47,6 +52,7 @@ class AuditLogMonitor:
         interval: int = 60,
         alert_engine: AlertEngine | None = None,
         notification_manager: NotificationManager | None = None,
+        entry_filter: Callable[[AuditLogEntry], bool] | None = None,
     ) -> None:
         """Initialize the monitor.
 
@@ -56,6 +62,7 @@ class AuditLogMonitor:
             interval: Polling interval in seconds.
             alert_engine: Optional alert engine for suspicious activity detection.
             notification_manager: Optional notification manager for external delivery.
+            entry_filter: Optional predicate; only entries it accepts are returned.
         """
         self.client = client
         self.console = console or Console()
@@ -63,8 +70,10 @@ class AuditLogMonitor:
         self.alert_engine = alert_engine
         self.notification_manager = notification_manager
         self._running = False
-        self._last_seen_id: str | None = None
-        self._last_seen_timestamp: datetime | None = None
+        self._entry_filter = entry_filter
+        self._last_poll_time: datetime | None = None
+        self._seen = RecentIds(SEEN_IDS_MAX)
+        self._stop_announced = False
         self._on_new_entry: Callable[[AuditLogEntry], None] | None = None
 
     def set_callback(self, callback: Callable[[AuditLogEntry], None]) -> None:
@@ -76,78 +85,57 @@ class AuditLogMonitor:
         self._on_new_entry = callback
 
     def _get_new_entries(self) -> list[AuditLogEntry]:
-        """Fetch new audit log entries since last check."""
-        query = AuditLogQuery(page_size=_MONITOR_PAGE_SIZE, page=0)
+        """Fetch entries not seen before, oldest first.
 
-        # If we have a last seen timestamp, use it as start date
-        if self._last_seen_timestamp:
-            # Add a small buffer to avoid missing entries
-            query.start_date = self._last_seen_timestamp - timedelta(seconds=1)
+        Each poll re-reads an overlap window before the last poll and drops entries whose key is
+        already remembered, so late-indexed events are not missed. The first poll reads one page
+        only. Fatal API errors are re-raised; other errors are logged and give no entries.
+        """
+        now = datetime.now(UTC)
+        first_poll = self._last_poll_time is None
+        query = build_poll_query(self._last_poll_time, now, _MONITOR_PAGE_SIZE)
 
         try:
-            entries: list[AuditLogEntry] = []
-            page = 0
-            hit_page_limit = False
-            while page < _MAX_POLL_PAGES:
+            fresh: dict[str, AuditLogEntry] = {}
+            for page in range(1 if first_poll else _MAX_POLL_PAGES):
                 query.page = page
                 response = self.client.get_logs(query)
                 batch = response.content
-                if not batch:
+                found_new = False
+                for entry in batch:
+                    key = entry_key(entry)
+                    if key not in self._seen and key not in fresh:
+                        fresh[key] = entry
+                        found_new = True
+                if not batch or response.last or not found_new:
                     break
-                entries.extend(batch)
-
-                saw_last_seen_id = bool(
-                    self._last_seen_id and any(entry.id == self._last_seen_id for entry in batch)
-                )
-                oldest_ts = next(
-                    (entry.timestamp for entry in reversed(batch) if entry.timestamp),
-                    None,
-                )
-                reached_known_time = bool(
-                    self._last_seen_timestamp
-                    and oldest_ts
-                    and oldest_ts <= self._last_seen_timestamp
-                )
-                if response.last or saw_last_seen_id or reached_known_time:
-                    break
-                page += 1
             else:
-                hit_page_limit = True
-
-            if hit_page_limit:
-                logger.warning(
-                    "Monitor poll reached %d pages; backlog may be larger than one cycle",
-                    _MAX_POLL_PAGES,
-                )
-
-            if not entries:
-                return []
-
-            # Filter out already seen entries
-            new_entries = []
-            for entry in entries:
-                if self._last_seen_id and entry.id == self._last_seen_id:
-                    break
-                if (
-                    self._last_seen_timestamp
-                    and entry.timestamp
-                    and entry.timestamp <= self._last_seen_timestamp
-                ):
-                    continue
-                new_entries.append(entry)
-
-            # Update last seen markers
-            if entries:
-                self._last_seen_id = entries[0].id
-                if entries[0].timestamp:
-                    self._last_seen_timestamp = entries[0].timestamp
-
-            # Return in chronological order
-            return list(reversed(new_entries))
-
+                if not first_poll:
+                    logger.warning(
+                        "Monitor poll reached %d pages; backlog may be larger than one cycle",
+                        _MAX_POLL_PAGES,
+                    )
+        except AuthenticationError:
+            raise
+        except APIError as e:
+            if e.status_code in FATAL_STATUS:
+                raise
+            logger.error("Error fetching audit logs: %s", e)
+            return []
         except Exception as e:
             logger.error("Error fetching audit logs: %s", e)
             return []
+
+        # Only remember entries once the whole poll succeeded, so a failed page is retried.
+        for key in fresh:
+            self._seen.add(key)
+        self._last_poll_time = now
+
+        # The API returns newest first; hand them back oldest first.
+        new_entries = list(reversed(fresh.values()))
+        if self._entry_filter:
+            new_entries = [e for e in new_entries if self._entry_filter(e)]
+        return new_entries
 
     def _handle_entry(self, entry: AuditLogEntry) -> None:
         """Handle a new audit log entry."""
@@ -193,7 +181,25 @@ class AuditLogMonitor:
     def _signal_handler(self, signum: int, frame: object) -> None:
         """Handle interrupt signal."""
         self._running = False
-        self.console.print("\n[yellow]Stopping monitor...[/yellow]")
+        if not self._stop_announced:
+            self._stop_announced = True
+            self.console.print("\n[yellow]Stopping monitor...[/yellow]")
+
+    def _run_poll(self, status: Status) -> None:
+        """Poll once, show the result, and update the status line."""
+        is_baseline = self._last_poll_time is None
+        entries = self._get_new_entries()
+        if is_baseline:
+            if entries:
+                self.console.print(f"[dim]Found {len(entries)} recent entries[/dim]")
+                for entry in entries[-5:]:
+                    self._display_entry(entry)
+                self.console.print()
+        else:
+            for entry in entries:
+                self._handle_entry(entry)
+        clock = datetime.now().strftime("%H:%M:%S")
+        status.update(f"Last poll {clock}: {len(entries)} new. Next in {self.interval}s")
 
     def start(self, duration: int | None = None) -> None:
         """Start monitoring for new audit log entries.
@@ -202,6 +208,7 @@ class AuditLogMonitor:
             duration: Optional duration in seconds. None for indefinite.
         """
         self._running = True
+        self._stop_announced = False
 
         # Register signal handlers
         original_sigint = signal.signal(signal.SIGINT, self._signal_handler)
@@ -214,41 +221,26 @@ class AuditLogMonitor:
             )
             self.console.print()
 
-            # Initial fetch to set baseline
-            initial = self._get_new_entries()
-            if initial:
-                self.console.print(f"[dim]Found {len(initial)} recent entries[/dim]")
-                for entry in initial[-5:]:  # Show last 5
-                    self._display_entry(entry)
-            self.console.print()
+            # Initial fetch sets the baseline; show the newest few entries for context.
+            with self.console.status("Waiting for first poll...") as status:
+                self._run_poll(status)
 
-            start_time = time.time()
-            last_check = start_time
+                start_time = time.monotonic()
+                last_check = start_time
 
-            while self._running:
-                current_time = time.time()
+                while self._running:
+                    current_time = time.monotonic()
 
-                # Check duration limit
-                if duration and (current_time - start_time) >= duration:
-                    self.console.print("[yellow]Duration limit reached[/yellow]")
-                    break
+                    # Check duration limit
+                    if duration and (current_time - start_time) >= duration:
+                        self.console.print("[yellow]Duration limit reached[/yellow]")
+                        break
 
-                # Check for new entries
-                if current_time - last_check >= self.interval:
-                    new_entries = self._get_new_entries()
-                    for entry in new_entries:
-                        self._handle_entry(entry)
-                    last_check = current_time
+                    if current_time - last_check >= self.interval:
+                        self._run_poll(status)
+                        last_check = current_time
 
-                    if not new_entries:
-                        # Show heartbeat
-                        self.console.print(
-                            f"[dim]{datetime.now().strftime('%H:%M:%S')} - "
-                            f"No new entries[/dim]",
-                            end="\r",
-                        )
-
-                time.sleep(1)
+                    time.sleep(1)
 
         finally:
             # Restore signal handlers
@@ -259,67 +251,3 @@ class AuditLogMonitor:
     def stop(self) -> None:
         """Stop the monitor."""
         self._running = False
-
-
-def watch_component(
-    client: AuditLogsClient,
-    component_id: str,
-    console: Console | None = None,
-    interval: int = 60,
-) -> None:
-    """Watch a specific component for audit events.
-
-    Args:
-        client: Audit logs API client.
-        component_id: Component ID to watch.
-        console: Rich console for output.
-        interval: Polling interval in seconds.
-    """
-    console = console or Console()
-    monitor = AuditLogMonitor(client, console, interval)
-
-    console.print(f"[green]Watching component:[/green] {component_id}")
-
-    # Override get_new_entries to filter by component
-    original_get_new = monitor._get_new_entries
-
-    def filtered_get_new() -> list[AuditLogEntry]:
-        entries = original_get_new()
-        return [e for e in entries if e.component_id == component_id]
-
-    monitor._get_new_entries = filtered_get_new  # type: ignore
-    monitor.start()
-
-
-def watch_user(
-    client: AuditLogsClient,
-    user_id: str,
-    console: Console | None = None,
-    interval: int = 60,
-) -> None:
-    """Watch a specific user's audit events.
-
-    Args:
-        client: Audit logs API client.
-        user_id: User ID or email to watch.
-        console: Rich console for output.
-        interval: Polling interval in seconds.
-    """
-    console = console or Console()
-    monitor = AuditLogMonitor(client, console, interval)
-
-    console.print(f"[green]Watching user:[/green] {user_id}")
-
-    # Override get_new_entries to filter by user
-    original_get_new = monitor._get_new_entries
-
-    def filtered_get_new() -> list[AuditLogEntry]:
-        entries = original_get_new()
-        return [
-            e
-            for e in entries
-            if e.user_id == user_id or e.user_email == user_id
-        ]
-
-    monitor._get_new_entries = filtered_get_new  # type: ignore
-    monitor.start()

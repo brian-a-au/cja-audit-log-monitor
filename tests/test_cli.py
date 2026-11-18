@@ -1490,3 +1490,49 @@ class TestBadConfigFile:
         assert result.exit_code == 1
         assert str(path) in result.output.replace("\n", "")
         assert "Traceback" not in result.output
+
+
+class TestMonitorFatalAndTailFilter:
+    def test_monitor_exits_1_on_403(self, runner: CliRunner) -> None:
+        from cja_audit_log_monitor.client import APIError
+
+        client = MagicMock()
+        client.get_logs.side_effect = APIError("forbidden", status_code=403)
+        with (
+            patch("cja_audit_log_monitor.cli.get_client") as gc,
+            patch("cja_audit_log_monitor.monitor.time.sleep"),
+        ):
+            gc.return_value = (client, MagicMock(alert_rules=[]))
+            result = runner.invoke(main, ["cli", "monitor", "--no-alerts", "--duration", "5"])
+        assert result.exit_code == 1
+
+    def test_tail_user_filter_shows_only_that_user(self, runner: CliRunner) -> None:
+        client = MagicMock()
+        client.get_logs.return_value = AuditLogResponse(
+            content=[
+                AuditLogEntry(id="1", action="CREATE", user_email="alice@example.com",
+                              component_name="mine-comp"),
+                AuditLogEntry(id="2", action="CREATE", user_email="bob@example.com",
+                              component_name="other-comp"),
+            ],
+            last=True,
+        )
+        captured = {}
+
+        def fake_start(self, *args, **kwargs):
+            captured["filter"] = self._entry_filter
+            for entry in self._get_new_entries():
+                self._display_entry(entry)
+
+        with (
+            patch("cja_audit_log_monitor.cli.get_client") as gc,
+            patch("cja_audit_log_monitor.cli.AuditLogMonitor.start", fake_start),
+        ):
+            gc.return_value = (client, MagicMock(alert_rules=[]))
+            result = runner.invoke(
+                main, ["cli", "tail", "--user", "alice@example.com", "--no-alerts"]
+            )
+        assert result.exit_code == 0
+        assert captured["filter"] is not None
+        assert "mine-comp" in result.output
+        assert "other-comp" not in result.output

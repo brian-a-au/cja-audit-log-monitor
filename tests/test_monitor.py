@@ -1,10 +1,12 @@
 """Tests for monitoring module."""
 
 from datetime import UTC, datetime, timedelta
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
+from cja_audit_log_monitor.auth import AuthenticationError
+from cja_audit_log_monitor.client import APIError
 from cja_audit_log_monitor.models import AuditLogEntry, AuditLogResponse
 from cja_audit_log_monitor.monitor import POLL_OVERLAP, AuditLogMonitor, build_poll_query
 
@@ -143,6 +145,7 @@ class TestAuditLogMonitor:
         mock_client: MagicMock,
     ) -> None:
         """Test monitor polling paginates to avoid missing burst events."""
+        monitor._last_poll_time = datetime.now(UTC)  # past the first poll, which reads one page
         pages_requested: list[int] = []
         responses = [
             AuditLogResponse(
@@ -285,3 +288,160 @@ class TestBuildPollQuery:
         query = build_poll_query(None, now, 50)
         assert query.start_date == now - POLL_OVERLAP
         assert query.page_size == 50
+
+
+T0 = datetime(2024, 1, 15, 10, 0, 0, tzinfo=UTC)
+
+
+def _entry(entry_id: str, minutes: float = 0, **kwargs) -> AuditLogEntry:
+    return AuditLogEntry(id=entry_id, timestamp=T0 + timedelta(minutes=minutes), **kwargs)
+
+
+def _scripted(mock_client: MagicMock, responses: list) -> list:
+    """Make get_logs return ``responses`` in order; return the list of queries seen."""
+    queries: list = []
+
+    def side_effect(query):
+        queries.append(query.model_copy())
+        return responses.pop(0)
+
+    mock_client.get_logs.side_effect = side_effect
+    return queries
+
+
+class TestPollDedupe:
+    """Polling dedupes by id inside an overlap window instead of by timestamp."""
+
+    def test_first_poll_reads_one_page_and_marks_it_seen(
+        self, monitor: AuditLogMonitor, mock_client: MagicMock
+    ) -> None:
+        queries = _scripted(
+            mock_client,
+            [
+                AuditLogResponse(content=[_entry("b", 2), _entry("a", 1)], last=False),
+                AuditLogResponse(content=[_entry("b", 2), _entry("a", 1)], last=False),
+            ],
+        )
+        first = monitor._get_new_entries()
+        assert len(queries) == 1
+        assert [e.id for e in first] == ["a", "b"]
+        assert monitor._get_new_entries() == []
+
+    def test_same_timestamp_new_id_is_returned(
+        self, monitor: AuditLogMonitor, mock_client: MagicMock
+    ) -> None:
+        _scripted(
+            mock_client,
+            [
+                AuditLogResponse(content=[_entry("a", 1)], last=True),
+                AuditLogResponse(content=[_entry("b", 1), _entry("a", 1)], last=True),
+            ],
+        )
+        monitor._get_new_entries()
+        assert [e.id for e in monitor._get_new_entries()] == ["b"]
+
+    def test_late_indexed_older_entry_is_returned(
+        self, monitor: AuditLogMonitor, mock_client: MagicMock
+    ) -> None:
+        _scripted(
+            mock_client,
+            [
+                AuditLogResponse(content=[_entry("a", 10)], last=True),
+                AuditLogResponse(content=[_entry("a", 10), _entry("late", 8)], last=True),
+            ],
+        )
+        monitor._get_new_entries()
+        assert [e.id for e in monitor._get_new_entries()] == ["late"]
+
+    def test_every_query_has_both_dates(
+        self, monitor: AuditLogMonitor, mock_client: MagicMock
+    ) -> None:
+        queries = _scripted(
+            mock_client,
+            [
+                AuditLogResponse(content=[_entry("a")], last=True),
+                AuditLogResponse(content=[_entry("a")], last=True),
+            ],
+        )
+        monitor._get_new_entries()
+        monitor._get_new_entries()
+        assert all(q.start_date is not None and q.end_date is not None for q in queries)
+
+    def test_stops_paging_when_last_is_missing(
+        self, monitor: AuditLogMonitor, mock_client: MagicMock
+    ) -> None:
+        """The API may omit `last`; paging must stop at a page with nothing new."""
+        _scripted(
+            mock_client,
+            [
+                AuditLogResponse(content=[_entry("a", 1)]),
+                AuditLogResponse(content=[_entry("b", 2), _entry("a", 1)]),
+                AuditLogResponse(content=[_entry("b", 2), _entry("a", 1)]),
+                AuditLogResponse(content=[]),
+            ],
+        )
+        monitor._get_new_entries()
+        calls_before = mock_client.get_logs.call_count
+        new = monitor._get_new_entries()
+        assert [e.id for e in new] == ["b"]
+        # page 0 has a new entry, page 1 has nothing new, so it stops there.
+        assert mock_client.get_logs.call_count - calls_before == 2
+
+    def test_entry_filter_applies_but_entries_still_marked_seen(
+        self, mock_client: MagicMock
+    ) -> None:
+        monitor = AuditLogMonitor(
+            mock_client, interval=1, entry_filter=lambda e: e.action == "DELETE"
+        )
+        _scripted(
+            mock_client,
+            [
+                AuditLogResponse(
+                    content=[_entry("b", 2, action="DELETE"), _entry("a", 1, action="CREATE")],
+                    last=True,
+                ),
+            ],
+        )
+        assert [e.id for e in monitor._get_new_entries()] == ["b"]
+        assert len(monitor._seen) == 2
+
+
+class TestPollErrors:
+    @pytest.fixture(autouse=True)
+    def _no_sleep(self):
+        ticks = iter(range(10_000))
+        with (
+            patch("cja_audit_log_monitor.monitor.time.sleep"),
+            patch("cja_audit_log_monitor.monitor.time.monotonic", side_effect=lambda: next(ticks)),
+        ):
+            yield
+
+    @pytest.mark.parametrize("status", [400, 401, 403, 404])
+    def test_fatal_status_raises_from_start(self, mock_client: MagicMock, status: int) -> None:
+        mock_client.get_logs.side_effect = APIError("x", status_code=status)
+        monitor = AuditLogMonitor(mock_client, interval=1)
+        with pytest.raises(APIError):
+            monitor.start(duration=5)
+
+    def test_authentication_error_raises_from_start(self, mock_client: MagicMock) -> None:
+        mock_client.get_logs.side_effect = AuthenticationError("bad")
+        monitor = AuditLogMonitor(mock_client, interval=1)
+        with pytest.raises(AuthenticationError):
+            monitor.start(duration=5)
+
+    def test_transient_status_is_logged_and_loop_continues(
+        self, mock_client: MagicMock, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        mock_client.get_logs.side_effect = APIError("down", status_code=503)
+        monitor = AuditLogMonitor(mock_client, interval=1)
+        monitor.start(duration=5)
+        assert mock_client.get_logs.call_count > 1
+        assert "down" in caplog.text
+
+    def test_stopping_message_prints_once(self, mock_client: MagicMock) -> None:
+        console = MagicMock()
+        monitor = AuditLogMonitor(mock_client, console=console, interval=1)
+        monitor._signal_handler(2, None)
+        monitor._signal_handler(15, None)
+        stops = [c for c in console.print.call_args_list if "Stopping monitor" in str(c)]
+        assert len(stops) == 1
