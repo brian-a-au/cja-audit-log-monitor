@@ -2,6 +2,7 @@
 
 import io
 import os
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -1327,6 +1328,22 @@ class TestMonitorStream:
             assert mock_app_state.monitor.interval == 30
             assert not interval_input.has_class("-invalid")
 
+    async def test_interval_box_accepts_values_above_an_hour(self, mock_app_state):
+        from textual.widgets import Input
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.press("m")
+            await pilot.pause()
+            screen = app._screens["monitor"]
+            interval_input = screen.query_one("#interval-input", Input)
+            interval_input.value = "7200"
+            interval_input.validate(interval_input.value)
+            assert interval_input.is_valid
+            assert screen._apply_interval()
+            assert not interval_input.has_class("-invalid")
+            assert mock_app_state.monitor.interval == 7200
+
     async def test_space_in_interval_input_starts_monitor(self, mock_app_state, monkeypatch):
         from textual.widgets import Input
 
@@ -2389,6 +2406,35 @@ class TestExportRobustness:
             monkeypatch.setattr(
                 "cja_audit_log_monitor.tui.modals.export_dialog.export_entries", broken_export
             )
+        from cja_audit_log_monitor.tui.modals.export_dialog import ExportDialog
+
+        # The worker's callbacks reach the closed dialog. Record that they ran, whether
+        # they raised, and whether they touched the status line.
+        reached: list[str] = []
+        raised: list[Exception] = []
+        status_calls: list[str] = []
+        real_set_status = ExportDialog._set_status
+
+        def spy_set_status(self, message, token="$text-muted"):
+            status_calls.append(message)
+            return real_set_status(self, message, token)
+
+        monkeypatch.setattr(ExportDialog, "_set_status", spy_set_status)
+        for name in ("_fail", "_done", "_ask_overwrite"):
+
+            def make(real, label):
+                def wrapper(self, *args, **kwargs):
+                    reached.append(label)
+                    try:
+                        return real(self, *args, **kwargs)
+                    except Exception as error:
+                        raised.append(error)
+                        raise
+
+                return wrapper
+
+            monkeypatch.setattr(ExportDialog, name, make(getattr(ExportDialog, name), name))
+
         app = _make_app(mock_app_state)
         async with app.run_test(size=(120, 40)) as pilot:
             dialog = await self._open(app, pilot)
@@ -2396,13 +2442,22 @@ class TestExportRobustness:
             dialog.query_one("#output-path").value = str(tmp_path / "x.json")
             dialog.query_one("#export-button").press()
             assert await _wait_for(started.is_set, pilot)
+            status_calls.clear()  # keep only what happens after the dialog closes
             await pilot.press("escape")
             await pilot.pause()
             assert await _wait_for(lambda: not dialog.is_attached, pilot)
             release.set()
+            if failure == "fetch":
+                # Closing the dialog drops its worker from the manager, so wait for the
+                # callback itself. The other cases stop at the worker's cancelled check.
+                assert await _wait_for(lambda: bool(reached), pilot)
             await app.workers.wait_for_complete()
             await pilot.pause()
             assert app.is_running
+        if failure == "fetch":
+            assert reached == ["_fail"]
+        assert raised == []
+        assert status_calls == []
         assert app._exception is None
 
     async def test_file_appearing_during_fetch_is_not_clobbered(
@@ -3281,11 +3336,7 @@ async def test_bracket_data_shows_literally_in_every_view(
         view = await _show_and_load(app, pilot, "l")
         table = view.query_one("#log-table", LogTable)
         assert await _wait_for(lambda: table.row_count == 1, pilot)
-        cells = [
-            str(table.get_cell_at((0, col)).plain if hasattr(table.get_cell_at((0, col)), "plain")
-                else table.get_cell_at((0, col)))
-            for col in range(len(table.columns))
-        ]
+        cells = [table.get_cell_at((0, col)).plain for col in range(len(table.columns))]
         assert _BRACKET_USER in cells
         assert _BRACKET_COMPONENT in cells
         panel = view.query_one("#entry-detail-panel", EntryDetailPanel)
@@ -3305,12 +3356,11 @@ async def test_bracket_data_shows_literally_in_every_view(
         monkeypatch.setattr(state, "check_alerts", lambda entries: [fired])
         screen = await _start_monitor_without_loop(app, pilot, monkeypatch)
         assert isinstance(screen, MonitorScreen)
-        screen._last_poll_time = screen._last_poll_time or __import__("datetime").datetime.now(
-            __import__("datetime").UTC
-        )
+        screen._last_poll_time = screen._last_poll_time or datetime.now(UTC)
         await _drive_poll(screen, pilot)
         assert await _wait_for(lambda: len(app._notifications) > 0, pilot)
         assert any("[/rule]" in n.message for n in app._notifications)
+        assert "[/rule]" in _rendered(screen.query_one("#alert-summary", Static))
         await pilot.pause()
         screen._show_error(_BRACKET_ERROR)
         screen._show_warning("[/warn]")
@@ -3582,8 +3632,6 @@ class TestConfiguredDefaults:
 
 def _dot_color(app):
     """Hex color the status row paints its dot with."""
-    from textual.color import Color
-
     strip = app.query_one("#status-row", Static).render_line(0)
     segment = next(seg for seg in strip if "●" in seg.text)
     return Color.from_rich_color(segment.style.color).hex
@@ -3686,3 +3734,51 @@ class TestPaginationButtons:
             await pilot.pause()
             assert view.query_one("#prev-page", Button).disabled
             assert view.query_one("#next-page", Button).disabled
+
+
+class TestLoadApplyErrors:
+    """A failure inside a view's apply callback leaves a traceback in the log."""
+
+    async def test_apply_exception_is_logged_with_traceback(self, mock_app_state, caplog):
+        import logging
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, "d")
+            shown: list[Exception] = []
+            view.show_load_error = shown.append
+
+            def bad_apply(_value):
+                raise ValueError("apply blew up")
+
+            with caplog.at_level(logging.ERROR):
+                view.run_load(lambda: 1, bad_apply)
+                assert await _wait_for(lambda: bool(shown), pilot)
+            assert [type(e) for e in shown] == [ValueError]
+            records = [r for r in caplog.records if r.exc_info]
+            assert any("apply blew up" in str(r.exc_info[1]) for r in records)
+
+
+class TestFilterDropdownEscape:
+    """Escape closes an open dropdown first; only the next Escape leaves the filter bar."""
+
+    async def test_first_escape_only_closes_the_dropdown(self, mock_app_state):
+        from textual.widgets import Select
+        from textual.widgets._select import SelectOverlay
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await _show_and_load(app, pilot, "l")
+            select = app.query_one("#filter-action", Select)
+            select.focus()
+            await pilot.pause()
+            await pilot.press("enter")
+            assert await _wait_for(lambda: select.expanded, pilot)
+            assert isinstance(app.focused, SelectOverlay)
+            await pilot.press("escape")
+            assert await _wait_for(lambda: not select.expanded, pilot)
+            await pilot.pause()
+            assert app.focused is select
+            await pilot.press("escape")
+            await pilot.pause()
+            assert app.focused is not select

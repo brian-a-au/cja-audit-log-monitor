@@ -2230,7 +2230,8 @@ class TestExportRaces:
             result = runner.invoke(main, ["cli", "report", "-o", "-", "--days", "1"])
             assert not Path("-").exists()
         assert result.exit_code == 0, result.output
-        assert "statistics" in json.loads(result.stdout) or json.loads(result.stdout)
+        report = json.loads(result.stdout)
+        assert sum(report["action_distribution"].values()) == len(sample_audit_entries)
 
 
 class TestConfiguredDefaults:

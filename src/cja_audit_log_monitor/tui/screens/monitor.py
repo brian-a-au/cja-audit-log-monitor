@@ -29,9 +29,8 @@ MONITOR_MAX_ROWS = 1000
 _POLL_PAGE_SIZE = 100
 # Rows the first poll of a session shows as context. They are not alerted on or counted.
 _CONTEXT_ROWS = 100
-# Allowed polling interval, in seconds.
+# Shortest allowed polling interval, in seconds. There is no upper limit.
 _MIN_INTERVAL = 5
-_MAX_INTERVAL = 3600
 
 
 class _IntervalInput(Input):
@@ -88,7 +87,7 @@ class MonitorScreen(ContentView):
                 id="interval-input",
                 type="integer",
                 compact=True,
-                validators=[Integer(minimum=_MIN_INTERVAL, maximum=_MAX_INTERVAL)],
+                validators=[Integer(minimum=_MIN_INTERVAL)],
             ),
             Label("s"),
             id="monitor-controls",
@@ -149,7 +148,7 @@ class MonitorScreen(ContentView):
         box.validate(box.value)  # clears a stale -invalid mark
 
     def _apply_interval(self) -> bool:
-        """Use the interval box's value if it is 5 to 3600 seconds.
+        """Use the interval box's value if it is 5 seconds or more.
 
         Otherwise keep the current interval and mark the box invalid.
 
@@ -182,7 +181,7 @@ class MonitorScreen(ContentView):
         """Start the monitoring loop."""
         if not self._apply_interval():
             self._show_warning(
-                f"Interval must be {_MIN_INTERVAL} to {_MAX_INTERVAL} seconds; "
+                f"Interval must be at least {_MIN_INTERVAL} seconds; "
                 f"using {self._state.monitor.interval}."
             )
         monitor = self._state.monitor

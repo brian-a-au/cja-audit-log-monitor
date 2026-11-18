@@ -5,6 +5,7 @@ from textual.app import ComposeResult
 from textual.containers import Horizontal
 from textual.message import Message
 from textual.widgets import Button, Input, Select, Static
+from textual.widgets._select import SelectOverlay
 
 from ...models import ActionType, ComponentType
 
@@ -58,6 +59,8 @@ class FilterBar(Static):
         """Escape leaves a filter input for the view's main widget, keeping what was typed."""
         if event.key != "escape":
             return
+        if isinstance(self.screen.focused, SelectOverlay):
+            return  # the dropdown closes itself; the next Escape leaves the bar
         event.stop()  # not also the view's "close details"
         event.prevent_default()
         for ancestor in self.ancestors:

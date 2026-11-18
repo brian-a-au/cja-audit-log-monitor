@@ -969,7 +969,7 @@ def config(ctx: click.Context) -> None:
     console.print(f"Config file: {escape(str(effective_config_path))}")
     console.print(f"API base URL: {escape(str(settings.api_base_url))}")
     console.print(f"IMS base URL: {escape(str(settings.ims_base_url))}")
-    console.print(f"Default page size: {settings.default_page_size}")
+    console.print(f"Log browser page size (TUI): {settings.default_page_size}")
     console.print(f"Default days: {settings.default_days}")
     console.print(f"Monitor interval: {settings.monitor_interval}s")
     console.print(f"OAuth configured: {settings.is_oauth_configured()}")

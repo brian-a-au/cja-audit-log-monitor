@@ -1,5 +1,6 @@
 """Base class for the views shown in the main content area."""
 
+import logging
 from collections.abc import Callable, Iterator
 from typing import Literal, TypeVar
 
@@ -13,6 +14,8 @@ from ...client import APIError
 from ...formatters import literal, resolve_tcss_markup
 from ..state import AppState
 from ..widgets.stats_panel import ActionBarChart, HourlyChart
+
+logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
@@ -208,6 +211,7 @@ class ContentView(Vertical):
             except Exception as error:  # a failure while showing data is shown too
                 if callback is handle_error:
                     raise
+                logger.exception("Applying loaded data failed")
                 handle_error(error)
             finally:
                 self.set_loading(False)
