@@ -18,7 +18,7 @@ The Alert Rules screen lets you toggle, inspect, and test the rules that detect 
 ## What you can do
 
 - **Toggle rules on/off** with the per-rule checkbox — changes take effect immediately for live Monitor sessions.
-- **Test rules against the last 24 hours** by clicking `Test Rules`. The screen pulls up to 1,000 recent entries, runs every enabled rule against them, and reports whether they would have fired.
+- **Test rules against the last 24 hours** by clicking `test rules`. The screen pulls up to 1,000 recent entries, runs every enabled rule against them, and reports whether they would have fired.
 - **Reset rules** to undo any in-session toggles. The rules are rebuilt from your config file, or from the built-in rules if the file has none.
 - **Inspect rule structure** without leaving the TUI — every threshold and scoped action/component is visible on the card.
 
