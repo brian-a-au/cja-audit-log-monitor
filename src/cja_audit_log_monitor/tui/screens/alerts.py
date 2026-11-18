@@ -79,10 +79,10 @@ class AlertsScreen(ContentView):
         """
         enabled_class = "rule-enabled" if rule.enabled else "rule-disabled"
         actions = (
-            ", ".join(a.value for a in rule.actions).lower() if rule.actions else "all actions"
+            ", ".join(rule.actions).lower() if rule.actions else "all actions"
         )
         components = (
-            ", ".join(c.value for c in rule.components).lower()
+            ", ".join(rule.components).lower()
             if rule.components
             else "all components"
         )

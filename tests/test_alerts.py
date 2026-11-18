@@ -436,3 +436,49 @@ class TestEventTimeWindows:
         )
         engine = AlertEngine(rules=[rule])
         assert engine.check_batch(self._deletes(2, self.BASE, step_minutes=90)) == []
+
+
+class TestPerUserRules:
+    """Per-user rules count each person's events separately."""
+
+    BASE = datetime(2026, 3, 1, 12, 0, tzinfo=UTC)
+
+    def _deletes(self, users):
+        return [
+            AuditLogEntry(
+                action="DELETE",
+                timestamp=self.BASE + timedelta(minutes=i),
+                user_id=f"id-{u}",
+                user_email=f"{u}@example.com",
+            )
+            for i, u in enumerate(users)
+        ]
+
+    def test_five_users_deleting_once_do_not_fire(self) -> None:
+        fired = AlertEngine().check_batch(self._deletes([f"u{i}" for i in range(5)]))
+        assert [a.rule_name for a in fired if a.rule_name == "bulk_delete"] == []
+
+    def test_one_user_deleting_five_times_fires_and_names_user(self) -> None:
+        fired = AlertEngine().check_batch(self._deletes(["u1"] * 5))
+        bulk = [a for a in fired if a.rule_name == "bulk_delete"]
+        assert len(bulk) == 1
+        assert bulk[0].entry.user_email == "u1@example.com"
+
+    def test_non_per_user_rule_still_counts_everyone(self) -> None:
+        rule = AlertRule(name="all", actions=["DELETE"], threshold_count=3)
+        fired = AlertEngine(rules=[rule]).check_batch(self._deletes(["a", "b", "c"]))
+        assert len(fired) == 1
+
+    def test_defaults_are_per_user(self) -> None:
+        per_user = {r.name for r in DEFAULT_ALERT_RULES if r.per_user}
+        assert per_user == {"bulk_delete", "bulk_export", "bulk_share"}
+
+    def test_rule_status_has_users_and_per_user(self) -> None:
+        row = AlertEngine().get_rule_status()[0]
+        assert "users" in row and "per_user" in row
+        assert row["per_user"] is True
+
+    def test_unknown_action_matches_by_string(self) -> None:
+        rule = AlertRule(name="arch", actions=["archive"], threshold_count=1)
+        entry = AuditLogEntry(action="ARCHIVE", timestamp=self.BASE)
+        assert AlertEngine(rules=[rule]).check_entry(entry)

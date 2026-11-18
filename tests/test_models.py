@@ -313,3 +313,28 @@ class TestTimestampTimezone:
 
 def test_response_last_defaults_to_false() -> None:
     assert AuditLogResponse.model_validate({"content": []}).last is False
+
+
+class TestAlertRuleValidation:
+    def test_zero_threshold_count_rejected(self) -> None:
+        from pydantic import ValidationError
+
+        from cja_audit_log_monitor.models import AlertRule
+
+        with pytest.raises(ValidationError):
+            AlertRule(name="x", threshold_count=0)
+
+    def test_zero_window_rejected(self) -> None:
+        from pydantic import ValidationError
+
+        from cja_audit_log_monitor.models import AlertRule
+
+        with pytest.raises(ValidationError):
+            AlertRule(name="x", threshold_window_minutes=0)
+
+    def test_actions_normalized_and_accept_enum_members(self) -> None:
+        from cja_audit_log_monitor.models import AlertRule
+
+        rule = AlertRule(name="x", actions=["delete", ActionType.EXPORT], components=["data_view"])
+        assert rule.actions == ["DELETE", "EXPORT"]
+        assert rule.components == ["DATA_VIEW"]

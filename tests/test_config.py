@@ -326,3 +326,25 @@ class TestConfigErrorHidesInput:
             load_config(path)
         assert "\n" not in excinfo.value.summary
         assert excinfo.value.summary.startswith("config.yaml: ")
+
+
+class TestAlertRuleConfig:
+    def test_unknown_action_loads_with_warning(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        path = tmp_path / "config.yaml"
+        path.write_text(
+            "alert_rules:\n  - name: r\n    actions: [DELETE, ARCHIVE]\n"
+        )
+        with caplog.at_level("WARNING"):
+            settings = load_config(path)
+        assert settings.alert_rules[0].actions == ["DELETE", "ARCHIVE"]
+        assert "ARCHIVE" in caplog.text
+        assert "DELETE" not in caplog.text
+
+    def test_bad_threshold_is_config_error_without_input(self, tmp_path: Path) -> None:
+        path = tmp_path / "config.yaml"
+        path.write_text("alert_rules:\n  - name: r\n    threshold_count: 0\n")
+        with pytest.raises(ConfigError) as excinfo:
+            load_config(path)
+        assert "input_value" not in str(excinfo.value)

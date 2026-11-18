@@ -36,6 +36,7 @@ DEFAULT_ALERT_RULES = [
         actions=[ActionType.DELETE],
         threshold_count=5,
         threshold_window_minutes=60,
+        per_user=True,
     ),
     AlertRule(
         name="bulk_export",
@@ -44,6 +45,7 @@ DEFAULT_ALERT_RULES = [
         actions=[ActionType.EXPORT],
         threshold_count=3,
         threshold_window_minutes=30,
+        per_user=True,
     ),
     AlertRule(
         name="sensitive_component_delete",
@@ -66,6 +68,7 @@ DEFAULT_ALERT_RULES = [
         actions=[ActionType.SHARE],
         threshold_count=10,
         threshold_window_minutes=60,
+        per_user=True,
     ),
 ]
 
@@ -167,27 +170,15 @@ class AlertEngine:
         Returns:
             True if entry matches rule criteria.
         """
-        # Check action match
-        if rule.actions:
-            if not entry.action:
-                return False
-            try:
-                entry_action = ActionType(entry.action)
-                if entry_action not in rule.actions:
-                    return False
-            except ValueError:
-                return False
+        # Check action match (names are upper-cased strings; unknown ones match too)
+        if rule.actions and (not entry.action or entry.action.upper() not in rule.actions):
+            return False
 
         # Check component match
-        if rule.components:
-            if not entry.component_type:
-                return False
-            try:
-                entry_component = ComponentType(entry.component_type)
-                if entry_component not in rule.components:
-                    return False
-            except ValueError:
-                return False
+        if rule.components and (
+            not entry.component_type or entry.component_type.upper() not in rule.components
+        ):
+            return False
 
         # Check user match
         if rule.users:
@@ -216,7 +207,7 @@ class AlertEngine:
             if not self._matches_rule(entry, rule):
                 continue
 
-            key = (rule.name, "")
+            key = (rule.name, get_user_identifier(entry) if rule.per_user else "")
 
             # Add to event history
             self._event_history[key].append((timestamp, entry))
@@ -285,11 +276,17 @@ class AlertEngine:
                 "name": rule.name,
                 "description": rule.description,
                 "enabled": rule.enabled,
-                "actions": [a.value for a in rule.actions] if rule.actions else None,
-                "components": [c.value for c in rule.components] if rule.components else None,
+                "actions": list(rule.actions) if rule.actions else None,
+                "components": list(rule.components) if rule.components else None,
+                "users": list(rule.users) if rule.users else None,
+                "per_user": rule.per_user,
                 "threshold_count": rule.threshold_count,
                 "threshold_window_minutes": rule.threshold_window_minutes,
-                "pending_events": len(self._event_history[(rule.name, "")]),
+                "pending_events": sum(
+                    len(events)
+                    for (name, _user), events in self._event_history.items()
+                    if name == rule.name
+                ),
             }
             for rule in self.rules
         ]

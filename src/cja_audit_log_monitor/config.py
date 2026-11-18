@@ -255,6 +255,7 @@ scopes: openid,AdobeID,read_organizations,additional_info.projectedProductContex
 #       - DELETE
 #     threshold_count: 5
 #     threshold_window_minutes: 60
+#     per_user: true   # count each user's events separately
 #   - name: sensitive_export
 #     description: Alert on data exports
 #     enabled: true

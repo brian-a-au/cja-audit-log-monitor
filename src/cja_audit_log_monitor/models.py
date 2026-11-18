@@ -1,10 +1,13 @@
 """Pydantic models and enums for CJA audit logs."""
 
+import logging
 from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
 from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
+
+logger = logging.getLogger(__name__)
 
 
 class ActionType(str, Enum):
@@ -213,17 +216,48 @@ class TokenInfo(BaseModel):
     expires_at: datetime | None = None
 
 
+def _normalize_rule_names(value: Any, enum_cls: type[Enum], label: str) -> Any:
+    """Upper-case rule action/component names; warn about names the enum lacks.
+
+    Unknown names are kept: the API can report values this tool does not list.
+    """
+    if value is None or not isinstance(value, (list, tuple)):
+        return value
+    known = {m.value for m in enum_cls}
+    names: list[Any] = []
+    for item in value:
+        if isinstance(item, Enum):
+            item = item.value
+        if isinstance(item, str):
+            item = item.strip().upper()
+            if item not in known:
+                logger.warning("Alert rule %s %r is not a known %s type", label, item, label)
+        names.append(item)
+    return names
+
+
 class AlertRule(BaseModel):
     """Configuration for an alert rule."""
 
     name: str
     description: str | None = None
     enabled: bool = True
-    actions: list[ActionType] | None = None
-    components: list[ComponentType] | None = None
-    threshold_count: int = 1
-    threshold_window_minutes: int = 60
+    actions: list[str] | None = None
+    components: list[str] | None = None
+    threshold_count: int = Field(1, ge=1)
+    threshold_window_minutes: int = Field(60, ge=1)
     users: list[str] | None = None
+    per_user: bool = False
+
+    @field_validator("actions", mode="before")
+    @classmethod
+    def _normalize_actions(cls, value: Any) -> Any:
+        return _normalize_rule_names(value, ActionType, "action")
+
+    @field_validator("components", mode="before")
+    @classmethod
+    def _normalize_components(cls, value: Any) -> Any:
+        return _normalize_rule_names(value, ComponentType, "component")
 
 
 class WebhookConfig(BaseModel):
