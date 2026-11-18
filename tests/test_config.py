@@ -287,3 +287,42 @@ def test_webhook_urls_hidden_from_repr() -> None:
     assert "HDRSECRET" not in repr(hook)
     notif = NotificationConfig(slack_webhook_url="https://hooks.slack.com/SLACKSECRET")
     assert "SLACKSECRET" not in repr(notif)
+
+
+class TestConfigErrorHidesInput:
+    """Config errors must not echo input values (webhook headers, URLs, secrets)."""
+
+    def test_webhook_typo_does_not_leak_header_or_url(self, tmp_path: Path) -> None:
+        path = tmp_path / "config.yaml"
+        path.write_text(
+            "notifications:\n"
+            "  webhooks:\n"
+            "    - urll: https://hooks.example.com/SECRETPATH\n"
+            "      headers:\n"
+            "        Authorization: Bearer HDRTOK\n"
+        )
+        with pytest.raises(ConfigError) as excinfo:
+            load_config(path)
+        text = str(excinfo.value)
+        assert "HDRTOK" not in text
+        assert "SECRETPATH" not in text
+        assert "input_value" not in text
+        assert "urll" not in text or "input_value" not in text
+
+    def test_summary_is_one_line_with_location_and_message(self, tmp_path: Path) -> None:
+        path = tmp_path / "config.yaml"
+        path.write_text("monitor_interval: abc\n")
+        with pytest.raises(ConfigError) as excinfo:
+            load_config(path)
+        summary = excinfo.value.summary
+        assert "\n" not in summary
+        assert summary.startswith("config.yaml: monitor_interval: ")
+        assert "valid integer" in summary
+
+    def test_summary_for_yaml_error_is_one_line(self, tmp_path: Path) -> None:
+        path = tmp_path / "config.yaml"
+        path.write_text("monitor_interval: [1, \n")
+        with pytest.raises(ConfigError) as excinfo:
+            load_config(path)
+        assert "\n" not in excinfo.value.summary
+        assert excinfo.value.summary.startswith("config.yaml: ")

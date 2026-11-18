@@ -30,7 +30,27 @@ _config_file_data: ContextVar[dict[str, Any]] = ContextVar("_config_file_data", 
 
 
 class ConfigError(Exception):
-    """The config file could not be read or holds invalid settings."""
+    """The config file could not be read or holds invalid settings.
+
+    ``str(error)`` is the full message; ``summary`` is a one-line version for
+    tight spaces such as the TUI header.
+    """
+
+    def __init__(self, message: str, summary: str | None = None) -> None:
+        super().__init__(message)
+        first_line = (message.strip().splitlines() or [""])[0]
+        self.summary = summary or first_line
+
+
+def _validation_summary(source: str, error: ValidationError) -> str:
+    """One line naming the first invalid field and why (never the input value)."""
+    errors = error.errors(include_input=False, include_url=False)
+    first = errors[0]
+    location = ".".join(str(part) for part in first["loc"])
+    text = f"{source}: {location}: {first['msg']}" if location else f"{source}: {first['msg']}"
+    if len(errors) > 1:
+        text += f" (+{len(errors) - 1} more)"
+    return text
 
 
 class ConfigFileSource(PydanticBaseSettingsSource):
@@ -50,6 +70,7 @@ class CJASettings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
+        hide_input_in_errors=True,
     )
 
     # Authentication (matches Adobe API skill: org_id, client_id, secret, scopes)
@@ -159,9 +180,15 @@ def load_config(config_path: Path | None = None, *, use_file: bool = True) -> CJ
                 yaml_config = yaml.safe_load(f)
             except yaml.YAMLError as e:
                 detail = (str(e).strip().splitlines() or ["unknown error"])[0]
-                raise ConfigError(f"{config_path}: not valid YAML ({detail})") from e
+                raise ConfigError(
+                    f"{config_path}: not valid YAML ({detail})",
+                    f"{config_path.name}: not valid YAML ({detail})",
+                ) from e
         if yaml_config is not None and not isinstance(yaml_config, dict):
-            raise ConfigError(f"{config_path}: expected a mapping of settings at the top level")
+            raise ConfigError(
+                f"{config_path}: expected a mapping of settings at the top level",
+                f"{config_path.name}: expected a mapping of settings at the top level",
+            )
         if yaml_config:
             config_data.update(yaml_config)
             for key in config_data:
@@ -172,8 +199,9 @@ def load_config(config_path: Path | None = None, *, use_file: bool = True) -> CJ
     try:
         return CJASettings()
     except ValidationError as e:
-        source = f"{config_path}: " if use_file else "environment: "
-        raise ConfigError(f"{source}{e}") from e
+        source = str(config_path) if use_file else "environment"
+        short = config_path.name if use_file else "environment"
+        raise ConfigError(f"{source}: {e}", _validation_summary(short, e)) from e
     finally:
         _config_file_data.reset(token)
 
