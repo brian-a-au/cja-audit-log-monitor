@@ -2238,6 +2238,91 @@ class TestExportScope:
             assert "up to 10,000" in str(every.label)
 
 
+class TestExportRobustness:
+    """The dialog survives being closed mid-export and never clobbers a late file."""
+
+    async def _open(self, app, pilot):
+        await pilot.pause()
+        await pilot.press("e")
+        await pilot.pause()
+        return app.screen
+
+    @pytest.mark.parametrize("failure", ["fetch", "empty", "write"])
+    async def test_escape_during_export_does_not_crash(
+        self, mock_app_state, sample_audit_entries, tmp_path, monkeypatch, failure
+    ):
+        import threading
+
+        started = threading.Event()
+        release = threading.Event()
+
+        def blocked_fetch(*args, **kwargs):
+            started.set()
+            assert release.wait(timeout=5)
+            if failure == "fetch":
+                raise RuntimeError("api down")
+            if failure == "empty":
+                return [], 0
+            return sample_audit_entries, len(sample_audit_entries)
+
+        mock_app_state.page_loaded = True
+        mock_app_state.client.get_logs_sample.side_effect = blocked_fetch
+        if failure == "write":
+
+            def broken_export(*args, **kwargs):
+                raise OSError("disk full")
+
+            monkeypatch.setattr(
+                "cja_audit_log_monitor.tui.modals.export_dialog.export_entries", broken_export
+            )
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(120, 40)) as pilot:
+            dialog = await self._open(app, pilot)
+            dialog.query_one("#scope-all").value = True
+            dialog.query_one("#output-path").value = str(tmp_path / "x.json")
+            dialog.query_one("#export-button").press()
+            assert await _wait_for(started.is_set, pilot)
+            await pilot.press("escape")
+            await pilot.pause()
+            assert await _wait_for(lambda: not dialog.is_attached, pilot)
+            release.set()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert app.is_running
+        assert app._exception is None
+
+    async def test_file_appearing_during_fetch_is_not_clobbered(
+        self, mock_app_state, sample_audit_entries, tmp_path
+    ):
+        target = tmp_path / "late.json"
+
+        def fetch_then_appear(*args, **kwargs):
+            target.write_text("someone else")
+            return sample_audit_entries, len(sample_audit_entries)
+
+        mock_app_state.page_loaded = True
+        mock_app_state.client.get_logs_sample.side_effect = fetch_then_appear
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(120, 40)) as pilot:
+            dialog = await self._open(app, pilot)
+            dialog.query_one("#scope-all").value = True
+            dialog.query_one("#output-path").value = str(target)
+            dialog.query_one("#export-button").press()
+            await app.workers.wait_for_complete()
+            assert await _wait_for(
+                lambda: "file exists · press export again to overwrite"
+                in dialog.query_one("#export-status").render().plain,
+                pilot,
+            )
+            assert target.read_text() == "someone else"
+            assert not dialog.query_one("#export-button").disabled
+            # Confirming now replaces it.
+            dialog.query_one("#export-button").press()
+            assert await _wait_for(lambda: target.read_text() != "someone else", pilot, timeout=5.0)
+            await app.workers.wait_for_complete()
+        assert app._exception is None
+
+
 class TestPageLoadedFlag:
     async def test_log_browser_sets_page_loaded(self, mock_app_state):
         app = _make_app(mock_app_state)
@@ -2247,6 +2332,28 @@ class TestPageLoadedFlag:
             view = await _show_and_load(app, pilot, "l")
             assert view is not None
             assert mock_app_state.page_loaded is True
+
+    async def test_failed_reload_clears_page_and_export_offers_no_page_scope(
+        self, mock_app_state
+    ):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            view = await _show_and_load(app, pilot, "l")
+            assert mock_app_state.page_loaded is True
+            assert mock_app_state.entries
+            mock_app_state.client.get_logs.side_effect = RuntimeError("api down")
+            view.refresh_data()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert mock_app_state.page_loaded is False
+            assert mock_app_state.entries == []
+            assert mock_app_state.total_entries == 0
+            await pilot.press("e")
+            await pilot.pause()
+            dialog = app.screen
+            assert dialog.query_one("#scope-page").disabled
+            assert "entries" not in str(dialog.query_one("#scope-page").label)
 
 
 class TestSwapSuffix:

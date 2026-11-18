@@ -169,6 +169,8 @@ class ExportDialog(ModalScreen):
             self._overwrite_pending = key
             self._set_status("file exists · press export again to overwrite", "$warning")
             return
+        # A pending confirmation is spent by this press: it is the one allowed to replace.
+        replace = output_path.exists()
         self._overwrite_pending = None
 
         if not fetch_all and not self._state.entries:
@@ -179,7 +181,9 @@ class ExportDialog(ModalScreen):
         self._set_status("fetching matching entries…" if fetch_all else "writing…")
         page_entries = list(self._state.entries)
         self.run_worker(
-            lambda: self._export_in_worker(fetch_all, page_entries, output_path, export_format),
+            lambda: self._export_in_worker(
+                fetch_all, page_entries, output_path, export_format, replace, key
+            ),
             thread=True,
             exclusive=True,
         )
@@ -190,6 +194,8 @@ class ExportDialog(ModalScreen):
         page_entries: list[AuditLogEntry],
         output_path: Path,
         export_format: str,
+        overwrite: bool,
+        key: tuple[str, str],
     ) -> None:
         """Worker: fetch (for "all matching"), write the file, then report on the UI thread."""
         worker = get_current_worker()
@@ -210,19 +216,40 @@ class ExportDialog(ModalScreen):
             self.app.call_from_thread(self._fail, "no entries to export")
             return
         try:
-            count = export_entries(entries, output_path, output_format=export_format, pretty=True)
+            count = export_entries(
+                entries, output_path, output_format=export_format, pretty=True, overwrite=overwrite
+            )
+        except FileExistsError:
+            # The file appeared after the check above; ask before replacing it.
+            self.app.call_from_thread(self._ask_overwrite, key)
+            return
         except Exception as e:
             self.app.call_from_thread(self._fail, f"export failed: {_one_line(e)}")
             return
         if not worker.is_cancelled:
             self.app.call_from_thread(self._done, count, total, output_path)
 
+    def _is_live(self) -> bool:
+        """True while this dialog is still the open screen (the user has not closed it)."""
+        return self.is_attached and self.app.screen is self
+
+    def _ask_overwrite(self, key: tuple[str, str]) -> None:
+        if not self._is_live():
+            return
+        self._overwrite_pending = key
+        self.query_one("#export-button", Button).disabled = False
+        self._set_status("file exists · press export again to overwrite", "$warning")
+
     def _fail(self, message: str) -> None:
+        if not self._is_live():
+            return
         self.query_one("#export-button", Button).disabled = False
         self._set_status(message, "$danger")
 
     def _done(self, count: int, total: int | None, output_path: Path) -> None:
         """Report a finished export and close the dialog shortly after."""
+        if not self._is_live():
+            return
         where = output_path.resolve()
         if total is not None and total > count:
             summary = f"exported {count:,} of {total:,} (limit reached) to {where}"
