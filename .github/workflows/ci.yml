@@ -31,6 +31,24 @@ jobs:
       - name: Test
         run: uv run pytest -q
 
+  floors:
+    name: Lowest dependency floors
+    # Skipped while the repo is private (Actions minutes are limited).
+    # Run scripts/ci.sh locally instead.
+    if: ${{ !github.event.repository.private }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+      - name: Install the lowest allowed versions
+        run: |
+          uv venv .ci/lowest --python 3.11
+          uv pip install --python .ci/lowest --resolution lowest-direct -e ".[dev]"
+      - name: Test
+        run: .ci/lowest/bin/pytest -q
+
   build:
     name: Build package
     # Skipped while the repo is private (Actions minutes are limited).

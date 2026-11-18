@@ -29,6 +29,17 @@ for v in "${VERSIONS[@]}"; do
 done
 unset UV_PROJECT_ENVIRONMENT
 
+echo "==> Lowest dependency floors (Python 3.11)"
+rm -rf .ci/lowest
+if uv venv --quiet .ci/lowest --python 3.11 \
+    && uv pip install --quiet --python .ci/lowest --resolution lowest-direct -e ".[dev]" \
+    && .ci/lowest/bin/pytest -q; then
+    echo "==> Floors: passed"
+else
+    echo "==> Floors: FAILED"
+    failed+=("floors")
+fi
+
 echo "==> Build sdist and wheel"
 rm -rf .ci/dist .ci/smoke
 uv build --quiet --out-dir .ci/dist
