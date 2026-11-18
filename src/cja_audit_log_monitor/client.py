@@ -1,6 +1,7 @@
 """API client for CJA audit logs endpoint."""
 
 import logging
+import threading
 import time
 from collections.abc import Iterator
 from datetime import UTC, datetime
@@ -80,22 +81,25 @@ class AuditLogsClient:
         self.settings = settings
         self.token_manager = token_manager or TokenManager(settings)
         self._client: httpx.Client | None = None
+        self._client_lock = threading.Lock()
 
     @property
     def client(self) -> httpx.Client:
         """Get or create HTTP client."""
-        if self._client is None:
-            self._client = httpx.Client(
-                base_url=self.settings.api_base_url,
-                timeout=60.0,
-            )
-        return self._client
+        with self._client_lock:
+            if self._client is None:
+                self._client = httpx.Client(
+                    base_url=self.settings.api_base_url,
+                    timeout=60.0,
+                )
+            return self._client
 
     def close(self) -> None:
         """Close the HTTP client."""
-        if self._client:
-            self._client.close()
-            self._client = None
+        with self._client_lock:
+            if self._client:
+                self._client.close()
+                self._client = None
 
     def __enter__(self) -> "AuditLogsClient":
         return self

@@ -1,7 +1,10 @@
 """Tests for authentication module."""
 
 import re
+import threading
+import time
 
+import httpx
 import pytest
 from pytest_httpx import HTTPXMock
 
@@ -178,3 +181,39 @@ def test_token_response_not_json(httpx_mock: HTTPXMock, sample_settings) -> None
     httpx_mock.add_response(url=re.compile(".*/ims/token/v3"), text="<html>oops</html>")
     with pytest.raises(AuthenticationError, match="non-JSON"):
         TokenManager(sample_settings).get_token()
+
+
+class TestTokenManagerThreads:
+    """Concurrent callers share one token request."""
+
+    def test_concurrent_get_token_makes_one_request(
+        self, sample_settings: CJASettings, httpx_mock: HTTPXMock
+    ) -> None:
+        def slow_token(request: httpx.Request) -> httpx.Response:
+            time.sleep(0.1)  # keep the request in flight so the other threads pile up
+            return httpx.Response(
+                200,
+                json={"access_token": "shared", "token_type": "bearer", "expires_in": 86400},
+            )
+
+        httpx_mock.add_callback(
+            slow_token,
+            url="https://ims-na1.adobelogin.com/ims/token/v3",
+            is_reusable=True,
+        )
+        manager = TokenManager(sample_settings)
+        barrier = threading.Barrier(8)
+        tokens: list[str] = []
+
+        def worker() -> None:
+            barrier.wait()
+            tokens.append(manager.get_token())
+
+        threads = [threading.Thread(target=worker) for _ in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert tokens == ["shared"] * 8
+        assert len(httpx_mock.get_requests()) == 1

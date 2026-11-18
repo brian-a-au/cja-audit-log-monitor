@@ -1,8 +1,11 @@
 """Tests for API client."""
 
+import threading
+import time
 from datetime import UTC, datetime, timedelta
 from email.utils import format_datetime
 
+import httpx
 import pytest
 from pytest_httpx import HTTPXMock
 
@@ -465,3 +468,37 @@ class TestResilience:
         with client, pytest.raises(APIError) as info:
             client.get_logs()
         assert str(info.value).startswith("API returned a non-JSON response")
+
+
+class TestThreadSafety:
+    """The lazy HTTP client is created once even when threads race for it."""
+
+    def test_concurrent_client_access_creates_one_client(
+        self, sample_settings: CJASettings, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A slow constructor widens the check-then-create window so threads overlap.
+        real_client = httpx.Client
+
+        class SlowClient(real_client):  # type: ignore[misc, valid-type]
+            def __init__(self, *args, **kwargs) -> None:
+                time.sleep(0.05)
+                super().__init__(*args, **kwargs)
+
+        monkeypatch.setattr("cja_audit_log_monitor.client.httpx.Client", SlowClient)
+        api = AuditLogsClient(sample_settings, TokenManager(sample_settings))
+        barrier = threading.Barrier(8)
+        results: list[httpx.Client] = []
+
+        def worker() -> None:
+            barrier.wait()
+            results.append(api.client)
+
+        threads = [threading.Thread(target=worker) for _ in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert len(results) == 8
+        assert len({id(c) for c in results}) == 1
+        api.close()
