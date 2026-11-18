@@ -48,7 +48,7 @@ class TestAuditLogMonitor:
                 timestamp=datetime(2024, 1, 15, 10, 0, 0, tzinfo=UTC),
             ),
         ]
-        mock_client.get_logs.return_value = AuditLogResponse(content=entries)
+        mock_client.get_logs.return_value = AuditLogResponse(content=entries, last=True)
 
         new_entries = monitor._get_new_entries()
 

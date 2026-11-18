@@ -502,3 +502,44 @@ class TestThreadSafety:
         assert len(results) == 8
         assert len({id(c) for c in results}) == 1
         api.close()
+
+
+class TestPagedQueryIsCopied:
+    """Paging works on a copy of the caller's query and validates max_pages."""
+
+    URL = r"https://cja\.adobe\.io/auditlogs/api/v1/auditlogs.*"
+
+    def test_paginated_leaves_callers_query_alone(self, client, httpx_mock) -> None:
+        import re
+
+        url = re.compile(self.URL)
+        for entry_id in ("a", "b"):
+            httpx_mock.add_response(
+                url=url,
+                json={
+                    "content": [{"id": entry_id}],
+                    "totalElements": 2,
+                    "totalPages": 2,
+                    "last": False,
+                },
+            )
+        query = AuditLogQuery(page_size=50)
+        with client:
+            assert len(list(client.get_logs_paginated(query))) == 2
+        assert query.page == 0
+
+    @pytest.mark.parametrize("bad", [0, -1])
+    def test_max_pages_below_one_is_rejected(self, sample_settings, bad) -> None:
+        client = AuditLogsClient(sample_settings, TokenManager(sample_settings))
+        with client, pytest.raises(ValueError, match="max_pages"):
+            list(client.get_logs_paginated(AuditLogQuery(), max_pages=bad))
+
+    def test_stops_on_empty_page_without_last_key(self, client, httpx_mock) -> None:
+        import re
+
+        url = re.compile(self.URL)
+        for content in ([{"id": "a"}], [{"id": "b"}], []):
+            httpx_mock.add_response(url=url, json={"content": content, "totalPages": 5})
+        with client:
+            entries = list(client.get_logs_paginated())
+        assert [e.id for e in entries] == ["a", "b"]

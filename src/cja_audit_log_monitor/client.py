@@ -71,7 +71,6 @@ class AuditLogsClient:
     """Client for querying CJA audit logs API."""
 
     AUDIT_LOGS_PATH = "/auditlogs/api/v1/auditlogs"
-    SEARCH_PATH = "/auditlogs/api/v1/auditlogs/search"
 
     def __init__(
         self,
@@ -224,13 +223,18 @@ class AuditLogsClient:
 
         Args:
             query: Base query parameters.
-            max_pages: Maximum number of pages to fetch (None for all).
+            max_pages: Maximum number of pages to fetch (None for all, else at least 1).
 
         Yields:
             Individual AuditLogEntry objects.
+
+        Raises:
+            ValueError: If ``max_pages`` is less than 1.
         """
-        if query is None:
-            query = AuditLogQuery()
+        if max_pages is not None and max_pages < 1:
+            raise ValueError("max_pages must be None or at least 1")
+        # Page on a copy so the caller's query keeps its own page number.
+        query = query.model_copy() if query else AuditLogQuery()
 
         page = 0
         pages_fetched = 0
@@ -257,7 +261,7 @@ class AuditLogsClient:
                 response.last
                 or not new_entries
                 or _is_final_page(page, response)
-                or (max_pages and pages_fetched >= max_pages)
+                or (max_pages is not None and pages_fetched >= max_pages)
             ):
                 break
 
@@ -330,24 +334,6 @@ class AuditLogsClient:
             page += 1
         return entries[:max_entries], total
 
-    def search_logs(self, filters: list[dict[str, Any]]) -> AuditLogResponse:
-        """Search audit logs using POST with complex filters.
-
-        This endpoint supports OR logic between filters.
-
-        Args:
-            filters: List of filter conditions.
-
-        Returns:
-            AuditLogResponse containing matching logs.
-        """
-        payload = {"filters": filters}
-
-        logger.debug("Searching audit logs with filters: %s", filters)
-        data = self._request("POST", self.SEARCH_PATH, json=payload)
-
-        return AuditLogResponse.model_validate(data)
-
     def get_component_logs(
         self,
         component_id: str,
@@ -370,26 +356,6 @@ class AuditLogsClient:
                 query.components = [ComponentType(component_type)]
             except ValueError:
                 logger.warning("Unknown component type: %s", component_type)
-
-        return self.get_all_logs(query)
-
-    def get_user_logs(
-        self,
-        user_id: str,
-        query: AuditLogQuery | None = None,
-    ) -> list[AuditLogEntry]:
-        """Get all audit logs for a specific user.
-
-        Args:
-            user_id: The user ID to filter by.
-            query: Optional additional query parameters.
-
-        Returns:
-            List of audit log entries for the user.
-        """
-        if query is None:
-            query = AuditLogQuery()
-        query.user_id = user_id
 
         return self.get_all_logs(query)
 
