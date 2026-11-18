@@ -35,6 +35,10 @@ ENV/
 # Environment variables and credentials
 .env
 .env.local
+.env.*
+!.env.example
+audit_logs_export.*
+report.json
 config.json
 *.pem
 private.key

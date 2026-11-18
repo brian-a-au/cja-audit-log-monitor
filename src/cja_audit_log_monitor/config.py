@@ -2,9 +2,12 @@
 
 import logging
 import os
+import stat
+import sys
 from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import yaml
 from pydantic import Field, SecretStr, ValidationError, field_validator
@@ -110,6 +113,17 @@ class CJASettings(BaseSettings):
             raise ValueError("ORG_ID must end with @AdobeOrg")
         return v
 
+    @field_validator("api_base_url", "ims_base_url")
+    @classmethod
+    def validate_endpoint_url(cls, v: str) -> str:
+        """Require https, allowing plain http only for localhost (tests, local mocks)."""
+        parsed = urlparse(v)
+        if parsed.scheme == "https" and parsed.hostname:
+            return v
+        if parsed.scheme == "http" and parsed.hostname in ("localhost", "127.0.0.1"):
+            return v
+        raise ValueError("must be an https:// URL (http:// is allowed only for localhost)")
+
     @property
     def scopes_list(self) -> list[str]:
         """Get scopes as a list."""
@@ -139,6 +153,7 @@ def load_config(config_path: Path | None = None, *, use_file: bool = True) -> CJ
 
     # Load from YAML config file if it exists
     if use_file and config_path.exists():
+        _warn_if_not_private(config_path)
         with open(config_path) as f:
             try:
                 yaml_config = yaml.safe_load(f)
@@ -163,31 +178,18 @@ def load_config(config_path: Path | None = None, *, use_file: bool = True) -> CJ
         _config_file_data.reset(token)
 
 
-def save_config(settings: CJASettings, config_path: Path | None = None) -> None:
-    """Save configuration to YAML file."""
-    if config_path is None:
-        config_path = get_config_path()
-
-    # Ensure directory exists
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-
-    # Convert to dict, excluding sensitive data from file (use env vars for those)
-    config_dict = {
-        "api_base_url": settings.api_base_url,
-        "ims_base_url": settings.ims_base_url,
-        "default_page_size": settings.default_page_size,
-        "default_days": settings.default_days,
-        "output_format": settings.output_format,
-        "monitor_interval": settings.monitor_interval,
-        "scopes": settings.scopes,
-    }
-
-    # Include alert rules if configured
-    if settings.alert_rules:
-        config_dict["alert_rules"] = [rule.model_dump() for rule in settings.alert_rules]
-
-    with open(config_path, "w") as f:
-        yaml.safe_dump(config_dict, f, default_flow_style=False)
+def _warn_if_not_private(config_path: Path) -> None:
+    """Warn when the config file is readable by group or others (POSIX only)."""
+    if sys.platform == "win32":
+        return
+    mode = stat.S_IMODE(config_path.stat().st_mode)
+    if mode & (stat.S_IRWXG | stat.S_IRWXO):
+        logger.warning(
+            "%s is readable by other users (mode %o); run: chmod 600 %s",
+            config_path,
+            mode,
+            config_path,
+        )
 
 
 def create_default_config(config_path: Path | None = None) -> Path:
@@ -195,7 +197,8 @@ def create_default_config(config_path: Path | None = None) -> Path:
     if config_path is None:
         config_path = get_config_path()
 
-    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    config_path.parent.chmod(0o700)
 
     default_config = """# CJA Audit Log Monitor Configuration
 # See .env.example for authentication credentials
@@ -247,8 +250,10 @@ scopes: openid,AdobeID,read_organizations,additional_info.projectedProductContex
 #       include_entry_details: true
 """
 
-    with open(config_path, "w") as f:
+    fd = os.open(config_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
         f.write(default_config)
+    config_path.chmod(0o600)  # os.open's mode is ignored when the file already exists
 
     return config_path
 

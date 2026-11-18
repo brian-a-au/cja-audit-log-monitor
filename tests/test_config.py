@@ -1,17 +1,20 @@
 """Tests for configuration module."""
 
+import logging
+import stat
+import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import pytest
 import yaml
+from pydantic import ValidationError
 
 from cja_audit_log_monitor.config import (
     CJASettings,
     ConfigError,
     create_default_config,
     load_config,
-    save_config,
 )
 
 
@@ -159,48 +162,54 @@ class TestConfigPriority:
         assert CJASettings().monitor_interval == 60
 
 
-class TestSaveConfig:
-    """Tests for save_config function."""
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX file modes")
+class TestPrivateConfigFiles:
+    def test_default_config_is_private(self, tmp_path: Path) -> None:
+        folder = tmp_path / "d"
+        path = create_default_config(folder / "config.yaml")
+        assert stat.S_IMODE(folder.stat().st_mode) == 0o700
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
-    def test_save_config(self) -> None:
-        """Test saving config to YAML file."""
-        with TemporaryDirectory() as tmpdir:
-            config_path = Path(tmpdir) / "config.yaml"
-            settings = CJASettings(default_page_size=75)
+    def test_overwrite_keeps_file_private(self, tmp_path: Path) -> None:
+        path = tmp_path / "config.yaml"
+        path.write_text("x: 1\n")
+        path.chmod(0o644)
+        create_default_config(path)
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
-            save_config(settings, config_path)
+    def test_load_warns_when_file_is_readable_by_others(self, tmp_path: Path, caplog) -> None:
+        path = tmp_path / "config.yaml"
+        path.write_text("monitor_interval: 10\n")
+        path.chmod(0o644)
+        with caplog.at_level(logging.WARNING):
+            load_config(path)
+        assert "chmod 600" in caplog.text
 
-            with open(config_path) as f:
-                saved = yaml.safe_load(f)
+    def test_load_is_quiet_for_private_file(self, tmp_path: Path, caplog) -> None:
+        path = tmp_path / "config.yaml"
+        path.write_text("monitor_interval: 10\n")
+        path.chmod(0o600)
+        with caplog.at_level(logging.WARNING):
+            load_config(path)
+        assert "chmod 600" not in caplog.text
 
-            assert saved["default_page_size"] == 75
 
-    def test_save_excludes_secrets(self) -> None:
-        """Test that secrets are not saved to file."""
-        with TemporaryDirectory() as tmpdir:
-            config_path = Path(tmpdir) / "config.yaml"
-            settings = CJASettings(
-                client_id="secret_id",
-                secret="super_secret",
-            )
+class TestEndpointUrls:
+    @pytest.mark.parametrize("field", ["ims_base_url", "api_base_url"])
+    def test_plain_http_to_remote_host_rejected(self, field: str) -> None:
+        with pytest.raises(ValidationError):
+            CJASettings(**{field: "http://evil.example"})
 
-            save_config(settings, config_path)
+    @pytest.mark.parametrize("field", ["ims_base_url", "api_base_url"])
+    @pytest.mark.parametrize(
+        "url", ["http://localhost:8080", "http://127.0.0.1:9", "https://example.com"]
+    )
+    def test_allowed_urls(self, field: str, url: str) -> None:
+        assert getattr(CJASettings(**{field: url}), field) == url
 
-            with open(config_path) as f:
-                saved = yaml.safe_load(f)
-
-            assert "client_id" not in saved
-            assert "secret" not in saved
-
-    def test_save_creates_directory(self) -> None:
-        """Test save creates parent directory if needed."""
-        with TemporaryDirectory() as tmpdir:
-            config_path = Path(tmpdir) / "subdir" / "config.yaml"
-            settings = CJASettings(default_page_size=25)
-
-            save_config(settings, config_path)
-
-            assert config_path.exists()
+    def test_other_schemes_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            CJASettings(api_base_url="ftp://example.com")
 
 
 class TestCreateDefaultConfig:
