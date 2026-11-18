@@ -494,6 +494,55 @@ class TestEventTimeWindows:
         assert engine.check_batch(self._deletes(2, self.BASE, step_minutes=90)) == []
 
 
+class FrozenClock(datetime):
+    """datetime whose now() is fixed, for patching the alerts module clock."""
+
+    @classmethod
+    def now(cls, tz=None):
+        return datetime(2026, 3, 1, 12, 0, tzinfo=UTC)
+
+
+class TestFutureTimestamps:
+    """The reference time for pruning never runs ahead of the clock."""
+
+    NOW = datetime(2026, 3, 1, 12, 0, tzinfo=UTC)
+
+    def _engine(self):
+        rule = AlertRule(
+            name="trio", actions=[ActionType.DELETE],
+            threshold_count=3, threshold_window_minutes=60,
+        )
+        return AlertEngine(rules=[rule])
+
+    def _delete(self, when):
+        return AuditLogEntry(action="DELETE", timestamp=when, user_id="u1")
+
+    def test_future_stamped_event_does_not_hide_real_events(self, monkeypatch):
+        monkeypatch.setattr("cja_audit_log_monitor.alerts.datetime", FrozenClock)
+        engine = self._engine()
+        assert engine.check_entry(self._delete(self.NOW - timedelta(minutes=10))) == []
+        assert engine.check_entry(self._delete(self.NOW - timedelta(minutes=5))) == []
+        # The future-stamped event still counts, and the two real events are kept with it.
+        fired = engine.check_entry(self._delete(self.NOW + timedelta(days=3650)))
+        assert [a.rule_name for a in fired] == ["trio"]
+
+    def test_late_event_inside_window_still_counts(self, monkeypatch):
+        monkeypatch.setattr("cja_audit_log_monitor.alerts.datetime", FrozenClock)
+        engine = self._engine()
+        engine.check_entry(self._delete(self.NOW - timedelta(minutes=1)))
+        engine.check_entry(self._delete(self.NOW - timedelta(minutes=2)))
+        fired = engine.check_entry(self._delete(self.NOW - timedelta(minutes=50)))
+        assert [a.rule_name for a in fired] == ["trio"]
+
+    def test_late_event_outside_window_is_dropped(self, monkeypatch):
+        monkeypatch.setattr("cja_audit_log_monitor.alerts.datetime", FrozenClock)
+        engine = self._engine()
+        engine.check_entry(self._delete(self.NOW - timedelta(minutes=1)))
+        engine.check_entry(self._delete(self.NOW - timedelta(minutes=2)))
+        assert engine.check_entry(self._delete(self.NOW - timedelta(minutes=90))) == []
+        assert len(engine._event_history[("trio", "")]) == 2
+
+
 class TestPerUserRules:
     """Per-user rules count each person's events separately."""
 

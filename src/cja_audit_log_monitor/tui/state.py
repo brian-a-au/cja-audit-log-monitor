@@ -242,9 +242,11 @@ class AppState:
             for fa in fired:
                 try:
                     nm.notify_alert(fa.rule_name, fa.message, fa.entry)
-                except Exception:
-                    logger.exception(
-                        "Notification dispatch failed for rule %s", fa.rule_name
+                except Exception as e:
+                    logger.error(
+                        "Notification dispatch failed for rule %s: %s",
+                        fa.rule_name,
+                        type(e).__name__,
                     )
         return fired
 

@@ -631,3 +631,40 @@ class TestMonitorOutputIsLiteral:
         out = buf.getvalue()
         assert "Q3 [/final] report" in out
         assert "Slack failed [/oops]" in out
+
+
+class TestPollOrdering:
+    """Late-indexed events arrive newest first; the engine must still see event time order."""
+
+    def test_newest_first_poll_fires_like_sorted(self, mock_client: MagicMock) -> None:
+        from cja_audit_log_monitor.alerts import AlertEngine
+        from cja_audit_log_monitor.models import ActionType, AlertRule
+
+        base = datetime(2026, 3, 1, 12, 0, tzinfo=UTC)
+        # API order is newest first, so fetch_unseen hands back the reverse of this list.
+        minutes = [100, 40, 30, 20, 10, 0]
+        api_order = [
+            AuditLogEntry(
+                id=f"e{m}", action="DELETE", user_id="u1",
+                timestamp=base + timedelta(minutes=m),
+            )
+            for m in minutes
+        ]
+        # Reverse so the monitor's own reversal yields newest first (late-indexed worst case).
+        mock_client.get_logs.return_value = AuditLogResponse(
+            content=list(reversed(api_order)), last=True
+        )
+        rule = AlertRule(
+            name="five", actions=[ActionType.DELETE],
+            threshold_count=5, threshold_window_minutes=60,
+        )
+        monitor = AuditLogMonitor(
+            mock_client, console=MagicMock(), interval=7, alert_engine=AlertEngine(rules=[rule])
+        )
+        monitor._last_poll_time = datetime.now(UTC)
+        panels = []
+        monitor.console.print.side_effect = panels.append
+        monitor._run_poll(MagicMock())
+        from rich.panel import Panel
+
+        assert sum(isinstance(p, Panel) for p in panels) == 1

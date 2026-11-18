@@ -1579,14 +1579,17 @@ class TestAlertsViewRealEngine:
     async def test_test_rules_does_not_touch_live_history(self, mock_app_state):
         state = self._state(mock_app_state, [AlertRule(name="any")])
         app = _make_app(state)
-        async with app.run_test() as pilot:
-            await pilot.press("a")
-            await pilot.pause()
-            await pilot.click("#test-rules")
-            await app.workers.wait_for_complete()
-            await pilot.pause()
-            assert len(state.alert_engine._event_history) == 0
-            assert state._client.get_all_logs.called
+        with patch.object(type(state.notification_manager), "notify_alert") as notify:
+            async with app.run_test() as pilot:
+                await pilot.press("a")
+                await pilot.pause()
+                await pilot.click("#test-rules")
+                await app.workers.wait_for_complete()
+                await pilot.pause()
+                assert len(state.alert_engine._event_history) == 0
+                assert state._client.get_all_logs.called
+                assert state.recent_alerts == []
+                assert not notify.called
 
     async def test_failed_test_rules_shows_error_in_results(self, mock_app_state):
         state = self._state(mock_app_state, [AlertRule(name="any")])

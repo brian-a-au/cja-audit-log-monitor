@@ -12,7 +12,7 @@ from rich.markup import escape
 from rich.status import Status
 from rich.text import Text
 
-from .alerts import AlertEngine
+from .alerts import AlertEngine, order_oldest_first
 from .auth import AuthenticationError
 from .client import APIError, AuditLogsClient, is_final_page
 from .formatters import get_action_color
@@ -166,7 +166,7 @@ class AuditLogMonitor:
 
         if self._entry_filter:
             new_entries = [e for e in new_entries if self._entry_filter(e)]
-        return new_entries
+        return order_oldest_first(new_entries)
 
     def _handle_entry(self, entry: AuditLogEntry) -> None:
         """Handle a new audit log entry."""
@@ -178,9 +178,11 @@ class AuditLogMonitor:
                         self.notification_manager.notify_alert(
                             fa.rule_name, fa.message, fa.entry
                         )
-                    except Exception:
-                        logger.exception(
-                            "Notification dispatch failed for rule %s", fa.rule_name
+                    except Exception as e:
+                        logger.error(
+                            "Notification dispatch failed for rule %s: %s",
+                            fa.rule_name,
+                            type(e).__name__,
                         )
             if self.notification_manager:
                 warning = self.notification_manager.pop_first_failure()

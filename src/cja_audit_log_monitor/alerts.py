@@ -86,6 +86,14 @@ DEFAULT_ALERT_RULES = [
 ]
 
 
+def order_oldest_first(entries: list[AuditLogEntry]) -> list[AuditLogEntry]:
+    """Sort entries by event time, oldest first, so rule windows slide forward.
+
+    Entries without a timestamp are treated as happening now and go last.
+    """
+    return sorted(entries, key=lambda e: (e.timestamp is None, e.timestamp or _EPOCH))
+
+
 class AlertEngine:
     """Engine for detecting suspicious patterns in audit logs."""
 
@@ -223,10 +231,13 @@ class AlertEngine:
             # Add to event history
             self._event_history[key].append((timestamp, entry))
 
-            # Clean old events, measured from the newest event time for this key
+            # Clean old events, measured from the newest event time for this key. A
+            # timestamp in the future must not push the window past real events.
             newest = max(ts for ts, _ in self._event_history[key])
             self._clean_old_events(
-                key, timedelta(minutes=rule.threshold_window_minutes), newest
+                key,
+                timedelta(minutes=rule.threshold_window_minutes),
+                min(newest, datetime.now(UTC)),
             )
 
             # Check threshold
@@ -268,9 +279,7 @@ class AlertEngine:
         Returns:
             List of FiredAlert objects for triggered rules.
         """
-        # Oldest first so windows slide forward in event time; entries without
-        # a timestamp are treated as happening now and go last.
-        ordered = sorted(entries, key=lambda e: (e.timestamp is None, e.timestamp or _EPOCH))
+        ordered = order_oldest_first(entries)
         all_fired: list[FiredAlert] = []
         for entry in ordered:
             all_fired.extend(self.check_entry(entry))
