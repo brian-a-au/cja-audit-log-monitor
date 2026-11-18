@@ -295,6 +295,62 @@ class TestAnalyzeForAnomalies:
         assert len(off_hours) >= 1
 
 
+class TestAnomalyThresholds:
+    """Anomaly checks need enough activity to mean something."""
+
+    @staticmethod
+    def _at(i, hour, user="u"):
+        ts = datetime(2026, 11, 17, hour, i % 60, tzinfo=UTC)
+        return AuditLogEntry(id=f"e{hour}-{i}", user_id=user, timestamp=ts)
+
+    def _spread(self, count):
+        return [self._at(i, 6 + i % 18) for i in range(count)]
+
+    @staticmethod
+    def _types(entries, kind):
+        return [a for a in analyze_for_anomalies(entries) if a["type"] == kind]
+
+    def test_single_off_hours_event_is_not_flagged(self):
+        entries = self._spread(4) + [self._at(0, 3)]
+        assert self._types(entries, "off_hours_activity") == []
+
+    def test_six_events_at_three_am_are_flagged(self):
+        entries = self._spread(44) + [self._at(i, 3) for i in range(6)]
+        off = self._types(entries, "off_hours_activity")
+        assert [a["hour"] for a in off] == [3]
+        assert off[0]["action_count"] == 6
+
+    def test_six_events_at_five_am_are_not_off_hours(self):
+        entries = self._spread(44) + [self._at(i, 5) for i in range(6)]
+        assert self._types(entries, "off_hours_activity") == []
+
+    def test_high_activity_compares_with_other_users(self):
+        entries = (
+            [self._at(i, 9, "a") for i in range(98)]
+            + [self._at(0, 9, "b"), self._at(1, 9, "c")]
+        )
+        high = self._types(entries, "high_activity_user")
+        assert [a["user"] for a in high] == ["a"]
+        assert high[0]["action_count"] == 98
+        assert high[0]["average"] == 1
+
+    def test_single_user_is_never_high_activity(self):
+        entries = [self._at(i, 9, "a") for i in range(100)]
+        assert self._types(entries, "high_activity_user") == []
+
+    def test_bulk_delete_is_reported_per_user(self):
+        entries = [
+            AuditLogEntry(id=f"d{i}", action="DELETE", user_id="a") for i in range(100)
+        ] + [AuditLogEntry(id="x", action="DELETE", user_id="b")]
+        bulk = self._types(entries, "bulk_delete_single_user")
+        assert [a["user"] for a in bulk] == ["a"]
+        assert bulk[0]["delete_count"] == 100
+
+    def test_ten_deletes_are_not_bulk(self):
+        entries = [AuditLogEntry(id=f"d{i}", action="DELETE", user_id="a") for i in range(10)]
+        assert self._types(entries, "bulk_delete_single_user") == []
+
+
 def test_rule_can_name_image_component():
     from cja_audit_log_monitor.alerts import AlertEngine
 

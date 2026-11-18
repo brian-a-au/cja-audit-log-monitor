@@ -23,6 +23,12 @@ logger = logging.getLogger(__name__)
 
 _EPOCH = datetime.min.replace(tzinfo=UTC)
 
+# Anomaly thresholds: a check needs this much activity before it means anything.
+OFF_HOURS_END = 5  # off-hours are 00:00 up to, not including, 05:00
+OFF_HOURS_MIN_COUNT = 5
+HIGH_ACTIVITY_MIN_COUNT = 20
+BULK_DELETE_MIN_COUNT = 11
+
 
 @dataclass
 class FiredAlert:
@@ -327,31 +333,33 @@ def analyze_for_anomalies(
 
     # Group by user
     user_actions = group_by_user(entries)
-
-    # Check for users with unusually high activity
     total_actions = len(entries)
-    avg_per_user = total_actions / len(user_actions) if user_actions else 0
 
-    for user, actions in user_actions.items():
-        if len(actions) > avg_per_user * 3:  # 3x average
-            anomalies.append({
-                "type": "high_activity_user",
-                "user": user,
-                "action_count": len(actions),
-                "average": avg_per_user,
-                "description": f"User {user} has {len(actions)} actions ({avg_per_user:.1f} avg)",
-            })
+    # Check for users with unusually high activity, judged against the other users
+    if len(user_actions) > 1:
+        for user, actions in user_actions.items():
+            others_mean = (total_actions - len(actions)) / (len(user_actions) - 1)
+            if len(actions) >= HIGH_ACTIVITY_MIN_COUNT and len(actions) > others_mean * 3:
+                anomalies.append({
+                    "type": "high_activity_user",
+                    "user": user,
+                    "action_count": len(actions),
+                    "average": others_mean,
+                    "description": (
+                        f"User {user} has {len(actions)} actions "
+                        f"({others_mean:.1f} avg for other users)"
+                    ),
+                })
 
-    # Check for concentrated delete activity
+    # Check for concentrated delete activity, one report per user
     delete_entries = [e for e in entries if e.action == ActionType.DELETE.value]
-    if len(delete_entries) > 10:
-        delete_users = set(group_by_user(delete_entries))
-        if len(delete_users) == 1:
+    for user, deletes in group_by_user(delete_entries).items():
+        if len(deletes) >= BULK_DELETE_MIN_COUNT:
             anomalies.append({
                 "type": "bulk_delete_single_user",
-                "user": list(delete_users)[0],
-                "delete_count": len(delete_entries),
-                "description": f"Single user performed {len(delete_entries)} deletes",
+                "user": user,
+                "delete_count": len(deletes),
+                "description": f"User {user} performed {len(deletes)} deletes",
             })
 
     # Check for unusual time patterns (if timestamps available)
@@ -366,8 +374,12 @@ def analyze_for_anomalies(
     if hour_counts:
         avg_per_hour = sum(hour_counts.values()) / 24
         for hour, count in hour_counts.items():
-            # Flag unusual activity in off-hours (midnight to 5am)
-            if 0 <= hour <= 5 and count > avg_per_hour * 2:
+            # Flag a real burst in off-hours (midnight up to OFF_HOURS_END)
+            if (
+                0 <= hour < OFF_HOURS_END
+                and count >= OFF_HOURS_MIN_COUNT
+                and count > avg_per_hour * 2
+            ):
                 anomalies.append({
                     "type": "off_hours_activity",
                     "hour": hour,
