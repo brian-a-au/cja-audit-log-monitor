@@ -348,3 +348,175 @@ class TestFormulaInjection:
         rows = list(csv.DictReader(StringIO(out.getvalue())))
         assert rows[0]["timestamp"].startswith("2024-01-15")
         assert rows[0]["component_name"] == "Plain"
+
+
+class TestAtomicWrite:
+    """atomic_write leaves nothing behind and never damages an existing file."""
+
+    @staticmethod
+    def _only(path: Path) -> list[str]:
+        return sorted(p.name for p in path.parent.iterdir())
+
+    def test_error_in_body_keeps_original_and_removes_temp(self, tmp_path: Path) -> None:
+        from cja_audit_log_monitor.export import atomic_write
+
+        target = tmp_path / "out.txt"
+        target.write_text("old")
+        with pytest.raises(RuntimeError, match="boom"):
+            with atomic_write(target) as f:
+                f.write("partial")
+                raise RuntimeError("boom")
+        assert target.read_text() == "old"
+        assert self._only(target) == ["out.txt"]
+
+    def test_failed_replace_keeps_original_and_removes_temp(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from cja_audit_log_monitor.export import atomic_write
+
+        target = tmp_path / "out.txt"
+        target.write_text("old")
+
+        def broken_replace(src, dst):
+            raise OSError("replace failed")
+
+        monkeypatch.setattr("cja_audit_log_monitor.export.os.replace", broken_replace)
+        with pytest.raises(OSError, match="replace failed"):
+            with atomic_write(target) as f:
+                f.write("new")
+        assert target.read_text() == "old"
+        assert self._only(target) == ["out.txt"]
+
+    def test_keyboard_interrupt_cleans_up(self, tmp_path: Path) -> None:
+        from cja_audit_log_monitor.export import atomic_write
+
+        target = tmp_path / "out.txt"
+        target.write_text("old")
+        with pytest.raises(KeyboardInterrupt):
+            with atomic_write(target) as f:
+                f.write("partial")
+                raise KeyboardInterrupt
+        assert target.read_text() == "old"
+        assert self._only(target) == ["out.txt"]
+
+    def test_cleanup_failure_keeps_original_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from cja_audit_log_monitor.export import atomic_write
+
+        def broken_unlink(name):
+            raise PermissionError("cannot unlink")
+
+        monkeypatch.setattr("cja_audit_log_monitor.export.os.unlink", broken_unlink)
+        with pytest.raises(RuntimeError, match="boom"):
+            with atomic_write(tmp_path / "out.txt") as f:
+                f.write("x")
+                raise RuntimeError("boom")
+
+    def test_no_overwrite_refuses_existing_file(self, tmp_path: Path) -> None:
+        from cja_audit_log_monitor.export import atomic_write
+
+        target = tmp_path / "out.txt"
+        target.write_text("old")
+        with pytest.raises(FileExistsError):
+            with atomic_write(target, overwrite=False) as f:
+                f.write("new")
+        assert target.read_text() == "old"
+        assert self._only(target) == ["out.txt"]
+
+    def test_no_overwrite_creates_new_file(self, tmp_path: Path) -> None:
+        from cja_audit_log_monitor.export import atomic_write
+
+        target = tmp_path / "out.txt"
+        with atomic_write(target, overwrite=False) as f:
+            f.write("new")
+        assert target.read_text() == "new"
+        assert self._only(target) == ["out.txt"]
+
+    def test_no_overwrite_falls_back_when_links_unsupported(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from cja_audit_log_monitor.export import atomic_write
+
+        def no_links(src, dst):
+            raise OSError("links not supported")
+
+        monkeypatch.setattr("cja_audit_log_monitor.export.os.link", no_links)
+        target = tmp_path / "out.txt"
+        with atomic_write(target, overwrite=False) as f:
+            f.write("new")
+        assert target.read_text() == "new"
+        target.write_text("old")
+        with pytest.raises(FileExistsError):
+            with atomic_write(target, overwrite=False) as f:
+                f.write("new")
+        assert target.read_text() == "old"
+        assert self._only(target) == ["out.txt"]
+
+    def test_unwritable_folder_error_names_the_target(self, tmp_path: Path) -> None:
+        from cja_audit_log_monitor.export import atomic_write
+
+        folder = tmp_path / "locked"
+        folder.mkdir()
+        folder.chmod(0o500)
+        try:
+            with pytest.raises(PermissionError) as info:
+                with atomic_write(folder / "out.json") as f:
+                    f.write("x")
+        finally:
+            folder.chmod(0o700)
+        assert "out.json" in str(info.value)
+        assert ".tmp" not in str(info.value)
+        assert info.value.errno is not None
+
+
+class TestExportOverwriteFlag:
+    def test_export_entries_overwrite_false_refuses_existing(
+        self, sample_audit_entries: list[AuditLogEntry], tmp_path: Path
+    ) -> None:
+        target = tmp_path / "out.csv"
+        target.write_text("old")
+        with pytest.raises(FileExistsError):
+            export_entries(sample_audit_entries, target, "csv", overwrite=False)
+        assert target.read_text() == "old"
+
+    @pytest.mark.parametrize("fmt", ["json", "csv", "tsv"])
+    def test_export_entries_default_replaces(
+        self, sample_audit_entries: list[AuditLogEntry], tmp_path: Path, fmt: str
+    ) -> None:
+        target = tmp_path / f"out.{fmt}"
+        target.write_text("old")
+        export_entries(sample_audit_entries, target, fmt)
+        assert target.read_text() != "old"
+
+
+class TestCellGuard:
+    @pytest.mark.parametrize("prefix", ["=", "+", "-", "@", "\t", "\r"])
+    def test_cell_prefixes_formula_starts(self, prefix: str) -> None:
+        from cja_audit_log_monitor.export import _cell
+
+        assert _cell(f"{prefix}SUM(A1)") == f"'{prefix}SUM(A1)"
+
+    def test_cell_leaves_plain_text_and_none(self) -> None:
+        from cja_audit_log_monitor.export import _cell
+
+        assert _cell("hello") == "hello"
+        assert _cell(None) == ""
+
+    def test_header_row_is_not_prefixed(self, sample_audit_entry: AuditLogEntry) -> None:
+        out = StringIO()
+        export_to_csv([sample_audit_entry], out)
+        assert out.getvalue().splitlines()[0].startswith("id,timestamp,user_id")
+
+
+class TestStreamOutput:
+    def test_json_stream_ends_with_newline(self, sample_audit_entry: AuditLogEntry) -> None:
+        out = StringIO()
+        export_to_json([sample_audit_entry], out)
+        assert out.getvalue().endswith("}\n")
+
+    def test_tsv_to_stream_via_export_entries(self, sample_audit_entry: AuditLogEntry) -> None:
+        out = StringIO()
+        count = export_entries([sample_audit_entry], out, "tsv")
+        assert count == 1
+        assert out.getvalue().splitlines()[0].startswith("id\ttimestamp")

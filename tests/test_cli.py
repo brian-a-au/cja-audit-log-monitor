@@ -2141,3 +2141,88 @@ def test_anomaly_dispatch_error_log_has_no_exception_text(caplog):
             _run_anomalies_cycle(client, nm, AnomalyDedupFilter(), 1)
     assert "RuntimeError" in caplog.text
     assert "SECRET" not in caplog.text
+
+
+class TestExportRaces:
+    """A file that appears after the early check is never clobbered; odd paths read clearly."""
+
+    @staticmethod
+    def _client(entries):
+        client = MagicMock()
+        client.get_all_logs.return_value = entries
+        client.get_logs_paginated.return_value = iter(entries)
+        client.__enter__ = MagicMock(return_value=client)
+        client.__exit__ = MagicMock(return_value=False)
+        return client
+
+    @patch("cja_audit_log_monitor.cli.get_client")
+    def test_file_created_during_fetch_is_not_clobbered(
+        self, mock_get_client: MagicMock, runner: CliRunner, sample_audit_entries, tmp_path
+    ) -> None:
+        target = tmp_path / "out.json"
+        client = self._client(sample_audit_entries)
+
+        def fetch_then_appear(*args, **kwargs):
+            target.write_text("someone else")
+            return sample_audit_entries
+
+        client.get_all_logs.side_effect = fetch_then_appear
+        mock_get_client.return_value = (client, MagicMock())
+
+        result = runner.invoke(main, ["cli", "export", "-o", str(target)])
+
+        assert result.exit_code == 1
+        assert target.read_text() == "someone else"
+        assert sorted(p.name for p in tmp_path.iterdir()) == ["out.json"]
+
+    @patch("cja_audit_log_monitor.cli.get_client")
+    def test_report_file_created_during_fetch_is_not_clobbered(
+        self, mock_get_client: MagicMock, runner: CliRunner, sample_audit_entries, tmp_path
+    ) -> None:
+        target = tmp_path / "report.json"
+        client = self._client(sample_audit_entries)
+
+        def fetch_then_appear(*args, **kwargs):
+            target.write_text("someone else")
+            return sample_audit_entries
+
+        client.get_all_logs.side_effect = fetch_then_appear
+        mock_get_client.return_value = (client, MagicMock())
+
+        result = runner.invoke(main, ["cli", "report", "-o", str(target)])
+
+        assert result.exit_code == 1
+        assert target.read_text() == "someone else"
+
+    @patch("cja_audit_log_monitor.cli.get_client")
+    def test_directory_output_says_folder(
+        self, mock_get_client: MagicMock, runner: CliRunner, tmp_path
+    ) -> None:
+        for extra in ([], ["--force"]):
+            result = runner.invoke(
+                main, ["cli", "export", "-o", str(tmp_path), *extra], env={"COLUMNS": "500"}
+            )
+            assert result.exit_code == 1
+            assert "folder" in result.stderr
+            assert "--force" not in result.stderr
+        mock_get_client.assert_not_called()
+
+    @patch("cja_audit_log_monitor.cli.get_client")
+    def test_export_tsv_to_stdout(
+        self, mock_get_client: MagicMock, runner: CliRunner, sample_audit_entries
+    ) -> None:
+        mock_get_client.return_value = (self._client(sample_audit_entries), MagicMock())
+        result = runner.invoke(main, ["cli", "export", "-f", "tsv", "-o", "-", "--days", "1"])
+        assert result.exit_code == 0, result.output
+        assert result.stdout.splitlines()[0].startswith("id\ttimestamp")
+
+    @patch("cja_audit_log_monitor.cli.get_client")
+    def test_report_dash_goes_to_stdout(
+        self, mock_get_client: MagicMock, runner: CliRunner, sample_audit_entries
+    ) -> None:
+        mock_get_client.return_value = (self._client(sample_audit_entries), MagicMock())
+        with runner.isolated_filesystem():
+            result = runner.invoke(main, ["cli", "report", "-o", "-", "--days", "1"])
+            assert not Path("-").exists()
+        assert result.exit_code == 0, result.output
+        assert "statistics" in json.loads(result.stdout) or json.loads(result.stdout)

@@ -110,6 +110,8 @@ def check_output_path(output: Path | None, force: bool) -> None:
     """
     if output is None or str(output) == "-":
         return
+    if output.is_dir():
+        raise IsADirectoryError(f"{output} is a folder, not a file; give a file name")
     if not output.parent.is_dir():
         raise FileNotFoundError(f"directory {output.parent} does not exist")
     if output.exists() and not force:
@@ -629,6 +631,7 @@ def export(
                 destination,
                 output_format=format,
                 pretty=pretty,
+                overwrite=force,
             )
         else:
             entries = client.get_all_logs(query, max_entries=max_entries)
@@ -636,7 +639,7 @@ def export(
                 err_console.print("[yellow]No audit logs found to export.[/yellow]")
                 return
             count = export_entries(
-                entries, destination, output_format=format, pretty=pretty
+                entries, destination, output_format=format, pretty=pretty, overwrite=force
             )
 
     target = "stdout" if to_stdout else escape(str(output))
@@ -1094,7 +1097,7 @@ def report(
     json_output = json.dumps(report_data, indent=indent, default=str)
 
     if output and str(output) != "-":
-        with atomic_write(output) as f:
+        with atomic_write(output, overwrite=force) as f:
             f.write(json_output)
         err_console.print(f"[green]Report saved to {escape(str(output))}[/green]")
     else:
