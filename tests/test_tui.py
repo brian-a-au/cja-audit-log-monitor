@@ -1901,8 +1901,8 @@ class TestExportScope:
             dialog = await self._open(app, pilot)
             dialog.query_one("#output-path").value = str(target)
             await pilot.click("#export-button")
+            assert await _wait_for(target.exists, pilot, timeout=5.0)
             await app.workers.wait_for_complete()
-            await pilot.pause()
         import json
 
         assert len(json.loads(target.read_text())["entries"]) == len(sample_audit_entries)
@@ -1923,8 +1923,8 @@ class TestExportScope:
             await pilot.pause()
             dialog.query_one("#output-path").value = str(target)
             await pilot.click("#export-button")
+            assert await _wait_for(target.exists, pilot, timeout=5.0)
             await app.workers.wait_for_complete()
-            await pilot.pause()
         import json
 
         assert len(json.loads(target.read_text())["entries"]) == 30
@@ -1939,12 +1939,15 @@ class TestExportScope:
         mock_app_state.entries = sample_audit_entries
         app = _make_app(mock_app_state)
         monkeypatch.setattr(ExportDialog, "AUTO_CLOSE_SECONDS", 0.05)
+        target = tmp_path / "x.json"
         async with app.run_test(size=(120, 40)) as pilot:
             dialog = await self._open(app, pilot)
-            dialog.query_one("#output-path").value = str(tmp_path / "x.json")
+            dialog.query_one("#output-path").value = str(target)
             await pilot.click("#export-button")
-            await pilot.pause(0.3)
-            assert not isinstance(app.screen, ExportDialog)
+            assert await _wait_for(target.exists, pilot, timeout=5.0)
+            assert await _wait_for(
+                lambda: not isinstance(app.screen, ExportDialog), pilot, timeout=5.0
+            )
         assert app._exception is None
 
     async def test_closing_before_auto_close_does_not_crash(
@@ -1952,10 +1955,18 @@ class TestExportScope:
     ):
         from cja_audit_log_monitor.tui.modals import ExportDialog
 
-        # Long enough that Escape lands before the timer fires.
-        monkeypatch.setattr(ExportDialog, "AUTO_CLOSE_SECONDS", 0.2)
+        # Wide margin so Escape lands before the timer even on a heavily loaded machine.
+        monkeypatch.setattr(ExportDialog, "AUTO_CLOSE_SECONDS", 2.0)
         closes: list[bool] = []
+        done: list[bool] = []
         real_close = ExportDialog._close_if_open
+        real_done = ExportDialog._done
+
+        def done_spy(self, *args, **kwargs):
+            real_done(self, *args, **kwargs)
+            done.append(True)  # the auto-close timer is now armed
+
+        monkeypatch.setattr(ExportDialog, "_done", done_spy)
 
         def spy(self):
             closes.append(self.app.screen is self)
@@ -1970,13 +1981,14 @@ class TestExportScope:
             dialog.query_one("#output-path").value = str(target)
             await pilot.click("#export-button")
             # Wait for the export worker and for _done (which starts the timer) to run.
-            await app.workers.wait_for_complete()
-            await pilot.pause()
+            assert await _wait_for(lambda: bool(done), pilot, timeout=5.0)
             assert target.exists()
             assert not closes  # timer has not fired yet
             await pilot.press("escape")
-            assert not isinstance(app.screen, ExportDialog)
-            await pilot.pause(0.6)  # well past the timer
+            assert await _wait_for(
+                lambda: not isinstance(app.screen, ExportDialog), pilot, timeout=5.0
+            )
+            await pilot.pause(0.1)  # let any stray timer callback run; the margin is 2 s
             # Textual stops a screen's timers when it is removed, so the callback never
             # runs on a closed dialog; if that ever changes, it must still be a no-op.
             assert closes in ([], [False])

@@ -113,6 +113,8 @@ class AuditLogMonitor:
         self._seen = RecentIds(SEEN_IDS_MAX)
         # Why the last poll failed, or None when it worked.
         self._poll_error: str | None = None
+        # How many polls worked, so a caller can tell a run where every poll failed.
+        self.successful_polls = 0
         self._stop_announced = False
         self._on_new_entry: Callable[[AuditLogEntry], None] | None = None
 
@@ -155,6 +157,7 @@ class AuditLogMonitor:
             self._poll_error = str(e)
             return []
         self._poll_error = None
+        self.successful_polls += 1
 
         # Only remember entries once the whole poll succeeded, so a failed page is retried.
         for entry in new_entries:
@@ -182,7 +185,7 @@ class AuditLogMonitor:
             if self.notification_manager:
                 warning = self.notification_manager.pop_first_failure()
                 if warning:
-                    self.console.print(f"[yellow]{warning}[/yellow]")
+                    self.console.print(f"[yellow]{escape(str(warning))}[/yellow]")
 
         self._display_entry(entry)
 

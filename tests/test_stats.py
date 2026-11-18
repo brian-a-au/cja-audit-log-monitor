@@ -138,3 +138,17 @@ class TestGroupByAccount:
         stats = calculate_stats(entries)
         assert stats["user_count"] == 25
         assert len(stats["top_users"]) == 10
+
+
+class TestTopN:
+    def test_top_n_controls_how_many_users_are_returned(self):
+        from cja_audit_log_monitor.models import AuditLogEntry
+        from cja_audit_log_monitor.stats import calculate_stats
+
+        entries = [
+            AuditLogEntry(id=f"{i}", user_id=f"U{i}@x.e", user_email=f"u{i}@example.com")
+            for i in range(15)
+        ]
+        assert len(calculate_stats(entries, top_n=15)["top_users"]) == 15
+        assert len(calculate_stats(entries, top_n=3)["top_users"]) == 3
+        assert len(calculate_stats(entries)["top_users"]) == 10

@@ -597,3 +597,37 @@ class TestFetchUnseen:
 
         fetch_unseen(get_logs, build_poll_query(None, T0, 1), RecentIds(10), 5, stop=stop)
         assert pages == [0]
+
+
+class TestMonitorOutputIsLiteral:
+    """Entry text and delivery warnings are data, not Rich markup."""
+
+    def test_entry_and_warning_with_brackets_print_literally(self, mock_client: MagicMock) -> None:
+        import io
+
+        from rich.console import Console
+
+        buf = io.StringIO()
+        notifier = MagicMock()
+        notifier.is_configured.return_value = False
+        notifier.pop_first_failure.return_value = "Slack failed [/oops]"
+        engine = MagicMock()
+        engine.check_entry.return_value = []
+        mon = AuditLogMonitor(
+            mock_client,
+            console=Console(file=buf, width=200),
+            alert_engine=engine,
+            notification_manager=notifier,
+        )
+        entry = AuditLogEntry(
+            id="e1",
+            timestamp=datetime(2024, 1, 15, 10, 0, 0, tzinfo=UTC),
+            action="CREATE",
+            component_name="Q3 [/final] report",
+        )
+
+        mon._handle_entry(entry)
+
+        out = buf.getvalue()
+        assert "Q3 [/final] report" in out
+        assert "Slack failed [/oops]" in out

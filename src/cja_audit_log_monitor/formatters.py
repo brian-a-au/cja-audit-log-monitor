@@ -169,17 +169,17 @@ def format_logs_table(
         action_text.stylize(get_action_color(action_str))
 
         row = [
-            format_timestamp(entry.timestamp),
-            get_user_identifier(entry, default="-"),
+            Text(format_timestamp(entry.timestamp)),
+            Text(get_user_identifier(entry, default="-")),
             action_text,
-            entry.component_type or "-",
-            entry.component_name or entry.component_id or "-",
+            Text(entry.component_type or "-"),
+            Text(entry.component_name or entry.component_id or "-"),
         ]
 
         if show_details:
             row.extend([
-                entry.description or "-",
-                entry.ip_address or "-",
+                Text(entry.description or "-"),
+                Text(entry.ip_address or "-"),
             ])
 
         table.add_row(*row)
@@ -220,9 +220,12 @@ def format_single_entry(entry: AuditLogEntry) -> Panel:
         content.append("Org ID: ", style="bold")
         content.append(f"{entry.org_id}\n")
 
+    title = Text()
+    title.append(f"{entry.action}", style=action_color)
+    title.append(f" - {entry.component_type}")
     return Panel(
         content,
-        title=f"[{action_color}]{entry.action}[/{action_color}] - {entry.component_type}",
+        title=title,
         border_style=action_color,
     )
 
@@ -262,7 +265,7 @@ def format_stats_panel(
         for component, count in sorted(stats["component_counts"].items(), key=lambda x: -x[1])[:10]:
             content.append(f"  {component}: {count:,}\n")
 
-    return Panel(content, title=title, border_style="blue")
+    return Panel(content, title=Text(title), border_style="blue")
 
 
 def format_user_stats_table(user_stats: list[tuple[str, int]]) -> Table:
@@ -278,7 +281,7 @@ def format_user_stats_table(user_stats: list[tuple[str, int]]) -> Table:
     table.add_column("Actions", justify="right", width=12)
 
     for rank, (user, count) in enumerate(user_stats, 1):
-        table.add_row(str(rank), user, f"{count:,}")
+        table.add_row(str(rank), Text(user), f"{count:,}")
 
     return table
 
@@ -338,7 +341,7 @@ def format_alert(
 
     return Panel(
         content,
-        title=f"⚠️  ALERT: {alert_name}",
+        title=Text(f"⚠️  ALERT: {alert_name}"),
         border_style="red",
     )
 

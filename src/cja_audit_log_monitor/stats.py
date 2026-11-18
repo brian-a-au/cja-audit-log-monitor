@@ -7,11 +7,12 @@ from .models import AuditLogEntry, AuditLogQuery
 from .utils import group_by_user, to_local
 
 
-def calculate_stats(entries: list[AuditLogEntry]) -> dict:
+def calculate_stats(entries: list[AuditLogEntry], top_n: int = 10) -> dict:
     """Calculate summary statistics from audit log entries.
 
     Args:
         entries: List of audit log entries.
+        top_n: How many of the most active users to include in ``top_users``.
 
     Returns:
         Dictionary containing various statistics.
@@ -55,7 +56,7 @@ def calculate_stats(entries: list[AuditLogEntry]) -> dict:
 
     return {
         "total_entries": len(entries),
-        "top_users": user_counter.most_common(10),
+        "top_users": user_counter.most_common(top_n),
         "user_count": len(user_counter),
         "action_counts": dict(action_counter),
         "component_counts": dict(component_counter),
