@@ -196,7 +196,11 @@ class CJAAuditApp(App):
         """
         self._connection_status = status
         first_line = detail.strip().splitlines()[0] if detail.strip() else ""
-        self.query_one("#status-row", Static).update(self._status_row_text(status, first_line))
+        try:
+            row = self.query_one("#status-row", Static)
+        except NoMatches:
+            return  # the screen is gone (app shutting down): nothing left to update
+        row.update(self._status_row_text(status, first_line))
 
     def note_api_error(self, error: Exception) -> None:
         """Mark the header disconnected when a view's API call failed to connect."""

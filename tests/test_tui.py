@@ -893,6 +893,11 @@ async def _wait_for(condition, pilot, timeout: float = 3.0) -> bool:
     return condition()
 
 
+def _reloaded(app, times: int = 1) -> bool:
+    """True once the config view's reload handler has run to its end ``times`` times."""
+    return sum("Settings reloaded" in n.message for n in app._notifications) >= times
+
+
 class TestMonitorScreen:
     """Test the Monitor screen."""
 
@@ -1730,6 +1735,7 @@ class TestSettingsScreen:
             app.query_one("#reload-button", Button).press()
             assert await _wait_for(lambda: "45 seconds" in shown_values(), pilot)
             assert "30 seconds" not in shown_values()
+            assert await _wait_for(lambda: _reloaded(app, 2), pilot)
 
     async def test_reload_settings_is_refused_while_monitoring(self, mock_app_state):
         client = mock_app_state.client
@@ -3607,6 +3613,7 @@ class TestConfiguredDefaults:
             assert app._screens["monitor"].query_one("#interval-input", Input).value == "30"
             assert app._screens["stats"].query_one("#days-input", Input).value == "3"
             assert mock_app_state.filters.page_size == 20
+            assert await _wait_for(lambda: _reloaded(app), pilot)
 
     async def test_reload_relabels_the_dashboard_window(self, mock_app_state, tmp_path):
         config = tmp_path / "config.yaml"
@@ -3628,6 +3635,7 @@ class TestConfiguredDefaults:
             await pilot.pause()
             app.query_one("#reload-button", Button).press()
             assert await _wait_for(lambda: "last 3 days" in labels(), pilot)
+            assert await _wait_for(lambda: _reloaded(app), pilot)
 
 
 def _dot_color(app):
