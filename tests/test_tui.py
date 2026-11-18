@@ -1,5 +1,6 @@
 """Tests for the TUI module."""
 
+import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -340,6 +341,15 @@ async def _show_and_load(app, pilot, key: str):
     return view
 
 
+def _plain(widget) -> str:
+    """A Static's content as plain text, whether it holds markup or a Rich renderable."""
+    from rich.console import Console
+
+    console = Console(width=200, record=True, color_system=None)
+    console.print(widget.content)
+    return console.export_text()
+
+
 def _empty_text(view) -> str:
     return str(view.query_one("#empty-state", Static).render())
 
@@ -524,8 +534,8 @@ class TestViewLayouts:
         app = _make_app(mock_app_state)
         async with app.run_test(size=(140, 40)) as pilot:
             view = await _show_and_load(app, pilot, "s")
-            action = view.query_one("#action-chart").region
-            hourly = view.query_one("#hourly-chart").region
+            action = view.query_one("#stats-action-chart").region
+            hourly = view.query_one("#stats-hourly-chart").region
             assert action.y == hourly.y
             assert hourly.x > action.x
 
@@ -567,8 +577,9 @@ class TestViewFocusAndScroll:
 
     @pytest.mark.parametrize("key", ["s", "c"])
     async def test_tall_view_body_scrolls_at_100x30(self, mock_app_state, key):
+        # 20 rows: shorter than either view's content, so the body must scroll.
         app = _make_app(mock_app_state)
-        async with app.run_test(size=(100, 30)) as pilot:
+        async with app.run_test(size=(100, 20)) as pilot:
             view = await _show_and_load(app, pilot, key)
             body = view.query_one("#view-body")
             assert body.max_scroll_y > 0
@@ -794,7 +805,7 @@ class TestLogBrowserScreen:
         async with app.run_test() as pilot:
             await pilot.press("l")
             await pilot.pause()
-            loading = app.query_one("#loading")
+            loading = app.query_one("#logs-loading")
             assert loading is not None
 
 
@@ -1057,7 +1068,7 @@ class TestModals:
             await pilot.pause()
             assert panel.is_visible()
             # Detail body must contain the entry id.
-            body_text = str(panel.query_one("#detail-body", Static).render())
+            body_text = _plain(panel.query_one("#detail-body", Static))
             assert sample_audit_entry.id in body_text
 
     async def test_entry_detail_panel_dismisses_on_escape(
@@ -1173,7 +1184,7 @@ class TestModals:
             panel.show_entry(entry_a)
             await pilot.pause()
             body = panel.query_one("#detail-body", Static)
-            body_text_a = str(body.render())
+            body_text_a = _plain(body)
             assert entry_a.id in body_text_a
 
             # Move cursor to second row and fire the highlighted handler directly.
@@ -1183,7 +1194,7 @@ class TestModals:
             log_screen.on_data_table_row_highlighted(event=None)
             await pilot.pause()
 
-            body_text_b = str(body.render())
+            body_text_b = _plain(body)
             assert entry_b.id in body_text_b
             assert panel.is_visible()
 
@@ -1265,7 +1276,7 @@ class TestSampledTotals:
         app = _make_app(mock_app_state)
         async with app.run_test(size=(140, 40)) as pilot:
             view = await _show_and_load(app, pilot, key)
-            note = view.query_one("#sample-note", Static)
+            note = view.query_one(".sample-note", Static)
             assert note.display
             n = len(sample_audit_entries)
             assert f"newest {n:,} of 28,775 entries" in str(note.render())
@@ -1275,7 +1286,7 @@ class TestSampledTotals:
         app = _make_app(mock_app_state)
         async with app.run_test(size=(140, 40)) as pilot:
             view = await _show_and_load(app, pilot, key)
-            assert not view.query_one("#sample-note", Static).display
+            assert not view.query_one(".sample-note", Static).display
 
 
 class TestExportScope:
@@ -1824,3 +1835,138 @@ async def test_alert_card_shows_local_time_with_zone(mock_app_state, los_angeles
         await pilot.pause()
         text = str(card.render())
         assert "2026-11-17 15:25:13 PST" in text
+
+
+class TestLaterRoundPolish:
+    async def test_no_repeated_ids_across_views(self, mock_app_state):
+        from collections import Counter
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            for key in "dlmsac":
+                await pilot.press(key)
+                await pilot.pause()
+            ids = Counter(w.id for w in app.query("*") if w.id)
+            # empty-state and view-body come from the shared ContentView base and
+            # are always looked up inside one view.
+            # "label" is used inside every Textual Select widget.
+            shared = {"empty-state", "view-body", "label"}
+            repeated = {i for i, n in ids.items() if n > 1} - shared
+            assert repeated == set()
+
+    async def test_top_users_refit_on_resize(self, mock_app_state, sample_audit_entry):
+        entries = [
+            sample_audit_entry.model_copy(
+                update={
+                    "id": f"e{i}",
+                    "user_id": f"U{i}@x.e",
+                    "user_email": f"someone.with.long.name{i}@example.com",
+                }
+            )
+            for i in range(5)
+        ]
+        mock_app_state.client.get_logs_sample.return_value = (entries, 5)
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(160, 40)) as pilot:
+            view = await _show_and_load(app, pilot, "d")
+            await pilot.resize_terminal(100, 30)
+            await pilot.pause()
+            await pilot.pause()
+            top = view.query_one("#top-users", Static)
+            lines = str(top.render()).splitlines()
+            assert lines
+            assert all(len(line) <= top.content_region.width for line in lines)
+
+    async def test_zone_labels_follow_a_zone_change(self, mock_app_state, los_angeles_tz):
+        import time
+
+        from cja_audit_log_monitor.tui.widgets.log_table import LogTable
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, "l")
+            os.environ["TZ"] = "America/New_York"
+            time.tzset()
+            await _show_and_load(app, pilot, "l")
+            table = view.query_one(LogTable)
+            labels = [str(col.label) for col in table.columns.values()]
+            assert labels[0] in ("time (EST)", "time (EDT)")
+            dash = await _show_and_load(app, pilot, "d")
+            hourly = [
+                str(s.render()) for s in dash.query(".section-label")
+                if str(s.render()).startswith("HOURLY")
+            ]
+            assert hourly[0].endswith(("EST", "EDT"))
+
+
+def test_hourly_chart_narrow_keeps_23_label():
+    from cja_audit_log_monitor.tui.widgets.stats_panel import HourlyChart
+
+    markup = HourlyChart.build_markup({h: h + 1 for h in range(24)}, cell=1)
+    axis = markup.splitlines()[-1]
+    assert "23" in axis
+    assert "18" in axis
+
+
+def test_detail_values_wrap_inside_their_column():
+    from rich.console import Console
+
+    from cja_audit_log_monitor.models import AuditLogEntry
+    from cja_audit_log_monitor.tui.modals.entry_detail import build_detail_table
+
+    entry = AuditLogEntry(
+        id="6afce25938051732907b1022",
+        component_name="Report for dv_67c2101db641e334f220bc0a and a long tail of words",
+    )
+    console = Console(width=44, record=True, color_system=None)
+    console.print(build_detail_table(entry))
+    lines = console.export_text().splitlines()
+    start = next(i for i, ln in enumerate(lines) if ln.startswith("component name"))
+    value_col = lines[start].index("Report")
+    continuation = lines[start + 1]
+    assert continuation[:value_col].strip() == ""
+    assert continuation[value_col:].strip()
+
+
+@pytest.mark.parametrize("size", [(100, 30), (140, 40)])
+async def test_stats_lists_fit_their_columns(mock_app_state, sample_audit_entry, size):
+    from datetime import UTC, datetime, timedelta
+
+    base = datetime.now(UTC)
+    entries = [
+        sample_audit_entry.model_copy(
+            update={
+                "id": f"e{i}",
+                "user_id": f"U{i % 6}@x.e",
+                "user_email": f"someone.with.long.name{i % 6}@example.com",
+                "timestamp": base - timedelta(days=i % 7, hours=i),
+            }
+        )
+        for i in range(60)
+    ]
+    mock_app_state.client.get_logs_sample.return_value = (entries, 60)
+    app = _make_app(mock_app_state)
+    async with app.run_test(size=size) as pilot:
+        view = await _show_and_load(app, pilot, "s")
+        await pilot.pause()
+        for widget_id in ("#daily-chart", "#user-ranking"):
+            widget = view.query_one(widget_id, Static)
+            lines = _plain(widget).rstrip("\n").splitlines()
+            assert lines, widget_id
+            assert all(len(line.rstrip()) <= widget.content_region.width for line in lines), (
+                widget_id,
+                widget.content_region.width,
+                lines,
+            )
+
+
+@pytest.mark.parametrize(("key", "widget_id"), [("d", "#top-users"), ("s", "#user-ranking")])
+async def test_lists_stay_blank_until_data_loads(mock_app_state, key, widget_id):
+    app = _make_app(mock_app_state)
+    async with app.run_test(size=(140, 40)) as pilot:
+        await pilot.press(key)
+        await pilot.pause()
+        await pilot.resize_terminal(120, 40)
+        await pilot.pause()
+        view = app._screens[app._current_screen]
+        assert "no audit activity" not in _plain(view.query_one(widget_id, Static))

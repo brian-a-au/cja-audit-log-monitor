@@ -2,13 +2,56 @@
 
 import json
 
+from rich.console import Group, RenderableType
+from rich.table import Table
+from rich.text import Text
 from textual.app import ComposeResult
 from textual.containers import Container
 from textual.widgets import Static
 
-from ...formatters import format_timestamp, get_action_color, get_action_icon, resolve_tcss_markup
+from ...formatters import (
+    TCSS_TOKEN_HEX,
+    format_timestamp,
+    get_action_color,
+    get_action_icon,
+    resolve_tcss_markup,
+)
 from ...models import AuditLogEntry
 from ...utils import get_user_identifier, local_tz_name
+
+LABEL_WIDTH = 14
+
+
+def build_detail_table(entry: AuditLogEntry) -> Table:
+    """Every field of ``entry`` as a two-column grid.
+
+    Long values wrap inside the value column (and long ids break mid-word)
+    instead of running back under the labels.
+    """
+    action = entry.action or "-"
+    color = get_action_color(action)
+    rows = [
+        ("id", entry.id or "-"),
+        ("timestamp", f"{format_timestamp(entry.timestamp, local=True)} {local_tz_name()}"),
+        ("user", get_user_identifier(entry, default="-")),
+        ("user id", entry.user_id or "-"),
+        ("user email", entry.user_email or "-"),
+        ("user name", entry.user_name or "-"),
+        ("action", Text(action, style=color)),
+        ("component", entry.component_type or "-"),
+        ("component id", entry.component_id or "-"),
+        ("component name", entry.component_name or "-"),
+        ("description", entry.description or "-"),
+        ("ip address", entry.ip_address or "-"),
+        ("org id", entry.org_id or "-"),
+    ]
+    muted = TCSS_TOKEN_HEX["$text-muted"]
+    table = Table.grid(padding=(0, 1))
+    table.add_column(width=LABEL_WIDTH, no_wrap=True, style=muted)
+    table.add_column(ratio=1, overflow="fold")
+    for label, value in rows:
+        table.add_row(label, value if isinstance(value, Text) else Text(value))
+    return table
 
 
 class EntryDetailPanel(Container):
@@ -76,33 +119,15 @@ class EntryDetailPanel(Container):
             )
         )
 
-        body_lines = [
-            self._row("id", entry.id or "-"),
-            self._row(
-                "timestamp", f"{format_timestamp(entry.timestamp, local=True)} {local_tz_name()}"
-            ),
-            self._row("user", get_user_identifier(entry, default="-")),
-            self._row("user id", entry.user_id or "-"),
-            self._row("user email", entry.user_email or "-"),
-            self._row("user name", entry.user_name or "-"),
-            self._row("action", f"[{color}]{action}[/{color}]"),
-            self._row("component", entry.component_type or "-"),
-            self._row("component id", entry.component_id or "-"),
-            self._row("component name", entry.component_name or "-"),
-            self._row("description", entry.description or "-"),
-            self._row("ip address", entry.ip_address or "-"),
-            self._row("org id", entry.org_id or "-"),
-        ]
+        body: RenderableType = build_detail_table(entry)
         if entry.changes:
-            body_lines.append("")
-            body_lines.append("[$text-muted]changes[/$text-muted]")
-            body_lines.append(json.dumps(entry.changes, indent=2, default=str))
+            muted = TCSS_TOKEN_HEX["$text-muted"]
+            body = Group(
+                body,
+                Text(""),
+                Text("changes", style=muted),
+                Text(json.dumps(entry.changes, indent=2, default=str)),
+            )
+        self.query_one("#detail-body", Static).update(body)
 
-        self.query_one("#detail-body", Static).update(
-            resolve_tcss_markup("\n".join(body_lines))
-        )
-
-    @staticmethod
-    def _row(label: str, value: str) -> str:
-        return f"[$text-muted]{label:<14}[/$text-muted] {value}"
 

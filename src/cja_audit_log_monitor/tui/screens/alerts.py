@@ -48,7 +48,7 @@ class AlertsScreen(ContentView):
                 id="test-results",
                 classes="card",
             ),
-            LoadingIndicator(id="loading"),
+            LoadingIndicator(id="alerts-loading"),
             id="alerts-container",
         )
 

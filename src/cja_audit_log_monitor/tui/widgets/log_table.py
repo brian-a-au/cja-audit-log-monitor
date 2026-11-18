@@ -122,6 +122,9 @@ class LogTable(DataTable):
         """
         self.clear()
         self._entries.clear()
+        # Refresh the zone name, which can change (daylight saving) in a long session.
+        if "timestamp" in self.columns:
+            self.columns["timestamp"].label = Text(f"time ({local_tz_name()})")
 
         for entry in entries:
             row_key = self.add_row(*self._build_row(entry), key=entry.id)

@@ -18,7 +18,7 @@ from ...stats import (
 )
 from ...utils import local_tz_name
 from ..state import AppState
-from ..widgets import ActionBarChart, HourlyChart
+from ..widgets import ActionBarChart, FittedStatic, HourlyChart
 from .base import (
     ContentView,
     error_message,
@@ -43,6 +43,9 @@ class StatsScreen(ContentView):
         """
         super().__init__(state, **kwargs)
         self._days = 7
+        self._daily: list[tuple[str, int]] = []
+        self._users: list[tuple[str, int]] = []
+        self._lists_loaded = False
 
     def compose_header(self) -> Iterator[Widget]:
         """Title and window control stay visible, so an empty window can be widened."""
@@ -57,7 +60,7 @@ class StatsScreen(ContentView):
 
     def compose_content(self) -> Iterator[Widget]:
         """Yield widgets for the stats body."""
-        yield LoadingIndicator(id="loading")
+        yield LoadingIndicator(id="stats-loading")
         yield Horizontal(
             stat_card("total entries", "stats-total"),
             stat_card("active users", "stats-users"),
@@ -68,25 +71,33 @@ class StatsScreen(ContentView):
         yield Horizontal(
             Vertical(
                 Static("ACTION DISTRIBUTION", classes="section-label"),
-                ActionBarChart(id="action-chart"),
+                ActionBarChart(id="stats-action-chart"),
                 classes="stats-column",
             ),
             Vertical(
-                Static(f"HOURLY ACTIVITY · {local_tz_name()}", classes="section-label"),
-                HourlyChart(id="hourly-chart"),
+                Static(
+                    f"HOURLY ACTIVITY · {local_tz_name()}",
+                    id="stats-hourly-label",
+                    classes="section-label",
+                ),
+                HourlyChart(id="stats-hourly-chart"),
                 classes="stats-column",
             ),
             classes="stats-row",
         )
         yield Horizontal(
             Vertical(
-                Static(f"DAILY ACTIVITY · {local_tz_name()}", classes="section-label"),
-                Static(id="daily-chart"),
+                Static(
+                    f"DAILY ACTIVITY · {local_tz_name()}",
+                    id="stats-daily-label",
+                    classes="section-label",
+                ),
+                FittedStatic(id="daily-chart", redraw=self._render_lists),
                 classes="stats-column",
             ),
             Vertical(
                 Static("USER RANKING", classes="section-label"),
-                Static(id="user-ranking"),
+                FittedStatic(id="user-ranking", redraw=self._render_lists),
                 classes="stats-column",
             ),
             classes="stats-row",
@@ -168,30 +179,45 @@ class StatsScreen(ContentView):
         start = now - timedelta(days=self._days)
         self.query_one("#stats-period", Static).update(f"{start:%Y-%m-%d} → {now:%Y-%m-%d}")
 
-        self.query_one("#action-chart", ActionBarChart).update_data(
+        self.query_one("#stats-action-chart", ActionBarChart).update_data(
             stats.get("action_counts", {}), width=20
         )
-        self.query_one("#hourly-chart", HourlyChart).update_data(hourly)
+        self.query_one("#stats-hourly-chart", HourlyChart).update_data(hourly)
+        # Refresh the zone name, which can change (daylight saving) in a long session.
+        zone = local_tz_name()
+        self.query_one("#stats-hourly-label", Static).update(f"HOURLY ACTIVITY · {zone}")
+        self.query_one("#stats-daily-label", Static).update(f"DAILY ACTIVITY · {zone}")
 
+        self._daily = sorted(daily.items())[-14:]
+        self._users = list(users[:10])
+        self._lists_loaded = True
+        self._render_lists()
+
+    def _render_lists(self) -> None:
+        """Draw the daily chart and user ranking to fit their columns' current width."""
+        if not self._lists_loaded:
+            return
+        daily_widget = self.query_one("#daily-chart", Static)
+        # "MM-DD  " (7) + bar + " " + 5-digit count (6).
+        bar_width = max(4, min(24, daily_widget.content_region.width - 13))
         primary = TCSS_TOKEN_HEX["$primary"]
-        recent_days = sorted(daily.items())[-14:]
-        max_daily = max((count for _, count in recent_days), default=0)
+        max_daily = max((count for _, count in self._daily), default=0)
         daily_lines = [
-            f"{day[5:]}  [{primary}]{render_bar(count, max_daily, 24).ljust(24)}[/{primary}] "
-            f"{count:>5,}"
-            for day, count in recent_days
+            f"{day[5:]}  [{primary}]{render_bar(count, max_daily, bar_width).ljust(bar_width)}"
+            f"[/{primary}] {count:>5,}"
+            for day, count in self._daily
         ]
-        self.query_one("#daily-chart", Static).update(
-            "\n".join(daily_lines) or no_activity_message(self._days)
-        )
+        daily_widget.update("\n".join(daily_lines) or no_activity_message(self._days))
 
-        name_width = 32
+        ranking_widget = self.query_one("#user-ranking", Static)
+        # "NN. " (4) + name + " " + 5-digit count (6).
+        name_width = max(8, min(32, ranking_widget.content_region.width - 10))
         user_lines = []
-        for rank, (user, count) in enumerate(users[:10], 1):
+        for rank, (user, count) in enumerate(self._users, 1):
             name = user if len(user) <= name_width else user[: name_width - 1] + "…"
             user_lines.append(f"{rank:>2}. {name:<{name_width}} {count:>5,}")
-        self.query_one("#user-ranking", Static).update(
-            "\n".join(user_lines) or no_activity_message(self._days)
-        )
+        ranking_widget.update("\n".join(user_lines) or no_activity_message(self._days))
+
+
 
 
