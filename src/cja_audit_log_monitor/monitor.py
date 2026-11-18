@@ -2,19 +2,21 @@
 
 import logging
 import signal
+import threading
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
 from rich.console import Console
+from rich.markup import escape
 from rich.status import Status
 from rich.text import Text
 
 from .alerts import AlertEngine
 from .auth import AuthenticationError
-from .client import APIError, AuditLogsClient
+from .client import APIError, AuditLogsClient, is_final_page
 from .formatters import get_action_color
-from .models import AuditLogEntry, AuditLogQuery
+from .models import AuditLogEntry, AuditLogQuery, AuditLogResponse
 from .notifications import NotificationManager
 from .utils import RecentIds, entry_key, get_user_identifier
 
@@ -40,6 +42,42 @@ def build_poll_query(since: datetime | None, now: datetime, page_size: int) -> A
         page=0,
         page_size=page_size,
     )
+
+
+def fetch_unseen(
+    get_logs: Callable[[AuditLogQuery], AuditLogResponse],
+    query: AuditLogQuery,
+    seen: RecentIds,
+    max_pages: int = _MAX_POLL_PAGES,
+    stop: threading.Event | None = None,
+) -> tuple[list[AuditLogEntry], bool]:
+    """Read every page of ``query`` and return the entries not in ``seen``, oldest first.
+
+    Paging ends on an empty page, the last page (by ``last`` or the API's page count), or after
+    ``max_pages`` pages. A page of entries already seen does not end it: pages are newest first,
+    so a late-indexed entry can sit behind them. ``seen`` is not changed; the caller adds the
+    keys once the whole poll has worked. When ``stop`` is set, paging ends before the next page.
+
+    Returns:
+        The unseen entries, oldest first, and whether the page limit ended paging.
+    """
+    fresh: dict[str, AuditLogEntry] = {}
+    hit_cap = False
+    for page in range(max_pages):
+        if stop is not None and stop.is_set():
+            break
+        query.page = page
+        response = get_logs(query)
+        for entry in response.content:
+            key = entry_key(entry)
+            if key not in seen and key not in fresh:
+                fresh[key] = entry
+        if not response.content or response.last or is_final_page(page, response):
+            break
+    else:
+        hit_cap = True
+    # The API returns newest first; hand them back oldest first.
+    return list(reversed(fresh.values())), hit_cap
 
 
 class AuditLogMonitor:
@@ -73,6 +111,8 @@ class AuditLogMonitor:
         self._entry_filter = entry_filter
         self._last_poll_time: datetime | None = None
         self._seen = RecentIds(SEEN_IDS_MAX)
+        # Why the last poll failed, or None when it worked.
+        self._poll_error: str | None = None
         self._stop_announced = False
         self._on_new_entry: Callable[[AuditLogEntry], None] | None = None
 
@@ -88,51 +128,39 @@ class AuditLogMonitor:
         """Fetch entries not seen before, oldest first.
 
         Each poll re-reads an overlap window before the last poll and drops entries whose key is
-        already remembered, so late-indexed events are not missed. The first poll reads one page
-        only. Fatal API errors are re-raised; other errors are logged and give no entries.
+        already remembered, so late-indexed events are not missed. The first poll reads the whole
+        window to seed the remembered keys. Fatal API errors are re-raised; other errors are
+        logged and give no entries.
         """
         now = datetime.now(UTC)
-        first_poll = self._last_poll_time is None
         query = build_poll_query(self._last_poll_time, now, _MONITOR_PAGE_SIZE)
 
         try:
-            fresh: dict[str, AuditLogEntry] = {}
-            for page in range(1 if first_poll else _MAX_POLL_PAGES):
-                query.page = page
-                response = self.client.get_logs(query)
-                batch = response.content
-                found_new = False
-                for entry in batch:
-                    key = entry_key(entry)
-                    if key not in self._seen and key not in fresh:
-                        fresh[key] = entry
-                        found_new = True
-                if not batch or response.last or not found_new:
-                    break
-            else:
-                if not first_poll:
-                    logger.warning(
-                        "Monitor poll reached %d pages; backlog may be larger than one cycle",
-                        _MAX_POLL_PAGES,
-                    )
+            new_entries, hit_cap = fetch_unseen(self.client.get_logs, query, self._seen)
+            if hit_cap:
+                logger.warning(
+                    "Monitor poll reached %d pages; backlog may be larger than one cycle",
+                    _MAX_POLL_PAGES,
+                )
         except AuthenticationError:
             raise
         except APIError as e:
             if e.status_code in FATAL_STATUS:
                 raise
             logger.error("Error fetching audit logs: %s", e)
+            self._poll_error = str(e)
             return []
         except Exception as e:
             logger.error("Error fetching audit logs: %s", e)
+            self._poll_error = str(e)
             return []
+        self._poll_error = None
 
         # Only remember entries once the whole poll succeeded, so a failed page is retried.
-        for key in fresh:
-            self._seen.add(key)
+        for entry in new_entries:
+            self._seen.add(entry_key(entry))
         self._last_poll_time = now
 
-        # The API returns newest first; hand them back oldest first.
-        new_entries = list(reversed(fresh.values()))
         if self._entry_filter:
             new_entries = [e for e in new_entries if self._entry_filter(e)]
         return new_entries
@@ -199,7 +227,13 @@ class AuditLogMonitor:
             for entry in entries:
                 self._handle_entry(entry)
         clock = datetime.now().strftime("%H:%M:%S")
-        status.update(f"Last poll {clock}: {len(entries)} new. Next in {self.interval}s")
+        if self._poll_error is not None:
+            status.update(
+                f"Last poll {clock} failed: {escape(self._poll_error)}. "
+                f"Retrying in {self.interval}s"
+            )
+        else:
+            status.update(f"Last poll {clock}: {len(entries)} new. Next in {self.interval}s")
 
     def start(self, duration: int | None = None) -> None:
         """Start monitoring for new audit log entries.

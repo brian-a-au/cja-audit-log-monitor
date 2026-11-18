@@ -297,6 +297,11 @@ def _entry(entry_id: str, minutes: float = 0, **kwargs) -> AuditLogEntry:
     return AuditLogEntry(id=entry_id, timestamp=T0 + timedelta(minutes=minutes), **kwargs)
 
 
+def _window(count: int) -> list[AuditLogEntry]:
+    """``count`` entries, newest first like the API."""
+    return [_entry(f"w{i}", -i / 100) for i in range(count)]
+
+
 def _scripted(mock_client: MagicMock, responses: list) -> list:
     """Make get_logs return ``responses`` in order; return the list of queries seen."""
     queries: list = []
@@ -312,14 +317,14 @@ def _scripted(mock_client: MagicMock, responses: list) -> list:
 class TestPollDedupe:
     """Polling dedupes by id inside an overlap window instead of by timestamp."""
 
-    def test_first_poll_reads_one_page_and_marks_it_seen(
+    def test_first_poll_calls_get_logs_once_when_page_0_is_last(
         self, monitor: AuditLogMonitor, mock_client: MagicMock
     ) -> None:
         queries = _scripted(
             mock_client,
             [
-                AuditLogResponse(content=[_entry("b", 2), _entry("a", 1)], last=False),
-                AuditLogResponse(content=[_entry("b", 2), _entry("a", 1)], last=False),
+                AuditLogResponse(content=[_entry("b", 2), _entry("a", 1)], last=True),
+                AuditLogResponse(content=[_entry("b", 2), _entry("a", 1)], last=True),
             ],
         )
         first = monitor._get_new_entries()
@@ -370,11 +375,12 @@ class TestPollDedupe:
     def test_stops_paging_when_last_is_missing(
         self, monitor: AuditLogMonitor, mock_client: MagicMock
     ) -> None:
-        """The API may omit `last`; paging must stop at a page with nothing new."""
+        """The API may omit `last`; an empty page still ends the poll."""
         _scripted(
             mock_client,
             [
                 AuditLogResponse(content=[_entry("a", 1)]),
+                AuditLogResponse(content=[]),
                 AuditLogResponse(content=[_entry("b", 2), _entry("a", 1)]),
                 AuditLogResponse(content=[_entry("b", 2), _entry("a", 1)]),
                 AuditLogResponse(content=[]),
@@ -384,8 +390,75 @@ class TestPollDedupe:
         calls_before = mock_client.get_logs.call_count
         new = monitor._get_new_entries()
         assert [e.id for e in new] == ["b"]
-        # page 0 has a new entry, page 1 has nothing new, so it stops there.
-        assert mock_client.get_logs.call_count - calls_before == 2
+        # Page 1 has nothing new but is read anyway; the empty page 2 ends the poll.
+        assert mock_client.get_logs.call_count - calls_before == 3
+
+    def test_stops_paging_at_the_api_page_count(
+        self, monitor: AuditLogMonitor, mock_client: MagicMock
+    ) -> None:
+        """Without `last`, the page count from the API also ends the poll."""
+        _scripted(
+            mock_client,
+            [
+                AuditLogResponse(content=[_entry("b", 2)], total_pages=2),
+                AuditLogResponse(content=[_entry("a", 1)], total_pages=2),
+            ],
+        )
+        assert [e.id for e in monitor._get_new_entries()] == ["a", "b"]
+        assert mock_client.get_logs.call_count == 2
+
+    def test_late_entry_behind_a_seen_page_is_reported(
+        self, monitor: AuditLogMonitor, mock_client: MagicMock
+    ) -> None:
+        """A full page of seen entries must not stop the poll before a late entry."""
+        window = _window(100)
+        _scripted(
+            mock_client,
+            [
+                AuditLogResponse(content=window, last=True),
+                AuditLogResponse(content=window, last=False),
+                AuditLogResponse(content=[_entry("late", -1)], last=True),
+            ],
+        )
+        monitor._get_new_entries()
+        assert [e.id for e in monitor._get_new_entries()] == ["late"]
+
+    def test_full_window_is_seeded_at_start(
+        self, monitor: AuditLogMonitor, mock_client: MagicMock
+    ) -> None:
+        """250 entries before start are all seen, so one new entry later reports only it."""
+        window = _window(250)
+        new_window = [_entry("new", 999), *window]
+        _scripted(
+            mock_client,
+            [
+                AuditLogResponse(content=window[:100], last=False),
+                AuditLogResponse(content=window[100:200], last=False),
+                AuditLogResponse(content=window[200:], last=True),
+                AuditLogResponse(content=new_window[:100], last=False),
+                AuditLogResponse(content=new_window[100:200], last=False),
+                AuditLogResponse(content=new_window[200:], last=True),
+            ],
+        )
+        first = monitor._get_new_entries()
+        assert len(first) == 250
+        assert [e.id for e in monitor._get_new_entries()] == ["new"]
+
+    def test_page_cap_ends_the_poll_and_warns(
+        self, monitor: AuditLogMonitor, mock_client: MagicMock, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        from cja_audit_log_monitor.monitor import _MAX_POLL_PAGES
+
+        counter = iter(range(100_000))
+
+        def endless(query):
+            return AuditLogResponse(content=[_entry(f"e{next(counter)}")])
+
+        monitor._last_poll_time = datetime.now(UTC)
+        mock_client.get_logs.side_effect = endless
+        monitor._get_new_entries()
+        assert mock_client.get_logs.call_count == _MAX_POLL_PAGES
+        assert "reached" in caplog.text
 
     def test_entry_filter_applies_but_entries_still_marked_seen(
         self, mock_client: MagicMock
@@ -438,6 +511,34 @@ class TestPollErrors:
         assert mock_client.get_logs.call_count > 1
         assert "down" in caplog.text
 
+    def test_failed_poll_shows_in_status(self, mock_client: MagicMock) -> None:
+        """A transient failure must not read as a good poll with nothing new."""
+        mock_client.get_logs.side_effect = APIError("[bold]down[/bold]", status_code=503)
+        monitor = AuditLogMonitor(mock_client, console=MagicMock(), interval=7)
+        status = MagicMock()
+        monitor._last_poll_time = datetime.now(UTC)
+        monitor._run_poll(status)
+        text = status.update.call_args.args[0]
+        assert "failed" in text
+        assert "0 new" not in text
+        assert "retry" in text.lower()
+        # The error text is escaped so Rich shows it as written.
+        assert "\\[bold]down" in text
+
+    def test_good_poll_after_failure_shows_new_count(self, mock_client: MagicMock) -> None:
+        mock_client.get_logs.side_effect = [
+            APIError("down", status_code=503),
+            AuditLogResponse(content=[_entry("a")], last=True),
+        ]
+        monitor = AuditLogMonitor(mock_client, console=MagicMock(), interval=7)
+        status = MagicMock()
+        monitor._last_poll_time = datetime.now(UTC)
+        monitor._run_poll(status)
+        monitor._run_poll(status)
+        text = status.update.call_args.args[0]
+        assert "1 new" in text
+        assert "failed" not in text
+
     def test_stopping_message_prints_once(self, mock_client: MagicMock) -> None:
         console = MagicMock()
         monitor = AuditLogMonitor(mock_client, console=console, interval=1)
@@ -445,3 +546,54 @@ class TestPollErrors:
         monitor._signal_handler(15, None)
         stops = [c for c in console.print.call_args_list if "Stopping monitor" in str(c)]
         assert len(stops) == 1
+
+
+class TestFetchUnseen:
+    """The one paging helper that the CLI and the TUI share."""
+
+    def test_returns_unseen_oldest_first(self) -> None:
+        from cja_audit_log_monitor.monitor import fetch_unseen
+        from cja_audit_log_monitor.utils import RecentIds
+
+        seen = RecentIds(10)
+        seen.add("b")
+        pages = [
+            AuditLogResponse(content=[_entry("c", 3), _entry("b", 2)]),
+            AuditLogResponse(content=[_entry("a", 1)], last=True),
+        ]
+        fresh, hit_cap = fetch_unseen(
+            lambda q: pages[q.page], build_poll_query(None, T0, 2), seen, max_pages=5
+        )
+        assert [e.id for e in fresh] == ["a", "c"]
+        assert hit_cap is False
+        assert "a" not in seen  # the caller decides when to remember them
+
+    def test_reports_hitting_the_page_cap(self) -> None:
+        from cja_audit_log_monitor.monitor import fetch_unseen
+        from cja_audit_log_monitor.utils import RecentIds
+
+        fresh, hit_cap = fetch_unseen(
+            lambda q: AuditLogResponse(content=[_entry(f"p{q.page}")]),
+            build_poll_query(None, T0, 1),
+            RecentIds(10),
+            max_pages=3,
+        )
+        assert len(fresh) == 3
+        assert hit_cap is True
+
+    def test_stop_ends_paging(self) -> None:
+        import threading
+
+        from cja_audit_log_monitor.monitor import fetch_unseen
+        from cja_audit_log_monitor.utils import RecentIds
+
+        stop = threading.Event()
+        pages: list[int] = []
+
+        def get_logs(query):
+            pages.append(query.page)
+            stop.set()
+            return AuditLogResponse(content=[_entry(f"p{query.page}")])
+
+        fetch_unseen(get_logs, build_poll_query(None, T0, 1), RecentIds(10), 5, stop=stop)
+        assert pages == [0]

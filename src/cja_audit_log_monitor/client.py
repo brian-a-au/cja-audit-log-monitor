@@ -45,7 +45,7 @@ def _retry_delay(header: str | None, attempt: int) -> float:
     return min(max(delay, 0.0), MAX_RETRY_WAIT)
 
 
-def _is_final_page(page: int, response: AuditLogResponse) -> bool:
+def is_final_page(page: int, response: AuditLogResponse) -> bool:
     """True when ``page`` is the last page by the API's own page count."""
     return response.total_pages > 0 and page + 1 >= response.total_pages
 
@@ -265,7 +265,7 @@ class AuditLogsClient:
             if (
                 response.last
                 or not new_entries
-                or _is_final_page(page, response)
+                or is_final_page(page, response)
                 or (max_pages is not None and pages_fetched >= max_pages)
             ):
                 break
@@ -334,7 +334,7 @@ class AuditLogsClient:
                 entries.append(entry)
             # Stop on the last page, or on a page that added nothing new
             # (which also guards against a server that ignores paging).
-            if response.last or len(entries) == before or _is_final_page(page, response):
+            if response.last or len(entries) == before or is_final_page(page, response):
                 break
             page += 1
         return entries[:max_entries], total
