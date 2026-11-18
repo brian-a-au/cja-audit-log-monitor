@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import Field, ValidationError, field_validator
+from pydantic import Field, SecretStr, ValidationError, field_validator
 from pydantic.fields import FieldInfo
 from pydantic_settings import (
     BaseSettings,
@@ -52,7 +52,9 @@ class CJASettings(BaseSettings):
     # Authentication (matches Adobe API skill: org_id, client_id, secret, scopes)
     org_id: str = Field(default="", description="Adobe IMS organization ID (ORG_ID)")
     client_id: str = Field(default="", description="Adobe OAuth client ID (CLIENT_ID)")
-    secret: str = Field(default="", description="Adobe OAuth client secret (SECRET)")
+    secret: SecretStr = Field(
+        default=SecretStr(""), description="Adobe OAuth client secret (SECRET)"
+    )
     scopes: str = Field(
         default="openid,AdobeID,read_organizations,additional_info.projectedProductContext",
         description="OAuth scopes (SCOPES, comma-separated)",
@@ -115,7 +117,7 @@ class CJASettings(BaseSettings):
 
     def is_oauth_configured(self) -> bool:
         """Check if OAuth credentials are configured."""
-        return bool(self.client_id and self.secret and self.org_id)
+        return bool(self.client_id and self.secret.get_secret_value() and self.org_id)
 
 
 def load_config(config_path: Path | None = None) -> CJASettings:

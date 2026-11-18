@@ -256,3 +256,20 @@ def test_settings_no_top_level_slack_field() -> None:
     assert not hasattr(s, "slack_webhook_url"), (
         "Top-level slack_webhook_url is dead — use settings.notifications.slack_webhook_url"
     )
+
+
+def test_secret_hidden_everywhere() -> None:
+    s = CJASettings(org_id="X@AdobeOrg", client_id="c", secret="SENTINEL")
+    for text in (repr(s), str(s), s.model_dump_json()):
+        assert "SENTINEL" not in text
+    assert s.secret.get_secret_value() == "SENTINEL"
+
+
+def test_webhook_urls_hidden_from_repr() -> None:
+    from cja_audit_log_monitor.models import NotificationConfig, WebhookConfig
+
+    hook = WebhookConfig(url="https://h/x?token=T", headers={"Authorization": "HDRSECRET"})
+    assert "token=T" not in repr(hook)
+    assert "HDRSECRET" not in repr(hook)
+    notif = NotificationConfig(slack_webhook_url="https://hooks.slack.com/SLACKSECRET")
+    assert "SLACKSECRET" not in repr(notif)
