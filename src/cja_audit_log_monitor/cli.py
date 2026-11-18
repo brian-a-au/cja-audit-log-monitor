@@ -3,6 +3,7 @@
 import functools
 import json
 import logging
+import re
 import sys
 import time
 from collections.abc import Callable
@@ -44,6 +45,10 @@ from .utils import get_user_identifier
 
 P = ParamSpec("P")
 R = TypeVar("R")
+
+# Shared validators: counts must be at least 1; polling intervals at least 5 seconds.
+POSITIVE_INT = click.IntRange(min=1)
+INTERVAL_SECONDS = click.IntRange(min=5)
 
 console = Console()
 err_console = Console(stderr=True)
@@ -105,40 +110,55 @@ def get_client(config_path: Path | None = None) -> tuple[AuditLogsClient, CJASet
     return client, settings
 
 
-def parse_date(date_str: str | None) -> datetime | None:
-    """Parse date string to datetime."""
+_DATE_ONLY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def parse_date(date_str: str | None, end_of_day: bool = False) -> datetime | None:
+    """Parse a date string to a timezone-aware datetime (UTC when no zone is given).
+
+    A date-only value means midnight UTC, or 23:59:59 UTC with ``end_of_day=True`` so an
+    end date covers the whole day. Values that carry a time are used as given.
+    """
     if not date_str:
         return None
 
     normalized = date_str.strip()
+    date_only = bool(_DATE_ONLY.match(normalized))
     if normalized.endswith("Z"):
         normalized = normalized[:-1] + "+00:00"
 
+    parsed: datetime | None = None
     try:
-        dt = datetime.fromisoformat(normalized)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=UTC)
-        return dt
+        parsed = datetime.fromisoformat(normalized)
     except ValueError:
-        pass
+        for fmt in ("%Y-%m-%d", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%d %H:%M:%S"):
+            try:
+                parsed = datetime.strptime(normalized, fmt)
+                break
+            except ValueError:
+                continue
+    if parsed is None:
+        raise click.BadParameter(f"Invalid date format: {date_str}")
 
-    formats = [
-        "%Y-%m-%d",
-        "%Y-%m-%dT%H:%M:%S",
-        "%Y-%m-%dT%H:%M:%S%z",
-        "%Y-%m-%d %H:%M:%S",
-    ]
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    if date_only and end_of_day:
+        parsed = parsed.replace(hour=23, minute=59, second=59)
+    return parsed
 
-    for fmt in formats:
-        try:
-            dt = datetime.strptime(date_str, fmt)
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=UTC)
-            return dt
-        except ValueError:
-            continue
 
-    raise click.BadParameter(f"Invalid date format: {date_str}")
+def parse_date_range(
+    start_date: str | None, end_date: str | None
+) -> tuple[datetime | None, datetime | None]:
+    """Parse ``--start-date`` and ``--end-date``; reject a start that is after the end."""
+    start = parse_date(start_date)
+    end = parse_date(end_date, end_of_day=True)
+    if start and end and start > end:
+        raise click.BadParameter(
+            f"--start-date ({start_date}) is after --end-date ({end_date})",
+            param_hint="--start-date",
+        )
+    return start, end
 
 
 def parse_actions(actions: tuple[str, ...] | None) -> list[ActionType] | None:
@@ -209,7 +229,10 @@ def cli(ctx: click.Context) -> None:
 
 
 @cli.command("list")
-@click.option("--limit", "-l", default=50, help="Maximum number of entries to show")
+@click.option(
+    "--limit", "-l", type=POSITIVE_INT, default=50,
+    help="Maximum number of entries to show",
+)
 @click.option(
     "--component",
     "-C",
@@ -283,7 +306,7 @@ def cli_list(
 )
 @click.option("--component-id", help="Filter by specific component ID")
 @click.option("--description", "--desc", help="Search in description")
-@click.option("--limit", "-l", default=100, help="Maximum entries to return")
+@click.option("--limit", "-l", type=POSITIVE_INT, default=100, help="Maximum entries to return")
 @click.option("--details", is_flag=True, help="Show additional details")
 @click.option(
     "--output-format",
@@ -310,13 +333,14 @@ def search(
     """Search audit logs with filters."""
     config_path = ctx.obj.get("config_path")
 
+    start, end = parse_date_range(start_date, end_date)
     client, settings = get_client(config_path)
 
     query = AuditLogQuery(
         user_id=user,
         actions=parse_actions(action),
-        start_date=parse_date(start_date),
-        end_date=parse_date(end_date),
+        start_date=start,
+        end_date=end,
         components=parse_components(component),
         component_id=component_id,
         description=description,
@@ -347,7 +371,7 @@ def search(
 
 @cli.command()
 @click.option("--dashboard-id", "-i", required=True, help="Dashboard/Project ID")
-@click.option("--limit", "-l", default=100, help="Maximum entries to return")
+@click.option("--limit", "-l", type=POSITIVE_INT, default=100, help="Maximum entries to return")
 @click.pass_context
 @handle_cli_errors
 def dashboard(ctx: click.Context, dashboard_id: str, limit: int) -> None:
@@ -373,8 +397,8 @@ def dashboard(ctx: click.Context, dashboard_id: str, limit: int) -> None:
 
 @cli.command()
 @click.option("--user-id", "-u", required=True, help="User ID or email address")
-@click.option("--days", "-d", default=7, help="Number of days to query")
-@click.option("--limit", "-l", default=100, help="Maximum entries to return")
+@click.option("--days", "-d", type=POSITIVE_INT, default=7, help="Number of days to query")
+@click.option("--limit", "-l", type=POSITIVE_INT, default=100, help="Maximum entries to return")
 @click.option(
     "--output-format",
     "-F",
@@ -429,7 +453,7 @@ def user(ctx: click.Context, user_id: str, days: int, limit: int, output_format:
     type=click.Choice([c.value for c in ComponentType]),
     help="Component type (optional)",
 )
-@click.option("--limit", "-l", default=100, help="Maximum entries to return")
+@click.option("--limit", "-l", type=POSITIVE_INT, default=100, help="Maximum entries to return")
 @click.option(
     "--output-format",
     "-F",
@@ -504,7 +528,10 @@ def component(
 )
 @click.option("--start-date", "-s", help="Start date (YYYY-MM-DD)")
 @click.option("--end-date", "-e", help="End date (YYYY-MM-DD)")
-@click.option("--days", "-d", default=7, help="Number of days (if no date range)")
+@click.option(
+    "--days", "-d", type=POSITIVE_INT, default=7,
+    help="Number of days (if no date range)",
+)
 @click.option(
     "--action",
     "-a",
@@ -520,7 +547,7 @@ def component(
 @click.option("--pretty/--compact", default=True, help="Pretty print JSON")
 @click.option(
     "--max-entries",
-    type=click.IntRange(min=1),
+    type=POSITIVE_INT,
     help="Maximum number of entries to export",
 )
 @click.pass_context
@@ -540,13 +567,14 @@ def export(
     """Export audit logs to file."""
     config_path = ctx.obj.get("config_path")
 
+    start, end = parse_date_range(start_date, end_date)
     client, settings = get_client(config_path)
 
     # Build query
     if start_date or end_date:
         query = AuditLogQuery(
-            start_date=parse_date(start_date),
-            end_date=parse_date(end_date),
+            start_date=start,
+            end_date=end,
             actions=parse_actions(action),
             components=parse_components(component),
         )
@@ -587,8 +615,8 @@ def export(
 
 
 @cli.command()
-@click.option("--days", "-d", default=7, help="Number of days to analyze")
-@click.option("--top", "-t", default=10, help="Number of top users to show")
+@click.option("--days", "-d", type=POSITIVE_INT, default=7, help="Number of days to analyze")
+@click.option("--top", "-t", type=POSITIVE_INT, default=10, help="Number of top users to show")
 @click.option(
     "--output-format",
     "-F",
@@ -618,7 +646,7 @@ def stats(ctx: click.Context, days: int, top: int, output_format: str) -> None:
             console.print("[dim]No audit logs found for the specified period.[/dim]")
         return
 
-    stats_data = calculate_stats(entries)
+    stats_data = calculate_stats(entries, top_n=top)
     anomalies = analyze_for_anomalies(entries)
 
     if output_format == "json":
@@ -636,7 +664,7 @@ def stats(ctx: click.Context, days: int, top: int, output_format: str) -> None:
 
         # Show user activity table
         if stats_data["top_users"]:
-            user_table = format_user_stats_table(stats_data["top_users"][:top])
+            user_table = format_user_stats_table(stats_data["top_users"])
             console.print(user_table)
             console.print()
 
@@ -654,8 +682,17 @@ def stats(ctx: click.Context, days: int, top: int, output_format: str) -> None:
 
 
 @cli.command()
-@click.option("--interval", "-i", default=60, help="Polling interval in seconds")
-@click.option("--duration", "-D", type=int, help="Duration in seconds (default: indefinite)")
+@click.option(
+    "--interval",
+    "-i",
+    type=INTERVAL_SECONDS,
+    default=60,
+    help="Polling interval in seconds (minimum 5)",
+)
+@click.option(
+    "--duration", "-D", type=POSITIVE_INT,
+    help="Duration in seconds (default: indefinite)",
+)
 @click.option("--alerts/--no-alerts", default=True, help="Enable alert detection")
 @click.pass_context
 @handle_cli_errors
@@ -698,6 +735,10 @@ def monitor(
             )
             monitor_instance.start(duration=duration)
 
+        if monitor_instance.successful_polls == 0:
+            err_console.print("[red]No poll succeeded; see the errors above.[/red]")
+            sys.exit(1)
+
     except KeyboardInterrupt:
         err_console.print("\n[yellow]Monitor stopped.[/yellow]")
 
@@ -706,13 +747,13 @@ def monitor(
 @click.option("--watch", is_flag=True, help="Run continuously")
 @click.option(
     "--interval",
-    type=click.IntRange(min=1),
+    type=POSITIVE_INT,
     default=300,
     help="Poll interval in seconds (--watch only, default 300)",
 )
 @click.option(
     "--lookback",
-    type=click.IntRange(min=1),
+    type=POSITIVE_INT,
     default=24,
     help="Hours of history to scan per cycle (default 24)",
 )
@@ -946,6 +987,9 @@ def verify(ctx: click.Context, output_format: str) -> None:
                 if result["error"]:
                     console.print(f"  Error: {escape(str(result['error']))}")
 
+        if not (result["connected"] and result["authenticated"]):
+            sys.exit(1)
+
     except AuthenticationError as e:
         if output_format == "json":
             emit_json({"connected": False, "error": str(e)})
@@ -961,7 +1005,7 @@ def verify(ctx: click.Context, output_format: str) -> None:
 
 
 @cli.command()
-@click.option("--days", "-d", default=7, help="Number of days to analyze")
+@click.option("--days", "-d", type=POSITIVE_INT, default=7, help="Number of days to analyze")
 @click.option(
     "--output",
     "-o",
@@ -971,7 +1015,7 @@ def verify(ctx: click.Context, output_format: str) -> None:
 @click.option("--pretty/--compact", default=True, help="Pretty print JSON")
 @click.option(
     "--max-entries",
-    type=click.IntRange(min=1),
+    type=POSITIVE_INT,
     default=10000,
     show_default=True,
     help="Maximum number of entries to process",
@@ -1026,7 +1070,13 @@ def report(
 
 
 @cli.command()
-@click.option("--interval", "-i", default=5, help="Polling interval in seconds")
+@click.option(
+    "--interval",
+    "-i",
+    type=INTERVAL_SECONDS,
+    default=5,
+    help="Polling interval in seconds (minimum 5)",
+)
 @click.option("--user", "-u", help="Filter by user ID or email")
 @click.option("--component-id", "-c", help="Filter by component ID")
 @click.option(
@@ -1163,7 +1213,7 @@ def alerts_list(ctx: click.Context, output_format: str) -> None:
 
 
 @alerts.command("test")
-@click.option("--days", "-d", default=1, help="Number of days to analyze")
+@click.option("--days", "-d", type=POSITIVE_INT, default=1, help="Number of days to analyze")
 @click.pass_context
 @handle_cli_errors
 def alerts_test(ctx: click.Context, days: int) -> None:
@@ -1221,7 +1271,7 @@ def alerts_test(ctx: click.Context, days: int) -> None:
     multiple=True,
     help="Filter by component type",
 )
-@click.option("--limit", "-l", default=100, help="Maximum entries to return")
+@click.option("--limit", "-l", type=POSITIVE_INT, default=100, help="Maximum entries to return")
 @click.option(
     "--output-format",
     "-F",
@@ -1307,7 +1357,7 @@ def query(
 
 
 @cli.command()
-@click.option("--days", "-d", default=7, help="Number of days to analyze")
+@click.option("--days", "-d", type=POSITIVE_INT, default=7, help="Number of days to analyze")
 @click.option(
     "--action",
     "-a",
@@ -1383,8 +1433,8 @@ def timeline(
     type=click.Choice([a.value for a in ActionType]),
     help="Action type to find",
 )
-@click.option("--days", "-d", default=7, help="Number of days to search")
-@click.option("--limit", "-l", default=50, help="Maximum entries to show")
+@click.option("--days", "-d", type=POSITIVE_INT, default=7, help="Number of days to search")
+@click.option("--limit", "-l", type=POSITIVE_INT, default=50, help="Maximum entries to show")
 @click.pass_context
 @handle_cli_errors
 def find_action(ctx: click.Context, action: str, days: int, limit: int) -> None:
@@ -1412,8 +1462,8 @@ def find_action(ctx: click.Context, action: str, days: int, limit: int) -> None:
 
 
 @cli.command()
-@click.option("--days", "-d", default=7, help="Number of days to analyze")
-@click.option("--top", "-t", default=10, help="Number of top items to show")
+@click.option("--days", "-d", type=POSITIVE_INT, default=7, help="Number of days to analyze")
+@click.option("--top", "-t", type=POSITIVE_INT, default=10, help="Number of top items to show")
 @click.pass_context
 @handle_cli_errors
 def top_users(ctx: click.Context, days: int, top: int) -> None:
@@ -1464,9 +1514,9 @@ def show(ctx: click.Context, entry_id: str) -> None:
                 break
 
     if not found_entry:
-        console.print(f"[yellow]Entry not found: {escape(entry_id)}[/yellow]")
-        console.print("[dim]Note: Only recent entries can be found this way.[/dim]")
-        return
+        err_console.print(f"[yellow]Entry not found: {escape(entry_id)}[/yellow]")
+        err_console.print("[dim]Note: Only recent entries can be found this way.[/dim]")
+        sys.exit(1)
 
     panel = format_single_entry(found_entry)
     console.print(panel)

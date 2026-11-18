@@ -583,7 +583,7 @@ class TestTailCommand:
 
         result = runner.invoke(
             main,
-            ["cli", "tail", "--action", "DELETE", "--interval", "1", "--no-alerts"],
+            ["cli", "tail", "--action", "DELETE", "--interval", "5", "--no-alerts"],
         )
         assert result.exit_code == 0
 
@@ -1711,3 +1711,183 @@ class TestHandleCliErrors:
 
         assert result.exit_code != 0
         assert isinstance(result.exception, (KeyboardInterrupt, SystemExit))
+
+
+def _mock_client(**attrs) -> MagicMock:
+    client = MagicMock()
+    client.__enter__ = MagicMock(return_value=client)
+    client.__exit__ = MagicMock(return_value=False)
+    for name, value in attrs.items():
+        getattr(client, name).return_value = value
+    return client
+
+
+class TestExitCodes:
+    """A failed check must fail the process, so scripts can rely on the exit code."""
+
+    @pytest.mark.parametrize("fmt", ["table", "json"])
+    @patch("cja_audit_log_monitor.cli.get_client")
+    def test_verify_failed_connection_exits_1(
+        self, mock_get_client: MagicMock, runner: CliRunner, fmt: str
+    ) -> None:
+        client = _mock_client(
+            verify_connection={
+                "connected": False,
+                "authenticated": False,
+                "org_id": "x@AdobeOrg",
+                "api_url": "https://cja.adobe.io",
+                "error": "boom",
+            }
+        )
+        mock_get_client.return_value = (client, MagicMock())
+        result = runner.invoke(main, ["cli", "verify", "-F", fmt])
+        assert result.exit_code == 1
+
+    @patch("cja_audit_log_monitor.cli.get_client")
+    def test_show_missing_entry_exits_1_with_message_on_stderr(
+        self, mock_get_client: MagicMock, runner: CliRunner
+    ) -> None:
+        client = _mock_client()
+        client.get_logs_paginated.return_value = iter([])
+        mock_get_client.return_value = (client, MagicMock())
+        result = runner.invoke(main, ["cli", "show", "missing-id"])
+        assert result.exit_code == 1
+        assert "Entry not found: missing-id" in result.stderr
+        assert "Entry not found" not in result.stdout
+
+    @patch("cja_audit_log_monitor.cli.NotificationManager")
+    @patch("cja_audit_log_monitor.cli.get_client")
+    def test_monitor_exits_1_when_no_poll_ever_succeeded(
+        self, mock_get_client: MagicMock, mock_nm: MagicMock, runner: CliRunner
+    ) -> None:
+        from cja_audit_log_monitor.client import APIError
+
+        client = MagicMock()
+        client.get_logs.side_effect = APIError("upstream down", status_code=503)
+        settings = MagicMock()
+        settings.alert_rules = []
+        mock_get_client.return_value = (client, settings)
+        mock_nm.return_value.__enter__.return_value.is_configured.return_value = False
+
+        def one_poll(monitor, *args, **kwargs):
+            monitor._get_new_entries()
+
+        with patch(
+            "cja_audit_log_monitor.cli.AuditLogMonitor.start", autospec=True, side_effect=one_poll
+        ):
+            result = runner.invoke(main, ["cli", "monitor", "--no-alerts", "--duration", "5"])
+        assert result.exit_code == 1
+
+    @patch("cja_audit_log_monitor.cli.NotificationManager")
+    @patch("cja_audit_log_monitor.cli.get_client")
+    def test_monitor_exits_0_when_a_poll_succeeded(
+        self, mock_get_client: MagicMock, mock_nm: MagicMock, runner: CliRunner
+    ) -> None:
+        client = MagicMock()
+        client.get_logs.return_value = AuditLogResponse(content=[], last=True)
+        settings = MagicMock()
+        settings.alert_rules = []
+        mock_get_client.return_value = (client, settings)
+        mock_nm.return_value.__enter__.return_value.is_configured.return_value = False
+
+        def one_poll(monitor, *args, **kwargs):
+            monitor._get_new_entries()
+
+        with patch(
+            "cja_audit_log_monitor.cli.AuditLogMonitor.start", autospec=True, side_effect=one_poll
+        ):
+            result = runner.invoke(main, ["cli", "monitor", "--no-alerts", "--duration", "5"])
+        assert result.exit_code == 0
+
+
+class TestNumericValidation:
+    """Zero and negative numbers are usage errors (exit 2), never silent no-ops."""
+
+    @pytest.mark.parametrize(
+        "args",
+        [
+            ["list", "--limit", "0"],
+            ["list", "--limit", "-3"],
+            ["search", "--limit", "0"],
+            ["stats", "--days", "0"],
+            ["stats", "--top", "0"],
+            ["top-users", "--days", "0"],
+            ["top-users", "--top", "0"],
+            ["export", "-o", "x.json", "--days", "0"],
+            ["export", "-o", "x.json", "--max-entries", "0"],
+            ["monitor", "--interval", "0"],
+            ["monitor", "--interval", "4"],
+            ["monitor", "--duration", "0"],
+            ["tail", "--interval", "0"],
+        ],
+    )
+    def test_invalid_number_exits_2(self, runner: CliRunner, args: list[str]) -> None:
+        result = runner.invoke(main, ["cli", *args])
+        assert result.exit_code == 2
+
+
+class TestDateRangeValidation:
+    """--end-date covers the whole day, and start after end is rejected."""
+
+    def test_parse_date_end_of_day(self) -> None:
+        assert parse_date("2026-01-01", end_of_day=True) == datetime(
+            2026, 1, 1, 23, 59, 59, tzinfo=UTC
+        )
+        assert parse_date("2026-01-01") == datetime(2026, 1, 1, tzinfo=UTC)
+        # An explicit time is left alone.
+        assert parse_date("2026-01-01T05:00:00Z", end_of_day=True) == datetime(
+            2026, 1, 1, 5, tzinfo=UTC
+        )
+
+    @patch("cja_audit_log_monitor.cli.get_client")
+    def test_search_same_day_end_date_is_end_of_day(
+        self, mock_get_client: MagicMock, runner: CliRunner
+    ) -> None:
+        client = _mock_client(get_all_logs=[])
+        mock_get_client.return_value = (client, MagicMock())
+        result = runner.invoke(main, ["cli", "search", "-s", "2026-01-01", "-e", "2026-01-01"])
+        assert result.exit_code == 0
+        query = client.get_all_logs.call_args.args[0]
+        assert query.start_date == datetime(2026, 1, 1, tzinfo=UTC)
+        assert query.end_date == datetime(2026, 1, 1, 23, 59, 59, tzinfo=UTC)
+
+    @patch("cja_audit_log_monitor.cli.get_client")
+    def test_export_same_day_end_date_is_end_of_day(
+        self, mock_get_client: MagicMock, runner: CliRunner, tmp_path
+    ) -> None:
+        client = _mock_client(get_all_logs=[])
+        mock_get_client.return_value = (client, MagicMock())
+        out = str(tmp_path / "x.json")
+        result = runner.invoke(
+            main, ["cli", "export", "-o", out, "-s", "2026-01-01", "-e", "2026-01-01"]
+        )
+        assert result.exit_code == 0
+        query = client.get_all_logs.call_args.args[0]
+        assert query.end_date == datetime(2026, 1, 1, 23, 59, 59, tzinfo=UTC)
+
+    @pytest.mark.parametrize("command", [["search"], ["export", "-o", "x.json"]])
+    def test_start_after_end_exits_2(self, runner: CliRunner, command: list[str]) -> None:
+        result = runner.invoke(
+            main, ["cli", *command, "-s", "2026-02-01", "-e", "2026-01-01"]
+        )
+        assert result.exit_code == 2
+
+
+class TestStatsTopFlag:
+    @patch("cja_audit_log_monitor.cli.get_client")
+    def test_top_15_shows_15_users(self, mock_get_client: MagicMock, runner: CliRunner) -> None:
+        entries = [
+            AuditLogEntry(
+                id=str(i),
+                user_id=f"U{i}@x.e",
+                user_email=f"user{i:02d}@example.com",
+                action="CREATE",
+                timestamp=datetime(2026, 1, 1, tzinfo=UTC),
+            )
+            for i in range(15)
+        ]
+        client = _mock_client(get_all_logs=entries)
+        mock_get_client.return_value = (client, MagicMock())
+        result = runner.invoke(main, ["cli", "stats", "--top", "15", "-F", "json"])
+        assert result.exit_code == 0
+        assert len(json.loads(result.stdout)["statistics"]["top_users"]) == 15
