@@ -146,7 +146,6 @@ class TestBadConfigFile:
             "default_page_size: 1001",
             "default_days: 0",
             "monitor_interval: 4",
-            "monitor_interval: 3601",
         ],
     )
     def test_out_of_range_values_are_rejected(self, tmp_path: Path, line: str) -> None:
@@ -154,6 +153,12 @@ class TestBadConfigFile:
         path.write_text(line + "\n")
         with pytest.raises(ConfigError, match=line.split(":")[0]):
             load_config(path)
+
+    def test_large_interval_and_days_are_accepted(self, tmp_path: Path) -> None:
+        path = tmp_path / "config.yaml"
+        path.write_text("monitor_interval: 7200\ndefault_days: 400\n")
+        settings = load_config(path)
+        assert (settings.monitor_interval, settings.default_days) == (7200, 400)
 
     def test_range_edges_are_accepted(self, tmp_path: Path) -> None:
         path = tmp_path / "config.yaml"

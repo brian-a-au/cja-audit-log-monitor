@@ -9,7 +9,7 @@ The Settings screen is a read-only view of the active configuration plus a one-c
 - **Connection status**: green dot + org ID + API URL + total logs available when authenticated; red dot + error string when not.
 - **API configuration**: the resolved config file path (your home folder is shown as `~`), the CJA API base URL, and the IMS base URL.
 - **Authentication**: organization ID (truncated), client ID (truncated), and an `oauth configured` yes/no indicator. Secrets are never displayed.
-- **Defaults**: `default_page_size`, `default_days` and `monitor_interval`. The log browser starts at that page size, the dashboard and stats look back that many days, and the monitor interval box starts at that interval. The same values are the CLI defaults for `--days` and `--interval` (monitor).
+- **Defaults**: `default_page_size`, `default_days` and `monitor_interval`. The log browser shows that many rows per page (the CLI does not use this setting), the dashboard and stats look back that many days, and the monitor interval box starts at that interval. The same values are the CLI defaults for `--days` and `--interval` (monitor).
 - **Alert rules**: the count of rules currently configured (full detail lives on the Alerts screen).
 - **Notifications**: presence indicators for the `notifications:` block — Slack (`configured` / `not configured`), webhook count, and the `notify_on_alerts` / `notify_on_anomalies` toggle states. No URLs or secrets shown — safe to screen-share.
 - **Action buttons**: `verify connection` and `reload settings`. Sections are laid out in a two-column grid.

@@ -104,7 +104,7 @@ class CJASettings(BaseSettings):
 
     # Monitoring settings
     monitor_interval: int = Field(
-        default=60, ge=5, le=3600, description="Polling interval in seconds (5 to 3600)"
+        default=60, ge=5, description="Polling interval in seconds (at least 5)"
     )
 
     # Alert settings

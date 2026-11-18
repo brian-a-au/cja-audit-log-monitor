@@ -3573,3 +3573,24 @@ class TestConfiguredDefaults:
             assert app._screens["monitor"].query_one("#interval-input", Input).value == "30"
             assert app._screens["stats"].query_one("#days-input", Input).value == "3"
             assert mock_app_state.filters.page_size == 20
+
+    async def test_reload_relabels_the_dashboard_window(self, mock_app_state, tmp_path):
+        config = tmp_path / "config.yaml"
+        config.write_text("default_days: 3\n")
+        mock_app_state._config_path = config
+        mock_app_state.refresh_client = MagicMock()
+        mock_app_state.verify_connection = MagicMock(
+            return_value={"connected": False, "error": "offline"}
+        )
+        app = _make_app(mock_app_state)
+
+        def labels():
+            return [_plain(s).strip() for s in app.query(".stat-label")]
+
+        async with app.run_test(size=(140, 40)) as pilot:
+            await _show_and_load(app, pilot, "d")
+            assert "last 7 days" in labels()
+            await pilot.press("c")
+            await pilot.pause()
+            app.query_one("#reload-button", Button).press()
+            assert await _wait_for(lambda: "last 3 days" in labels(), pilot)

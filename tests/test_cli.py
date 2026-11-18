@@ -2234,7 +2234,7 @@ class TestExportRaces:
 
 
 class TestConfiguredDefaults:
-    """Commands fall back to default_days, default_page_size and monitor_interval."""
+    """Commands fall back to default_days and monitor_interval."""
 
     @staticmethod
     def _client() -> MagicMock:
@@ -2268,18 +2268,6 @@ class TestConfiguredDefaults:
         assert result.exit_code == 0
         query = client.get_all_logs.call_args.args[0]
         assert (query.end_date - query.start_date).days == 10
-
-    @patch("cja_audit_log_monitor.cli.get_client")
-    def test_list_uses_default_page_size(
-        self, mock_get_client: MagicMock, runner: CliRunner
-    ) -> None:
-        client = self._client()
-        settings = _settings()
-        settings.default_page_size = 25
-        mock_get_client.return_value = (client, settings)
-        result = runner.invoke(main, ["cli", "list", "--limit", "80"])
-        assert result.exit_code == 0
-        assert client.get_all_logs.call_args.args[0].page_size == 25
 
     @patch("cja_audit_log_monitor.cli.AuditLogMonitor")
     @patch("cja_audit_log_monitor.cli.get_client")
