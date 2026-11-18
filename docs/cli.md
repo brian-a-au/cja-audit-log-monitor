@@ -50,6 +50,8 @@ cja-audit-log-monitor cli timeline [--days N] [--action TYPE] [--user EMAIL]
 cja-audit-log-monitor cli report [--days N] [--output FILE]
 ```
 
+When `--days` is left off, commands use `default_days` from the config file (7 unless changed). `cli monitor` does the same with `monitor_interval` for `--interval` (60 unless changed).
+
 ## Monitoring commands
 
 ```bash

@@ -95,12 +95,17 @@ class CJASettings(BaseSettings):
     )
 
     # CLI defaults
-    default_page_size: int = Field(default=100, description="Default page size for queries")
-    default_days: int = Field(default=7, description="Default number of days for date range")
-    output_format: str = Field(default="table", description="Default output format")
+    default_page_size: int = Field(
+        default=100, ge=1, le=1000, description="Default page size for queries (1 to 1000)"
+    )
+    default_days: int = Field(
+        default=7, ge=1, description="Default number of days for date range"
+    )
 
     # Monitoring settings
-    monitor_interval: int = Field(default=60, description="Polling interval in seconds")
+    monitor_interval: int = Field(
+        default=60, ge=5, le=3600, description="Polling interval in seconds (5 to 3600)"
+    )
 
     # Alert settings
     alert_rules: list[AlertRule] = Field(default_factory=list)
@@ -238,7 +243,6 @@ ims_base_url: https://ims-na1.adobelogin.com
 # CLI defaults
 default_page_size: 100
 default_days: 7
-output_format: table
 
 # Monitoring settings
 monitor_interval: 60

@@ -23,7 +23,6 @@ from .base import (
     stat_card,
 )
 
-DASHBOARD_DAYS = 7
 DASHBOARD_SAMPLE = 1000
 
 
@@ -64,7 +63,7 @@ class DashboardScreen(ContentView):
             stat_card("total entries", "stat-total"),
             stat_card("active users", "stat-users"),
             stat_card("anomalies", "stat-alerts"),
-            stat_card(f"last {DASHBOARD_DAYS} days", "stat-range"),
+            stat_card(f"last {self._days} days", "stat-range"),
             classes="dashboard-stats",
         )
         yield sample_note()
@@ -99,6 +98,17 @@ class DashboardScreen(ContentView):
         """Load data the first time the dashboard is shown."""
         self.refresh_data()
 
+    @property
+    def _days(self) -> int:
+        """Days the dashboard looks back: the configured default_days."""
+        return self._state.settings.default_days
+
+    def on_settings_reloaded(self) -> None:
+        """Relabel the window for the reloaded default_days and reload."""
+        card = self.query_one("#stat-range").parent
+        card.query_one(".stat-label", Static).update(f"last {self._days} days")
+        self.refresh_data()
+
     def refresh_data(self) -> None:
         """Refresh dashboard data."""
         self.run_load(self._fetch, self._show_load)
@@ -109,7 +119,7 @@ class DashboardScreen(ContentView):
         if not connection.get("connected"):
             return _DashboardLoad(connection)
         try:
-            query = build_date_range_query(DASHBOARD_DAYS)
+            query = build_date_range_query(self._days)
             entries, total = self._state.client.get_logs_sample(
                 query, max_entries=DASHBOARD_SAMPLE
             )
@@ -138,7 +148,7 @@ class DashboardScreen(ContentView):
         if load.error is not None:
             self.show_load_error(load.error)
         elif load.stats is None:
-            self.set_empty_state(no_activity_message(DASHBOARD_DAYS))
+            self.set_empty_state(no_activity_message(self._days))
         else:
             self._update_stats(load.stats, load.anomalies, load.hourly, load.total)
 
@@ -160,7 +170,7 @@ class DashboardScreen(ContentView):
         show_sample_note(self, shown, total)
 
         now = datetime.now().astimezone()
-        start = now - timedelta(days=DASHBOARD_DAYS)
+        start = now - timedelta(days=self._days)
         self.query_one("#stat-range", Static).update(f"{start:%m-%d} → {now:%m-%d}")
 
         top_users = stats.get("top_users", [])
@@ -208,7 +218,7 @@ class DashboardScreen(ContentView):
             return
         widget = self.query_one("#top-users", Static)
         if not self._top_users:
-            widget.update(no_activity_message(DASHBOARD_DAYS))
+            widget.update(no_activity_message(self._days))
             return
         # Fit "name count" on one line: count takes 6 cells (space + 5 digits).
         name_width = max(8, min(28, widget.content_region.width - 6))

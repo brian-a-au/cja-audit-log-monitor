@@ -191,6 +191,7 @@ class SettingsScreen(ContentView):
         except RuntimeError as error:
             self.app.notify(str(error), severity="warning")
             return
+        self.app.settings_reloaded()
         await self.recompose()
         self.app.set_connection_status("connecting")
         self.refresh_data()

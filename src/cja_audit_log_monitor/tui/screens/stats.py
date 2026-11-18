@@ -40,7 +40,6 @@ class StatsScreen(ContentView):
             **kwargs: Additional arguments for Screen.
         """
         super().__init__(state, **kwargs)
-        self._days = 7
         self._daily: list[tuple[str, int]] = []
         self._users: list[tuple[str, int]] = []
         self._lists_loaded = False
@@ -50,7 +49,9 @@ class StatsScreen(ContentView):
         yield Static("statistics", id="stats-title", classes="section-label view-title")
         yield Horizontal(
             Label("days"),
-            Input(value="7", id="days-input", type="integer", compact=True),
+            Input(
+                value=str(self._state.stats_days), id="days-input", type="integer", compact=True
+            ),
             Button("update", id="update-button", variant="primary", compact=True),
             id="stats-controls",
             classes="toolbar",
@@ -107,7 +108,7 @@ class StatsScreen(ContentView):
 
     def refresh_data(self) -> None:
         """Refresh statistics data."""
-        days = self._days
+        days = self._state.stats_days
         self.run_load(lambda: self._fetch(days), lambda load: self._show_load(days, load))
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
@@ -121,14 +122,19 @@ class StatsScreen(ContentView):
             event.stop()
             self._apply_days()
 
+    def on_settings_reloaded(self) -> None:
+        """Show the reloaded default days and reload the statistics for them."""
+        self.query_one("#days-input", Input).value = str(self._state.stats_days)
+        self.refresh_data()
+
     def _apply_days(self) -> None:
         """Read the days box, show the value actually used, and reload."""
         box = self.query_one("#days-input", Input)
         try:
-            self._days = max(1, int(box.value))
+            self._state.stats_days = max(1, int(box.value))
         except ValueError:
-            self._days = 7
-        box.value = str(self._days)
+            self._state.stats_days = self._state.settings.default_days
+        box.value = str(self._state.stats_days)
         self.refresh_data()
 
     def _fetch(self, days: int) -> tuple | None:
@@ -170,7 +176,7 @@ class StatsScreen(ContentView):
         show_sample_note(self, shown, total)
         self.query_one("#stats-users", Static).update(f"{len(users):,}")
         now = datetime.now().astimezone()
-        start = now - timedelta(days=self._days)
+        start = now - timedelta(days=self._state.stats_days)
         self.query_one("#stats-period", Static).update(f"{start:%Y-%m-%d} → {now:%Y-%m-%d}")
 
         self.query_one("#stats-action-chart", ActionBarChart).update_data(
@@ -202,7 +208,8 @@ class StatsScreen(ContentView):
             f"[/{primary}] {count:>5,}"
             for day, count in self._daily
         ]
-        daily_widget.update("\n".join(daily_lines) or no_activity_message(self._days))
+        days = self._state.stats_days
+        daily_widget.update("\n".join(daily_lines) or no_activity_message(days))
 
         ranking_widget = self.query_one("#user-ranking", Static)
         # "NN. " (4) + name + " " + 5-digit count (6).
@@ -211,7 +218,7 @@ class StatsScreen(ContentView):
         for rank, (user, count) in enumerate(self._users, 1):
             name = user if len(user) <= name_width else user[: name_width - 1] + "…"
             user_lines.append(f"{rank:>2}. {literal(f'{name:<{name_width}}')} {count:>5,}")
-        ranking_widget.update("\n".join(user_lines) or no_activity_message(self._days))
+        ranking_widget.update("\n".join(user_lines) or no_activity_message(days))
 
 
 

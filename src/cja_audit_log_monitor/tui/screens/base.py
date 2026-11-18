@@ -222,6 +222,9 @@ class ContentView(Vertical):
         self.app.note_api_error(error)
         self.set_empty_state(error_message(error))
 
+    def on_settings_reloaded(self) -> None:
+        """Hook called when the settings were re-read; take the new defaults here."""
+
     def on_content_mounted(self) -> None:
         """Hook called once, the first time the view is shown."""
 

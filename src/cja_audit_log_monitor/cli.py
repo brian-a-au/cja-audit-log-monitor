@@ -51,6 +51,19 @@ R = TypeVar("R")
 POSITIVE_INT = click.IntRange(min=1)
 INTERVAL_SECONDS = click.IntRange(min=5)
 
+
+def days_option(what: str) -> Callable[[Callable[P, R]], Callable[P, R]]:
+    """The --days option. Left unset, the command uses the configured default_days."""
+    return click.option(
+        "--days", "-d", type=POSITIVE_INT, default=None,
+        help=f"{what} (default: from config (7))",
+    )
+
+
+def days_or_default(days: int | None, settings: CJASettings) -> int:
+    """The --days value, or the configured default_days when the flag was not given."""
+    return settings.default_days if days is None else days
+
 console = Console()
 err_console = Console(stderr=True)
 
@@ -291,7 +304,7 @@ def cli_list(
     client, settings = get_client(config_path)
 
     query = AuditLogQuery(
-        page_size=min(limit, 100),
+        page_size=min(limit, settings.default_page_size),
         components=parse_components(component),
     )
 
@@ -372,7 +385,7 @@ def search(
         components=parse_components(component),
         component_id=component_id,
         description=description,
-        page_size=min(limit, 100),
+        page_size=min(limit, settings.default_page_size),
     )
 
     with client:
@@ -423,7 +436,7 @@ def dashboard(ctx: click.Context, dashboard_id: str, limit: int) -> None:
 
 @cli.command()
 @click.option("--user-id", "-u", required=True, help="User ID or email address")
-@click.option("--days", "-d", type=POSITIVE_INT, default=7, help="Number of days to query")
+@days_option("Number of days to query")
 @click.option("--limit", "-l", type=POSITIVE_INT, default=100, help="Maximum entries to return")
 @click.option(
     "--output-format",
@@ -434,11 +447,14 @@ def dashboard(ctx: click.Context, dashboard_id: str, limit: int) -> None:
 )
 @click.pass_context
 @handle_cli_errors
-def user(ctx: click.Context, user_id: str, days: int, limit: int, output_format: str) -> None:
+def user(
+    ctx: click.Context, user_id: str, days: int | None, limit: int, output_format: str
+) -> None:
     """Show all audit events for a specific user."""
     config_path = ctx.obj.get("config_path")
 
     client, settings = get_client(config_path)
+    days = days_or_default(days, settings)
 
     query = build_date_range_query(days)
     query.user_id = user_id
@@ -552,10 +568,7 @@ def component(
 )
 @click.option("--start-date", "-s", help="Start date (YYYY-MM-DD)")
 @click.option("--end-date", "-e", help="End date (YYYY-MM-DD)")
-@click.option(
-    "--days", "-d", type=POSITIVE_INT, default=7,
-    help="Number of days (if no date range)",
-)
+@days_option("Number of days (if no date range)")
 @click.option(
     "--action",
     "-a",
@@ -583,7 +596,7 @@ def export(
     output: Path,
     start_date: str | None,
     end_date: str | None,
-    days: int,
+    days: int | None,
     action: tuple[str, ...],
     component: tuple[str, ...],
     pretty: bool,
@@ -598,6 +611,7 @@ def export(
 
     start, end = parse_date_range(start_date, end_date)
     client, settings = get_client(config_path)
+    days = days_or_default(days, settings)
 
     # Build query
     if start_date or end_date:
@@ -647,7 +661,7 @@ def export(
 
 
 @cli.command()
-@click.option("--days", "-d", type=POSITIVE_INT, default=7, help="Number of days to analyze")
+@days_option("Number of days to analyze")
 @click.option("--top", "-t", type=POSITIVE_INT, default=10, help="Number of top users to show")
 @click.option(
     "--output-format",
@@ -658,11 +672,12 @@ def export(
 )
 @click.pass_context
 @handle_cli_errors
-def stats(ctx: click.Context, days: int, top: int, output_format: str) -> None:
+def stats(ctx: click.Context, days: int | None, top: int, output_format: str) -> None:
     """Display summary statistics for audit logs."""
     config_path = ctx.obj.get("config_path")
 
     client, settings = get_client(config_path)
+    days = days_or_default(days, settings)
 
     query = build_date_range_query(days)
     if output_format != "json":
@@ -717,8 +732,8 @@ def stats(ctx: click.Context, days: int, top: int, output_format: str) -> None:
     "--interval",
     "-i",
     type=INTERVAL_SECONDS,
-    default=60,
-    help="Polling interval in seconds (minimum 5)",
+    default=None,
+    help="Polling interval in seconds (minimum 5, default: from config (60))",
 )
 @click.option(
     "--duration", "-D", type=POSITIVE_INT,
@@ -729,7 +744,7 @@ def stats(ctx: click.Context, days: int, top: int, output_format: str) -> None:
 @handle_cli_errors
 def monitor(
     ctx: click.Context,
-    interval: int,
+    interval: int | None,
     duration: int | None,
     alerts: bool,
 ) -> None:
@@ -738,6 +753,8 @@ def monitor(
 
     try:
         client, settings = get_client(config_path)
+        if interval is None:
+            interval = settings.monitor_interval
 
         alert_engine = None
         if alerts:
@@ -1036,7 +1053,7 @@ def verify(ctx: click.Context, output_format: str) -> None:
 
 
 @cli.command()
-@click.option("--days", "-d", type=POSITIVE_INT, default=7, help="Number of days to analyze")
+@days_option("Number of days to analyze")
 @click.option(
     "--output",
     "-o",
@@ -1056,7 +1073,7 @@ def verify(ctx: click.Context, output_format: str) -> None:
 @handle_cli_errors
 def report(
     ctx: click.Context,
-    days: int,
+    days: int | None,
     output: Path | None,
     pretty: bool,
     max_entries: int,
@@ -1067,6 +1084,7 @@ def report(
     check_output_path(output, force)
 
     client, settings = get_client(config_path)
+    days = days_or_default(days, settings)
 
     err_console.print(f"[dim]Generating report for the last {days} days...[/dim]\n")
 
@@ -1136,6 +1154,8 @@ def tail(
 
     try:
         client, settings = get_client(config_path)
+        if interval is None:
+            interval = settings.monitor_interval
 
         alert_engine = None
         if alerts:
@@ -1364,7 +1384,7 @@ def query(
         user_id=user,
         actions=parse_actions(action),
         components=parse_components(component),
-        page_size=min(limit, 100),
+        page_size=min(limit, settings.default_page_size),
     )
 
     if not quiet and output_format != "json":
@@ -1393,7 +1413,7 @@ def query(
 
 
 @cli.command()
-@click.option("--days", "-d", type=POSITIVE_INT, default=7, help="Number of days to analyze")
+@days_option("Number of days to analyze")
 @click.option(
     "--action",
     "-a",
@@ -1411,7 +1431,7 @@ def query(
 @handle_cli_errors
 def timeline(
     ctx: click.Context,
-    days: int,
+    days: int | None,
     action: tuple[str, ...],
     component: tuple[str, ...],
     user: str | None,
@@ -1420,6 +1440,7 @@ def timeline(
     config_path = ctx.obj.get("config_path")
 
     client, settings = get_client(config_path)
+    days = days_or_default(days, settings)
 
     query = build_date_range_query(days)
     query.actions = parse_actions(action)
@@ -1468,15 +1489,16 @@ def timeline(
     type=click.Choice([a.value for a in ActionType]),
     help="Action type to find",
 )
-@click.option("--days", "-d", type=POSITIVE_INT, default=7, help="Number of days to search")
+@days_option("Number of days to search")
 @click.option("--limit", "-l", type=POSITIVE_INT, default=50, help="Maximum entries to show")
 @click.pass_context
 @handle_cli_errors
-def find_action(ctx: click.Context, action: str, days: int, limit: int) -> None:
+def find_action(ctx: click.Context, action: str, days: int | None, limit: int) -> None:
     """Find all occurrences of a specific action type."""
     config_path = ctx.obj.get("config_path")
 
     client, settings = get_client(config_path)
+    days = days_or_default(days, settings)
 
     query = build_date_range_query(days)
     query.actions = [ActionType(action)]
@@ -1496,15 +1518,16 @@ def find_action(ctx: click.Context, action: str, days: int, limit: int) -> None:
 
 
 @cli.command()
-@click.option("--days", "-d", type=POSITIVE_INT, default=7, help="Number of days to analyze")
+@days_option("Number of days to analyze")
 @click.option("--top", "-t", type=POSITIVE_INT, default=10, help="Number of top items to show")
 @click.pass_context
 @handle_cli_errors
-def top_users(ctx: click.Context, days: int, top: int) -> None:
+def top_users(ctx: click.Context, days: int | None, top: int) -> None:
     """Show most active users."""
     config_path = ctx.obj.get("config_path")
 
     client, settings = get_client(config_path)
+    days = days_or_default(days, settings)
 
     query = build_date_range_query(days)
 

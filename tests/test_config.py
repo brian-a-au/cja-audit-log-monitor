@@ -126,6 +126,42 @@ class TestBadConfigFile:
         path.write_text("monitor_interval: [1, \n")
         assert load_config(path, use_file=False).monitor_interval == 60
 
+    def test_output_format_is_not_a_setting(self) -> None:
+        assert "output_format" not in CJASettings.model_fields
+
+    def test_old_config_with_output_format_still_loads(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        path = tmp_path / "config.yaml"
+        path.write_text("default_days: 3\noutput_format: table\n")
+        with caplog.at_level("WARNING"):
+            settings = load_config(path)
+        assert settings.default_days == 3
+        assert "output_format" in caplog.text
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            "default_page_size: 0",
+            "default_page_size: 1001",
+            "default_days: 0",
+            "monitor_interval: 4",
+            "monitor_interval: 3601",
+        ],
+    )
+    def test_out_of_range_values_are_rejected(self, tmp_path: Path, line: str) -> None:
+        path = tmp_path / "config.yaml"
+        path.write_text(line + "\n")
+        with pytest.raises(ConfigError, match=line.split(":")[0]):
+            load_config(path)
+
+    def test_range_edges_are_accepted(self, tmp_path: Path) -> None:
+        path = tmp_path / "config.yaml"
+        path.write_text("default_page_size: 1000\ndefault_days: 1\nmonitor_interval: 5\n")
+        settings = load_config(path)
+        assert (settings.default_page_size, settings.default_days) == (1000, 1)
+        assert settings.monitor_interval == 5
+
     def test_unknown_key_warns(self, tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
         path = tmp_path / "config.yaml"
         path.write_text("monitor_intervall: 5\n")

@@ -62,6 +62,16 @@ Writes `~/.cja-audit-log-monitor/config.yaml` with default alert rules and a com
 > The default for `notify_on_anomalies` is `false` (opt-in). Set to `true` to
 > enable delivery via `cja-audit-log-monitor cli anomalies`.
 
+### Defaults in the config file
+
+| Key | Default | Range | Used by |
+| --- | --- | --- | --- |
+| `default_page_size` | 100 | 1 to 1000 | The TUI log browser, and the page size of `cli list`, `search` and `query`. |
+| `default_days` | 7 | 1 or more | The TUI dashboard and stats views, and `--days` when you leave it off (`user`, `export`, `stats`, `report`, `timeline`, `find-action`, `top-users`). |
+| `monitor_interval` | 60 | 5 to 3600 | The TUI monitor interval box, and `cli monitor --interval` when you leave it off. |
+
+A value outside its range stops the config file from loading, and the error names the key. An older file that still has `output_format:` keeps working: the key is ignored with a warning.
+
 ## 5. Verify
 
 ```bash

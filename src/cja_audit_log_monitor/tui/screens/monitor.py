@@ -84,7 +84,7 @@ class MonitorScreen(ContentView):
             Button("■ stop", id="stop-button", variant="error", disabled=True, compact=True),
             Label("interval"),
             _IntervalInput(
-                value="60",
+                value=str(self._state.monitor.interval),
                 id="interval-input",
                 type="integer",
                 compact=True,
@@ -141,6 +141,12 @@ class MonitorScreen(ContentView):
         """Apply the interval when Enter is pressed in its box."""
         if event.input.id == "interval-input":
             self._apply_interval()
+
+    def on_settings_reloaded(self) -> None:
+        """Show the reloaded default interval (the monitor is stopped; reload needs that)."""
+        box = self.query_one("#interval-input", Input)
+        box.value = str(self._state.monitor.interval)
+        box.validate(box.value)  # clears a stale -invalid mark
 
     def _apply_interval(self) -> bool:
         """Use the interval box's value if it is 5 to 3600 seconds.

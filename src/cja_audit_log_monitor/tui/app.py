@@ -229,6 +229,8 @@ class CJAAuditApp(App):
         }
         self._screens = {name: cls(self.state, id=f"view-{name}") for name, cls in views.items()}
 
+        self.state.apply_settings_defaults()
+
         # Show dashboard by default
         await self._show_screen("dashboard")
 
@@ -280,6 +282,16 @@ class CJAAuditApp(App):
                 screen_name = candidate_id.replace("nav-", "")
                 await self._show_screen(screen_name)
                 return
+
+    def settings_reloaded(self) -> None:
+        """Tell the views already shown that the settings were re-read.
+
+        Each one takes the new defaults and reloads its data; views not yet shown pick
+        the defaults up when they are first built. The config view redraws itself.
+        """
+        for name in self._mounted_views:
+            if name != "settings":
+                self._screens[name].on_settings_reloaded()
 
     def action_switch_screen(self, screen_name: str) -> None:
         """Switch to a different screen."""

@@ -65,6 +65,10 @@ class LogBrowserScreen(ContentView):
         """Called after compose_content widgets are mounted."""
         self.refresh_data()
 
+    def on_settings_reloaded(self) -> None:
+        """Reload the page: the page size may have changed."""
+        self.refresh_data()
+
     def refresh_data(self) -> None:
         """Refresh log data."""
         self.run_load(self._state.fetch_logs_page, self._show_page)

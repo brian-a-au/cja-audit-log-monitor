@@ -3433,3 +3433,102 @@ class TestFocusAndKeys:
             lines = everywhere.splitlines()
             assert any(ln.strip().startswith("/") for ln in lines)
             assert any(ln.strip().startswith("tab") for ln in lines)
+
+
+class TestConfiguredDefaults:
+    """The TUI starts from default_page_size, default_days and monitor_interval."""
+
+    @staticmethod
+    def _page_by_size(state, sample_audit_entry):
+        """Make the mock client return as many rows as the query's page size asks for."""
+        from cja_audit_log_monitor.models import AuditLogResponse
+
+        def get_logs(query):
+            rows = [
+                sample_audit_entry.model_copy(update={"id": f"row-{n}"})
+                for n in range(query.page_size)
+            ]
+            return AuditLogResponse(
+                content=rows,
+                total_elements=500,
+                total_pages=500 // query.page_size,
+                number_of_elements=len(rows),
+                first=True,
+                last=False,
+                number=0,
+                size=query.page_size,
+            )
+
+        state.client.get_logs.side_effect = get_logs
+
+    async def test_log_browser_uses_default_page_size(self, mock_app_state, sample_audit_entry):
+        from cja_audit_log_monitor.tui.widgets import LogTable
+
+        mock_app_state.settings.default_page_size = 25
+        self._page_by_size(mock_app_state, sample_audit_entry)
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await _show_and_load(app, pilot, "l")
+            assert app.query_one("#log-table", LogTable).row_count == 25
+
+    async def test_monitor_interval_box_starts_at_the_setting(self, mock_app_state):
+        from textual.widgets import Input
+
+        mock_app_state.settings.monitor_interval = 30
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.press("m")
+            assert await _wait_for(lambda: app.query("#interval-input"), pilot)
+            assert app.query_one("#interval-input", Input).value == "30"
+            assert mock_app_state.monitor.interval == 30
+
+    async def test_stats_days_box_and_query_start_at_the_setting(self, mock_app_state):
+        from textual.widgets import Input
+
+        mock_app_state.settings.default_days = 3
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await _show_and_load(app, pilot, "s")
+            assert app.query_one("#days-input", Input).value == "3"
+            query = mock_app_state.client.get_logs_sample.call_args.args[0]
+            assert (query.end_date - query.start_date).days == 3
+
+    async def test_dashboard_window_follows_default_days(self, mock_app_state):
+        mock_app_state.settings.default_days = 3
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await _show_and_load(app, pilot, "d")
+            query = mock_app_state.client.get_logs_sample.call_args.args[0]
+            assert (query.end_date - query.start_date).days == 3
+            labels = [_plain(s) for s in app.query(".stat-label")]
+            assert "last 3 days" in [label.strip() for label in labels]
+
+    async def test_reload_applies_new_defaults_to_open_views(
+        self, mock_app_state, sample_audit_entry, tmp_path
+    ):
+        from textual.widgets import Input
+
+        config = tmp_path / "config.yaml"
+        config.write_text("default_page_size: 20\nmonitor_interval: 30\ndefault_days: 3\n")
+        mock_app_state._config_path = config
+        mock_app_state.refresh_client = MagicMock()  # keep the mock client through the reload
+        mock_app_state.verify_connection = MagicMock(
+            return_value={"connected": False, "error": "offline"}
+        )
+        self._page_by_size(mock_app_state, sample_audit_entry)
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await _show_and_load(app, pilot, "m")
+            await _show_and_load(app, pilot, "s")
+            await _show_and_load(app, pilot, "l")
+            await pilot.press("c")
+            await pilot.pause()
+            app.query_one("#reload-button", Button).press()
+            assert await _wait_for(
+                lambda: mock_app_state.client.get_logs.call_args is not None
+                and mock_app_state.client.get_logs.call_args.args[0].page_size == 20,
+                pilot,
+            )
+            assert app._screens["monitor"].query_one("#interval-input", Input).value == "30"
+            assert app._screens["stats"].query_one("#days-input", Input).value == "3"
+            assert mock_app_state.filters.page_size == 20

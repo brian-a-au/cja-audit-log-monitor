@@ -96,6 +96,9 @@ class AppState:
         # Monitor state
         self.monitor = MonitorState()
 
+        # Days the statistics view looks back; starts at the configured default_days.
+        self.stats_days: int = 7
+
         # Alerts
         self.recent_alerts: list[FiredAlert] = []
 
@@ -201,7 +204,20 @@ class AppState:
             self._notification_manager.close()
             self._notification_manager = None
         self.refresh_client()
-        self.settings  # noqa: B018 - load now so a bad file sets the config warning
+        self.apply_settings_defaults()  # loads now, so a bad file sets the config warning
+
+    def apply_settings_defaults(self) -> None:
+        """Start the page size, monitor interval and stats days from the settings.
+
+        Called at startup and after a reload. It resets the log page to the first, since
+        the page size may have changed. Views read these values when they are built or told
+        the settings were reloaded.
+        """
+        settings = self.settings
+        self.filters.page_size = settings.default_page_size
+        self.filters.page = 0
+        self.monitor.interval = settings.monitor_interval
+        self.stats_days = settings.default_days
 
     def verify_connection(self) -> dict:
         """Verify API connection and authentication.
