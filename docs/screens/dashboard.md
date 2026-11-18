@@ -6,7 +6,7 @@ The Dashboard is the home screen of the TUI — your at-a-glance situational vie
 
 ## What you see
 
-- **Connection status** (in the header row, on every screen): `connecting`, `connected` with the Adobe org, or `disconnected` with the error.
+- **Connection status** (in the header row, on every screen): `connecting`, `connected` with the Adobe org, or `disconnected` with the first line of the error. Any view that loses the connection updates it, and the next successful load sets it back to `connected`.
 - **Stat cards**: the total number of entries in the last 7 days, the number of active users, the number of recent anomalies (highlighted in warning color when non-zero), and the dates of the window.
 - **A sample note** under the cards when the window has more than 1,000 entries. The charts and lists then use the newest 1,000 entries, and the note says so.
 - **Left column**: an action distribution chart (bars colored by action severity, with counts and percentages) and an hourly activity chart in your local time zone.
