@@ -30,7 +30,7 @@ from .config import (
     get_config_path,
     load_config,
 )
-from .export import export_entries
+from .export import atomic_write, export_entries
 from .formatters import (
     format_action_stats_table,
     format_logs_table,
@@ -100,6 +100,22 @@ def handle_cli_errors(func: Callable[P, R]) -> Callable[P, R]:
         sys.exit(1)
 
     return wrapper
+
+
+def check_output_path(output: Path | None, force: bool) -> None:
+    """Fail fast (before any API call) on an unusable output path.
+
+    Refuses an existing file unless ``--force`` was given, and a missing parent
+    directory. ``-`` means stdout and is never a file, so it is always allowed.
+    """
+    if output is None or str(output) == "-":
+        return
+    if output.is_dir():
+        raise IsADirectoryError(f"{output} is a folder, not a file; give a file name")
+    if not output.parent.is_dir():
+        raise FileNotFoundError(f"directory {output.parent} does not exist")
+    if output.exists() and not force:
+        raise FileExistsError(f"{output} already exists; use --force to overwrite")
 
 
 def setup_logging(verbose: bool) -> None:
@@ -532,7 +548,7 @@ def component(
     "-o",
     type=click.Path(path_type=Path),
     required=True,
-    help="Output file path",
+    help="Output file path, or - for stdout",
 )
 @click.option("--start-date", "-s", help="Start date (YYYY-MM-DD)")
 @click.option("--end-date", "-e", help="End date (YYYY-MM-DD)")
@@ -558,6 +574,7 @@ def component(
     type=POSITIVE_INT,
     help="Maximum number of entries to export",
 )
+@click.option("--force", is_flag=True, help="Overwrite the output file if it exists")
 @click.pass_context
 @handle_cli_errors
 def export(
@@ -571,9 +588,13 @@ def export(
     component: tuple[str, ...],
     pretty: bool,
     max_entries: int | None,
+    force: bool,
 ) -> None:
-    """Export audit logs to file."""
+    """Export audit logs to a file, or to stdout with -o -."""
     config_path = ctx.obj.get("config_path")
+    check_output_path(output, force)
+    to_stdout = str(output) == "-"
+    destination: Any = sys.stdout if to_stdout else output
 
     start, end = parse_date_range(start_date, end_date)
     client, settings = get_client(config_path)
@@ -607,18 +628,22 @@ def export(
 
             count = export_entries(
                 chain([first_entry], entries_iter),
-                output,
+                destination,
                 output_format=format,
                 pretty=pretty,
+                overwrite=force,
             )
         else:
             entries = client.get_all_logs(query, max_entries=max_entries)
             if not entries:
                 err_console.print("[yellow]No audit logs found to export.[/yellow]")
                 return
-            count = export_entries(entries, output, output_format=format, pretty=pretty)
+            count = export_entries(
+                entries, destination, output_format=format, pretty=pretty, overwrite=force
+            )
 
-    err_console.print(f"[green]Exported {count} entries to {escape(str(output))}[/green]")
+    target = "stdout" if to_stdout else escape(str(output))
+    err_console.print(f"[green]Exported {count} entries to {target}[/green]")
 
 
 @cli.command()
@@ -1026,6 +1051,7 @@ def verify(ctx: click.Context, output_format: str) -> None:
     show_default=True,
     help="Maximum number of entries to process",
 )
+@click.option("--force", is_flag=True, help="Overwrite the output file if it exists")
 @click.pass_context
 @handle_cli_errors
 def report(
@@ -1034,9 +1060,11 @@ def report(
     output: Path | None,
     pretty: bool,
     max_entries: int,
+    force: bool,
 ) -> None:
     """Generate a comprehensive audit log report."""
     config_path = ctx.obj.get("config_path")
+    check_output_path(output, force)
 
     client, settings = get_client(config_path)
 
@@ -1045,12 +1073,14 @@ def report(
     query = build_date_range_query(days)
 
     with client:
-        entries = client.get_all_logs(query, max_entries=max_entries)
+        # Fetch one extra entry so "truncated" means there really is more data.
+        entries = client.get_all_logs(query, max_entries=max_entries + 1)
 
     if not entries:
         err_console.print("[yellow]No audit logs found for the specified period.[/yellow]")
 
-    truncated = len(entries) >= max_entries
+    truncated = len(entries) > max_entries
+    entries = entries[:max_entries]
     if truncated:
         err_console.print(
             f"[yellow]Reached --max-entries limit ({max_entries}); "
@@ -1066,8 +1096,9 @@ def report(
     indent = 2 if pretty else None
     json_output = json.dumps(report_data, indent=indent, default=str)
 
-    if output:
-        output.write_text(json_output)
+    if output and str(output) != "-":
+        with atomic_write(output, overwrite=force) as f:
+            f.write(json_output)
         err_console.print(f"[green]Report saved to {escape(str(output))}[/green]")
     else:
         click.echo(json_output)

@@ -86,6 +86,8 @@ class AppState:
         # Data state
         self.entries: list[AuditLogEntry] = []
         self.total_entries: int = 0
+        # True once the log browser has loaded a page; until then entries/total are unknown.
+        self.page_loaded: bool = False
         self.selected_entry: AuditLogEntry | None = None
 
         # Filter state

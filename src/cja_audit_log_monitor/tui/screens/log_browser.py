@@ -92,6 +92,7 @@ class LogBrowserScreen(ContentView):
         """Update the log table with entries."""
         table = self.query_one("#log-table", LogTable)
         table.load_entries(entries)
+        self._state.page_loaded = True  # the export dialog may now offer "this page"
         if entries:
             self._set_table_message(None)
         elif self._filters_active():
@@ -123,6 +124,10 @@ class LogBrowserScreen(ContentView):
         """Show why the table is empty, above it, so the filters stay usable."""
         self.app.note_api_error(error)
         self.query_one("#log-table", LogTable).load_entries([])
+        # The table is empty, so the shared page must be too: export must not offer it.
+        self._state.entries = []
+        self._state.total_entries = 0
+        self._state.page_loaded = False
         self._set_table_message(error_message(error))
 
     def _set_table_message(self, message: str | None) -> None:

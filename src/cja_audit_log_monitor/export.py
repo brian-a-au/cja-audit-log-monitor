@@ -1,13 +1,66 @@
 """Export functionality for audit logs."""
 
 import csv
+import errno
 import json
+import os
+import tempfile
 from collections.abc import Iterator
-from datetime import datetime
+from contextlib import contextmanager, suppress
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, TextIO
 
 from .models import AuditLogEntry
+
+
+@contextmanager
+def atomic_write(
+    path: Path, newline: str | None = None, overwrite: bool = True
+) -> Iterator[TextIO]:
+    """Write a UTF-8 text file atomically with private (0o600) permissions.
+
+    The data goes to a temp file in the same folder and appears at ``path`` only
+    when the block finishes. On any error the temp file is removed and an
+    existing ``path`` is left untouched. A symlink at ``path`` is replaced, not
+    followed.
+
+    With ``overwrite=False`` an existing ``path`` is never replaced, even one
+    that appears while the block runs: ``FileExistsError`` is raised instead.
+    """
+    try:
+        fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    except OSError as e:
+        raise type(e)(e.errno, e.strerror, str(path)) from e
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline=newline) as f:
+            yield f
+        if overwrite:
+            os.replace(tmp_name, path)
+        else:
+            _publish_without_overwrite(tmp_name, path)
+    except BaseException:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass  # keep the original error
+        raise
+    if not overwrite:
+        with suppress(OSError):
+            os.unlink(tmp_name)
+
+
+def _publish_without_overwrite(tmp_name: str, path: Path) -> None:
+    """Move ``tmp_name`` to ``path`` unless ``path`` exists; raise FileExistsError if it does."""
+    try:
+        os.link(tmp_name, path)  # fails atomically when path exists
+    except FileExistsError:
+        raise
+    except OSError:
+        # No hard links here (some network or FAT volumes): check, then replace.
+        if path.exists():
+            raise FileExistsError(errno.EEXIST, os.strerror(errno.EEXIST), str(path)) from None
+        os.replace(tmp_name, path)
 
 
 def entry_to_dict(entry: AuditLogEntry) -> dict[str, Any]:
@@ -39,6 +92,7 @@ def export_to_json(
     entries: list[AuditLogEntry] | Iterator[AuditLogEntry],
     output: Path | TextIO,
     pretty: bool = True,
+    overwrite: bool = True,
 ) -> int:
     """Export audit logs to JSON file.
 
@@ -46,6 +100,7 @@ def export_to_json(
         entries: Audit log entries to export.
         output: Output file path or file object.
         pretty: Whether to format JSON with indentation.
+        overwrite: When False, refuse (FileExistsError) to replace an existing file.
 
     Returns:
         Number of entries exported.
@@ -55,146 +110,131 @@ def export_to_json(
         entries = list(entries)
 
     data = {
-        "exported_at": datetime.now().isoformat(),
+        "exported_at": datetime.now(UTC).isoformat(),
         "count": len(entries),
         "entries": [entry_to_dict(e) for e in entries],
     }
 
     if isinstance(output, Path):
-        with open(output, "w") as f:
-            if pretty:
-                json.dump(data, f, indent=2, default=str)
-            else:
-                json.dump(data, f, default=str)
+        with atomic_write(output, overwrite=overwrite) as f:
+            json.dump(data, f, indent=2 if pretty else None, default=str)
     else:
-        if pretty:
-            json.dump(data, output, indent=2, default=str)
-        else:
-            json.dump(data, output, default=str)
+        json.dump(data, output, indent=2 if pretty else None, default=str)
+        output.write("\n")
 
     return len(entries)
+
+
+_EXPORT_FIELDS = [
+    "id",
+    "timestamp",
+    "user_id",
+    "user_email",
+    "user_name",
+    "action",
+    "component_type",
+    "component_id",
+    "component_name",
+    "description",
+    "org_id",
+    "ip_address",
+]
+
+_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _cell(value: object) -> str:
+    """Render a cell, prefixing ``'`` when a spreadsheet could read it as a formula.
+
+    Text starting with ``=``, ``+``, ``-``, ``@``, tab or carriage return gets a
+    leading apostrophe. This also marks plain negative numbers such as ``-5``;
+    that is a deliberate trade-off. ``None`` becomes an empty cell.
+    """
+    if value is None:
+        return ""
+    text = str(value)
+    if text.startswith(_FORMULA_PREFIXES):
+        return "'" + text
+    return text
+
+
+def _write_delimited(
+    entries: list[AuditLogEntry] | Iterator[AuditLogEntry], f: TextIO, delimiter: str
+) -> int:
+    """Write entries as delimited text with a header row; return the entry count."""
+    writer = csv.writer(f, delimiter=delimiter)
+    writer.writerow(_EXPORT_FIELDS)
+    count = 0
+    for entry in entries:
+        row = entry_to_dict(entry)
+        writer.writerow([_cell(row[name]) for name in _EXPORT_FIELDS])
+        count += 1
+    return count
+
+
+def _export_delimited(
+    entries: list[AuditLogEntry] | Iterator[AuditLogEntry],
+    output: Path | TextIO,
+    delimiter: str,
+    overwrite: bool = True,
+) -> int:
+    if isinstance(output, Path):
+        with atomic_write(output, newline="", overwrite=overwrite) as f:
+            return _write_delimited(entries, f, delimiter)
+    return _write_delimited(entries, output, delimiter)
 
 
 def export_to_csv(
     entries: list[AuditLogEntry] | Iterator[AuditLogEntry],
     output: Path | TextIO,
+    overwrite: bool = True,
 ) -> int:
     """Export audit logs to CSV file.
 
     Args:
         entries: Audit log entries to export.
         output: Output file path or file object.
+        overwrite: When False, refuse (FileExistsError) to replace an existing file.
 
     Returns:
         Number of entries exported.
     """
-    fieldnames = [
-        "id",
-        "timestamp",
-        "user_id",
-        "user_email",
-        "user_name",
-        "action",
-        "component_type",
-        "component_id",
-        "component_name",
-        "description",
-        "org_id",
-        "ip_address",
-    ]
-
-    count = 0
-
-    def write_csv(f: TextIO) -> int:
-        nonlocal count
-        writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
-        writer.writeheader()
-
-        for entry in entries:
-            row = entry_to_dict(entry)
-            # Format timestamp for CSV
-            if row["timestamp"]:
-                row["timestamp"] = row["timestamp"]
-            writer.writerow(row)
-            count += 1
-
-        return count
-
-    if isinstance(output, Path):
-        with open(output, "w", newline="") as f:
-            write_csv(f)
-    else:
-        write_csv(output)
-
-    return count
+    return _export_delimited(entries, output, ",", overwrite)
 
 
 def export_to_tsv(
     entries: list[AuditLogEntry] | Iterator[AuditLogEntry],
     output: Path | TextIO,
+    overwrite: bool = True,
 ) -> int:
     """Export audit logs to TSV (tab-separated values) file.
 
     Args:
         entries: Audit log entries to export.
         output: Output file path or file object.
+        overwrite: When False, refuse (FileExistsError) to replace an existing file.
 
     Returns:
         Number of entries exported.
     """
-    fieldnames = [
-        "id",
-        "timestamp",
-        "user_id",
-        "user_email",
-        "user_name",
-        "action",
-        "component_type",
-        "component_id",
-        "component_name",
-        "description",
-        "org_id",
-        "ip_address",
-    ]
-
-    count = 0
-
-    def write_tsv(f: TextIO) -> int:
-        nonlocal count
-        writer = csv.DictWriter(
-            f, fieldnames=fieldnames, extrasaction="ignore", delimiter="\t"
-        )
-        writer.writeheader()
-
-        for entry in entries:
-            row = entry_to_dict(entry)
-            writer.writerow(row)
-            count += 1
-
-        return count
-
-    if isinstance(output, Path):
-        with open(output, "w", newline="") as f:
-            write_tsv(f)
-    else:
-        write_tsv(output)
-
-    return count
+    return _export_delimited(entries, output, "\t", overwrite)
 
 
 def export_entries(
     entries: list[AuditLogEntry] | Iterator[AuditLogEntry],
-    output_path: Path,
+    output: Path | TextIO,
     output_format: str = "json",
     pretty: bool = True,
+    overwrite: bool = True,
 ) -> int:
-    """Export audit logs to file in specified format.
+    """Export audit logs to a file or an open text stream in the specified format.
 
     Args:
         entries: Audit log entries to export.
-        output_path: Output file path.
+        output: Output file path (written atomically) or a text stream.
         output_format: Output format ('json', 'csv', or 'tsv').
         pretty: For JSON, whether to pretty-print.
+        overwrite: When False, refuse (FileExistsError) to replace an existing file.
 
     Returns:
         Number of entries exported.
@@ -205,11 +245,11 @@ def export_entries(
     output_format = output_format.lower()
 
     if output_format == "json":
-        return export_to_json(entries, output_path, pretty=pretty)
+        return export_to_json(entries, output, pretty=pretty, overwrite=overwrite)
     elif output_format == "csv":
-        return export_to_csv(entries, output_path)
+        return export_to_csv(entries, output, overwrite)
     elif output_format == "tsv":
-        return export_to_tsv(entries, output_path)
+        return export_to_tsv(entries, output, overwrite)
     else:
         raise ValueError(
             f"Unsupported export format: {output_format}. Use 'json', 'csv', or 'tsv'."
@@ -229,18 +269,16 @@ def export_stats_to_json(
         pretty: Whether to format JSON with indentation.
     """
     data = {
-        "exported_at": datetime.now().isoformat(),
+        "exported_at": datetime.now(UTC).isoformat(),
         "statistics": stats,
     }
 
     if isinstance(output, Path):
-        with open(output, "w") as f:
+        with atomic_write(output) as f:
             if pretty:
                 json.dump(data, f, indent=2, default=str)
             else:
                 json.dump(data, f, default=str)
     else:
-        if pretty:
-            json.dump(data, output, indent=2, default=str)
-        else:
-            json.dump(data, output, default=str)
+        json.dump(data, output, indent=2 if pretty else None, default=str)
+        output.write("\n")
