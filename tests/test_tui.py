@@ -1460,19 +1460,34 @@ class TestExportScope:
     ):
         from cja_audit_log_monitor.tui.modals import ExportDialog
 
-        # Long enough that Escape reliably lands before the timer fires.
-        monkeypatch.setattr(ExportDialog, "AUTO_CLOSE_SECONDS", 0.3)
+        # Long enough that Escape lands before the timer fires.
+        monkeypatch.setattr(ExportDialog, "AUTO_CLOSE_SECONDS", 0.2)
+        closes: list[bool] = []
+        real_close = ExportDialog._close_if_open
+
+        def spy(self):
+            closes.append(self.app.screen is self)
+            real_close(self)
+
+        monkeypatch.setattr(ExportDialog, "_close_if_open", spy)
         mock_app_state.entries = sample_audit_entries
         app = _make_app(mock_app_state)
+        target = tmp_path / "x.json"
         async with app.run_test(size=(120, 40)) as pilot:
             dialog = await self._open(app, pilot)
-            dialog.query_one("#output-path").value = str(tmp_path / "x.json")
+            dialog.query_one("#output-path").value = str(target)
             await pilot.click("#export-button")
+            # Wait for the export worker and for _done (which starts the timer) to run.
+            await app.workers.wait_for_complete()
             await pilot.pause()
+            assert target.exists()
+            assert not closes  # timer has not fired yet
             await pilot.press("escape")
             assert not isinstance(app.screen, ExportDialog)
-            await pilot.pause(0.4)  # past the timer, which now fires on a closed dialog
-            assert not isinstance(app.screen, ExportDialog)
+            await pilot.pause(0.6)  # well past the timer
+            # Textual stops a screen's timers when it is removed, so the callback never
+            # runs on a closed dialog; if that ever changes, it must still be a no-op.
+            assert closes in ([], [False])
             assert app.is_running
         assert app._exception is None
 
