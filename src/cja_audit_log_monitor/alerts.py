@@ -10,7 +10,7 @@ from rich.panel import Panel
 
 from .formatters import format_alert
 from .models import ActionType, AlertRule, AuditLogEntry, ComponentType
-from .utils import get_user_identifier
+from .utils import get_user_identifier, local_tz_name, to_local
 
 logger = logging.getLogger(__name__)
 
@@ -278,13 +278,17 @@ class AlertEngine:
         ]
 
 
-def analyze_for_anomalies(entries: list[AuditLogEntry]) -> list[dict[str, Any]]:
+def analyze_for_anomalies(
+    entries: list[AuditLogEntry], local: bool = False
+) -> list[dict[str, Any]]:
     """Analyze entries for anomalous patterns.
 
     This performs batch analysis looking for unusual patterns.
 
     Args:
         entries: List of audit log entries.
+        local: Judge off-hours (midnight to 5am) by the local time zone
+            instead of UTC. The TUI sets this; the CLI keeps UTC.
 
     Returns:
         List of anomaly reports.
@@ -333,10 +337,13 @@ def analyze_for_anomalies(entries: list[AuditLogEntry]) -> list[dict[str, Any]]:
             })
 
     # Check for unusual time patterns (if timestamps available)
+    # Hours are UTC unless ``local`` is set; the description names the zone either way.
+    zone = local_tz_name() if local else "UTC"
     hour_counts: dict[int, int] = defaultdict(int)
     for entry in entries:
         if entry.timestamp:
-            hour_counts[entry.timestamp.hour] += 1
+            ts = to_local(entry.timestamp) if local else entry.timestamp
+            hour_counts[ts.hour] += 1
 
     if hour_counts:
         avg_per_hour = sum(hour_counts.values()) / 24
@@ -347,7 +354,9 @@ def analyze_for_anomalies(entries: list[AuditLogEntry]) -> list[dict[str, Any]]:
                     "type": "off_hours_activity",
                     "hour": hour,
                     "action_count": count,
-                    "description": f"Unusual activity at {hour}:00 ({count} actions)",
+                    "description": (
+                        f"Unusual activity at {hour:02d}:00 {zone} ({count} actions)"
+                    ),
                 })
 
     return anomalies

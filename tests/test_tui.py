@@ -1641,3 +1641,19 @@ async def test_component_filter_offers_image(mock_app_state):
         select = app.query_one("#filter-component", Select)
         values = [value for _, value in select._options]
         assert "IMAGE" in values
+
+
+async def test_dashboard_anomalies_use_local_hours(mock_app_state, monkeypatch):
+    from cja_audit_log_monitor.tui.screens import dashboard
+
+    calls = []
+
+    def fake(entries, local=False):
+        calls.append(local)
+        return []
+
+    monkeypatch.setattr(dashboard, "analyze_for_anomalies", fake)
+    app = _make_app(mock_app_state)
+    async with app.run_test(size=(140, 40)) as pilot:
+        await _show_and_load(app, pilot, "d")
+    assert calls and all(calls)

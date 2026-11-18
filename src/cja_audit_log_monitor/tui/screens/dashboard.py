@@ -121,7 +121,7 @@ class DashboardScreen(ContentView):
                 return
 
             stats = calculate_stats(entries)
-            anomalies = analyze_for_anomalies(entries)
+            anomalies = analyze_for_anomalies(entries, local=True)
             hourly = get_hourly_distribution(entries, local=True)
 
             self.app.call_from_thread(self._update_stats, stats, anomalies, hourly, total)

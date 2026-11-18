@@ -310,3 +310,39 @@ def test_rule_can_name_image_component():
         id="1", timestamp=datetime.now(UTC), action="DELETE", component_type="IMAGE"
     )
     assert engine._matches_rule(entry, rule)
+
+
+class TestOffHoursZone:
+    """Off-hours anomalies can use local hours, and always name the zone."""
+
+    @staticmethod
+    def _at(entry_id, hour, minute):
+        ts = datetime(2026, 11, 17, hour, minute, tzinfo=UTC)
+        return AuditLogEntry(id=entry_id, user_id="u", timestamp=ts)
+
+    def _entries(self):
+        # 30 actions at 10:00 UTC (02:00 in Los Angeles), plus a spread of daytime ones.
+        busy = [
+            self._at(f"b{i}", 10, i) for i in range(30)
+        ]
+        spread = [
+            self._at(f"s{h}", h, 0) for h in range(16, 23)
+        ]
+        return busy + spread
+
+    def test_utc_by_default(self, los_angeles_tz):
+        anomalies = analyze_for_anomalies(self._entries())
+        assert not [a for a in anomalies if a["type"] == "off_hours_activity"]
+
+    def test_local_hours_when_asked(self, los_angeles_tz):
+        anomalies = analyze_for_anomalies(self._entries(), local=True)
+        off = [a for a in anomalies if a["type"] == "off_hours_activity"]
+        assert [a["hour"] for a in off] == [2]
+        assert off[0]["description"].startswith("Unusual activity at 02:00 PST")
+
+    def test_utc_description_names_utc(self):
+        entries = [
+            self._at(f"b{i}", 3, i) for i in range(30)
+        ]
+        off = [a for a in analyze_for_anomalies(entries) if a["type"] == "off_hours_activity"]
+        assert off[0]["description"].startswith("Unusual activity at 03:00 UTC")
