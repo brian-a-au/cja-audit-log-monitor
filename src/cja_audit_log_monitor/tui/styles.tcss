@@ -326,9 +326,23 @@ AlertSummary {
     display: none;
 }
 
-/* Narrow terminals: the panel covers the table instead of squeezing it to nothing. */
-Screen.-narrow #entry-detail-panel {
+/* Below 160 columns the panel covers the table: beside a 40-wide panel the table would be
+ * too narrow for time, user and action. */
+Screen.-narrow #entry-detail-panel,
+Screen.-normal #entry-detail-panel {
+    dock: none;
+    layer: above;
     width: 100%;
+}
+
+Screen.-narrow #log-table-and-panel,
+Screen.-normal #log-table-and-panel {
+    layers: below above;
+}
+
+Screen.-narrow #log-table,
+Screen.-normal #log-table {
+    layer: below;
 }
 
 #entry-detail-panel .modal-title {

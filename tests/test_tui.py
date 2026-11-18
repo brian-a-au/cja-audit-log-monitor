@@ -582,6 +582,38 @@ class TestTableFit:
             panel = app.query_one("#entry-detail-panel", EntryDetailPanel)
             assert panel.is_visible()
             assert panel.region.width >= 60
+            table = app.query_one("#log-table", LogTable)
+            assert table.virtual_size.width <= table.scrollable_content_region.width
+            assert table.scrollable_content_region.width >= 60
+
+    async def test_detail_panel_open_at_100_cols_keeps_table_readable(
+        self, mock_app_state, sample_audit_entry
+    ):
+        from cja_audit_log_monitor.tui.modals import EntryDetailPanel
+        from cja_audit_log_monitor.tui.widgets import LogTable
+
+        entries = [
+            sample_audit_entry.model_copy(
+                update={"id": f"e{i}", "user_email": f"someone.with.long.name{i}@example.com"}
+            )
+            for i in range(5)
+        ]
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(100, 30)) as pilot:
+            await pilot.press("l")
+            await pilot.pause()
+            app._screens["logs"]._update_table(entries, 5)
+            await pilot.pause()
+            table = app.query_one("#log-table", LogTable)
+            table.focus()
+            await pilot.press("enter")
+            await pilot.pause()
+            await pilot.pause()
+            assert app.query_one("#entry-detail-panel", EntryDetailPanel).is_visible()
+            assert table.virtual_size.width <= table.scrollable_content_region.width
+            users = [str(table.get_row_at(i)[1]) for i in range(table.row_count)]
+            assert all(u.endswith("…") for u in users)
+            assert all(len(u) <= table.columns["user"].width for u in users)
 
     def test_fit_columns_hides_component_name_then_type(self):
         from cja_audit_log_monitor.tui.widgets import LogTable
