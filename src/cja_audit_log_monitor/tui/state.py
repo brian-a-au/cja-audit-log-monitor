@@ -97,6 +97,7 @@ class AppState:
         self.is_connected: bool = False
         self.connection_error: str | None = None
         self.config_error: str | None = None
+        self.config_error_summary: str | None = None
         self.last_refresh: datetime | None = None
 
     @property
@@ -109,11 +110,14 @@ class AppState:
                 # Keep the app usable: fall back to env-only settings and
                 # let the header show what is wrong with the file.
                 self.config_error = str(e)
+                self.config_error_summary = e.summary
                 try:
                     self._settings = load_config(use_file=False)
-                except ConfigError:
+                except ConfigError as env_error:
                     # Env/.env values are invalid too: start on plain defaults.
                     self._settings = CJASettings.model_construct()
+                    self.config_error = f"{self.config_error}\n{env_error}"
+                    self.config_error_summary = f"{e.summary}; {env_error.summary}"
         return self._settings
 
     @property

@@ -23,7 +23,8 @@ Screen {
 /* ---- Top status row (replaces Header) ---- */
 #status-row {
     dock: top;
-    height: 1;
+    height: auto;  /* one line; wraps only when a config warning is long */
+    min-height: 1;
     padding: 0 1;
     background: $background;
     color: $text-muted;
