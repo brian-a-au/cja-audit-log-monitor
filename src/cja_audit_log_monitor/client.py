@@ -3,6 +3,8 @@
 import logging
 import time
 from collections.abc import Iterator
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 import httpx
@@ -15,6 +17,31 @@ logger = logging.getLogger(__name__)
 
 # Largest pageSize the CJA Audit Logs API accepts (it rejects 2000 with a 400).
 MAX_PAGE_SIZE = 1000
+
+# Longest we will ever wait between retries, whatever the server asks for.
+MAX_RETRY_WAIT = 60.0
+
+# Server-side failures that are worth retrying.
+RETRYABLE_STATUS = frozenset({500, 502, 503, 504})
+
+
+def _retry_delay(header: str | None, attempt: int) -> float:
+    """Seconds to wait before a retry, from a Retry-After header or exponential backoff."""
+    delay: float | None = None
+    if header is not None:
+        try:
+            delay = float(header)
+        except ValueError:
+            try:
+                when = parsedate_to_datetime(header)
+                if when.tzinfo is None:
+                    when = when.replace(tzinfo=UTC)
+                delay = (when - datetime.now(UTC)).total_seconds()
+            except (TypeError, ValueError):
+                delay = None
+    if delay is None or delay != delay:  # missing, unparseable or NaN
+        delay = float(2**attempt)
+    return min(max(delay, 0.0), MAX_RETRY_WAIT)
 
 
 def _is_final_page(page: int, response: AuditLogResponse) -> bool:
@@ -98,17 +125,29 @@ class AuditLogsClient:
                 )
 
                 if response.status_code == 429:
-                    retry_after = int(response.headers.get("Retry-After", 30))
+                    retry_after = _retry_delay(response.headers.get("Retry-After"), attempt)
                     if attempt < retry_count - 1:
                         logger.warning(
-                            "Rate limited, waiting %d seconds (attempt %d/%d)",
+                            "Rate limited, waiting %g seconds (attempt %d/%d)",
                             retry_after,
                             attempt + 1,
                             retry_count,
                         )
                         time.sleep(retry_after)
                         continue
-                    raise RateLimitError(retry_after=retry_after)
+                    raise RateLimitError(retry_after=int(retry_after))
+
+                if response.status_code in RETRYABLE_STATUS and attempt < retry_count - 1:
+                    delay = _retry_delay(None, attempt)
+                    logger.warning(
+                        "Server error %d, retrying in %g seconds (attempt %d/%d)",
+                        response.status_code,
+                        delay,
+                        attempt + 1,
+                        retry_count,
+                    )
+                    time.sleep(delay)
+                    continue
 
                 if response.status_code == 401:
                     # Token might be expired, invalidate and retry
@@ -120,7 +159,14 @@ class AuditLogsClient:
                     raise APIError("Authentication failed", status_code=401)
 
                 response.raise_for_status()
-                return response.json()
+                try:
+                    return response.json()
+                except ValueError as e:
+                    raise APIError(
+                        "API returned a non-JSON response "
+                        f"(HTTP {response.status_code}, {len(response.content)} bytes)",
+                        status_code=response.status_code,
+                    ) from e
 
             except httpx.HTTPStatusError as e:
                 error_detail = ""
@@ -143,7 +189,7 @@ class AuditLogsClient:
                         retry_count,
                         e,
                     )
-                    time.sleep(2**attempt)  # Exponential backoff
+                    time.sleep(_retry_delay(None, attempt))  # Exponential backoff
                     continue
                 raise APIError(f"Request failed: {e}") from e
 

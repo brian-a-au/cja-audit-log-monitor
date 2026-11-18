@@ -71,7 +71,10 @@ class TokenManager:
             with httpx.Client(timeout=30.0) as client:
                 response = client.post(token_url, data=data)
                 response.raise_for_status()
-                token_data = response.json()
+                try:
+                    token_data = response.json()
+                except ValueError:
+                    raise AuthenticationError("IMS returned a non-JSON response") from None
 
                 try:
                     return TokenInfo(

@@ -1,10 +1,13 @@
 """Tests for API client."""
 
+from datetime import UTC, datetime, timedelta
+from email.utils import format_datetime
+
 import pytest
 from pytest_httpx import HTTPXMock
 
 from cja_audit_log_monitor.auth import TokenManager
-from cja_audit_log_monitor.client import APIError, AuditLogsClient
+from cja_audit_log_monitor.client import APIError, AuditLogsClient, _retry_delay
 from cja_audit_log_monitor.config import CJASettings
 from cja_audit_log_monitor.models import AuditLogQuery
 
@@ -407,3 +410,58 @@ class TestGetAllLogsPageSize:
         with client:
             client.get_all_logs(query)
         assert query.page_size == 50
+
+
+@pytest.mark.parametrize(
+    "header,attempt,expected",
+    [
+        ("5", 0, 5.0),
+        ("1.5", 0, 1.5),
+        ("3600", 0, 60.0),
+        ("-3", 0, 0.0),
+        (None, 2, 4.0),
+        ("garbage", 1, 2.0),
+    ],
+)
+def test_retry_delay(header, attempt, expected) -> None:
+    assert _retry_delay(header, attempt) == expected
+
+
+def test_retry_delay_http_date() -> None:
+    when = format_datetime(datetime.now(UTC) + timedelta(seconds=10), usegmt=True)
+    assert 0 < _retry_delay(when, 0) <= 10
+
+
+class TestResilience:
+    URL = "https://cja.adobe.io/auditlogs/api/v1/auditlogs"
+
+    @staticmethod
+    def _api_requests(httpx_mock):
+        return [r for r in httpx_mock.get_requests() if "auditlogs" in str(r.url)]
+
+    def test_retries_503_then_succeeds(
+        self, client, sample_api_response, httpx_mock, monkeypatch
+    ) -> None:
+        sleeps: list[float] = []
+        monkeypatch.setattr("cja_audit_log_monitor.client.time.sleep", sleeps.append)
+        httpx_mock.add_response(url=self.URL, status_code=503)
+        httpx_mock.add_response(url=self.URL, json=sample_api_response)
+        with client:
+            assert client.get_logs() is not None
+        assert len(self._api_requests(httpx_mock)) == 2
+        assert sleeps == [1.0]
+
+    def test_persistent_503_raises_api_error(self, client, httpx_mock, monkeypatch) -> None:
+        monkeypatch.setattr("cja_audit_log_monitor.client.time.sleep", lambda s: None)
+        httpx_mock.add_response(url=self.URL, status_code=503)
+        with client, pytest.raises(APIError) as info:
+            client.get_logs()
+        assert info.value.status_code == 503
+        assert len(self._api_requests(httpx_mock)) == 3
+
+    def test_non_json_body_raises_api_error(self, client, httpx_mock, monkeypatch) -> None:
+        monkeypatch.setattr("cja_audit_log_monitor.client.time.sleep", lambda s: None)
+        httpx_mock.add_response(url=self.URL, text="<html>gateway</html>")
+        with client, pytest.raises(APIError) as info:
+            client.get_logs()
+        assert str(info.value).startswith("API returned a non-JSON response")

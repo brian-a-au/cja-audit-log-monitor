@@ -172,3 +172,9 @@ def test_token_info_repr_hides_token() -> None:
 
     info = TokenInfo(access_token="TOKSENTINEL", expires_in=10)
     assert "TOKSENTINEL" not in repr(info)
+
+
+def test_token_response_not_json(httpx_mock: HTTPXMock, sample_settings) -> None:
+    httpx_mock.add_response(url=re.compile(".*/ims/token/v3"), text="<html>oops</html>")
+    with pytest.raises(AuthenticationError, match="non-JSON"):
+        TokenManager(sample_settings).get_token()
