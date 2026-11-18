@@ -12,6 +12,17 @@
 
 After permission changes in Admin Console, allow **5–10 minutes** for propagation before retrying.
 
+## Messages in the TUI
+
+When a view can't load data, it shows one of these messages with the error from Adobe:
+
+- **not connected**: login failed, or the app could not reach Adobe. Check your credentials on the config screen (`c`), or run `cja-audit-log-monitor cli verify`.
+- **access denied**: Adobe returned 403. The API credential needs a CJA product profile and the right scopes.
+- **request rejected**: Adobe returned 400. Check the filters or the number of days, then press `r`.
+- **could not load data**: any other error. Press `r` to try again.
+
+The header shows `disconnected` after a login or network failure in any view, and `connected` again after the next successful load.
+
 ## Setup checklist
 
 - [ ] `ORG_ID` ends with `@AdobeOrg`

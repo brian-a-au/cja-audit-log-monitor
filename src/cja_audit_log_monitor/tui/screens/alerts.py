@@ -176,6 +176,7 @@ class AlertsScreen(ContentView):
                 )
 
         except Exception as e:
+            self.app.call_from_thread(self.app.note_api_error, e)
             self.app.call_from_thread(self._show_error, str(e))
         finally:
             self.app.call_from_thread(self.set_loading, False)

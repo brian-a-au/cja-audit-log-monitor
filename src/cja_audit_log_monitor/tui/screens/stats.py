@@ -21,8 +21,8 @@ from ..state import AppState
 from ..widgets import ActionBarChart, HourlyChart
 from .base import (
     ContentView,
+    error_message,
     no_activity_message,
-    not_connected_message,
     sample_note,
     show_sample_note,
     stat_card,
@@ -125,6 +125,7 @@ class StatsScreen(ContentView):
                 return
 
             if not entries:
+                self.app.call_from_thread(self.app.note_api_ok)
                 self.app.call_from_thread(self.set_empty_state, no_activity_message(self._days))
                 return
 
@@ -134,12 +135,18 @@ class StatsScreen(ContentView):
             daily = get_daily_distribution(entries, local=True)
             users = get_user_activity(entries)
 
+            self.app.call_from_thread(self.app.note_api_ok)
             self.app.call_from_thread(self._update_display, stats, hourly, daily, users, total)
 
         except Exception as e:
-            self.app.call_from_thread(self.set_empty_state, not_connected_message(str(e)))
+            self.app.call_from_thread(self._show_error, e)
         finally:
             self.app.call_from_thread(self.set_loading, False)
+
+    def _show_error(self, error: Exception) -> None:
+        """Report a failed API call in the view, and in the header if it was a connection."""
+        self.app.note_api_error(error)
+        self.set_empty_state(error_message(error))
 
     def _update_display(
         self,

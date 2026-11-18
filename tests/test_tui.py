@@ -612,10 +612,10 @@ class TestViewFocusAndScroll:
             assert app._screens["logs"].query_one("#filter-user").value == ""
 
     async def test_n_pages_logs_right_after_l(self, mock_app_state):
+        mock_app_state.client.get_logs.return_value.total_elements = 120  # 3 pages
         app = _make_app(mock_app_state)
         async with app.run_test(size=(140, 40)) as pilot:
-            await pilot.press("l")
-            await pilot.pause()
+            await _show_and_load(app, pilot, "l")
             await pilot.press("n")
             await pilot.pause()
             assert mock_app_state.filters.page == 1
@@ -1429,7 +1429,9 @@ class TestLogBrowserMessages:
     """The log browser explains an empty table instead of showing a blank grid."""
 
     async def test_connection_error_is_shown_in_view(self, mock_app_state):
-        mock_app_state.client.get_logs.side_effect = RuntimeError(
+        from cja_audit_log_monitor.auth import AuthenticationError
+
+        mock_app_state.client.get_logs.side_effect = AuthenticationError(
             "invalid_client: invalid client_secret parameter"
         )
         app = _make_app(mock_app_state)
@@ -1629,3 +1631,180 @@ class TestActionColumn:
             table = view.query_one(LogTable)
             cell = table.get_row_at(0)[2]
             assert table.columns["action"].width >= len(str(cell).rstrip())
+
+
+async def test_component_filter_offers_image(mock_app_state):
+    from textual.widgets import Select
+
+    app = _make_app(mock_app_state)
+    async with app.run_test(size=(140, 40)) as pilot:
+        await pilot.press("l")
+        await pilot.pause()
+        select = app.query_one("#filter-component", Select)
+        values = [value for _, value in select._options]
+        assert "IMAGE" in values
+
+
+async def test_dashboard_anomalies_use_local_hours(mock_app_state, monkeypatch):
+    from cja_audit_log_monitor.tui.screens import dashboard
+
+    calls = []
+
+    def fake(entries, local=False):
+        calls.append(local)
+        return []
+
+    monkeypatch.setattr(dashboard, "analyze_for_anomalies", fake)
+    app = _make_app(mock_app_state)
+    async with app.run_test(size=(140, 40)) as pilot:
+        await _show_and_load(app, pilot, "d")
+    assert calls and all(calls)
+
+
+class TestReviewFixes:
+    async def test_n_on_last_page_stays(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await _show_and_load(app, pilot, "l")
+            assert mock_app_state.filters.page == 0
+            await pilot.press("n")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert mock_app_state.filters.page == 0
+
+    async def test_dashboard_active_users_counts_every_account(
+        self, mock_app_state, sample_audit_entry
+    ):
+        entries = [
+            sample_audit_entry.model_copy(
+                update={"id": f"e{i}", "user_id": f"U{i}@x.e", "user_email": f"u{i}@example.com"}
+            )
+            for i in range(25)
+        ]
+        mock_app_state.client.get_logs_sample.return_value = (entries, 25)
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, "d")
+            assert str(view.query_one("#stat-users", Static).render()) == "25"
+
+    async def test_export_writes_off_the_ui_thread(
+        self, mock_app_state, sample_audit_entries, tmp_path, monkeypatch
+    ):
+        import threading
+
+        from cja_audit_log_monitor.tui.modals import export_dialog
+
+        threads = []
+        real = export_dialog.export_entries
+
+        def recording(*args, **kwargs):
+            threads.append(threading.current_thread() is threading.main_thread())
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(export_dialog, "export_entries", recording)
+        mock_app_state.entries = sample_audit_entries
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.press("e")
+            await pilot.pause()
+            app.screen.query_one("#output-path").value = str(tmp_path / "x.json")
+            await pilot.click("#export-button")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+        assert threads == [False]
+
+
+class TestErrorKinds:
+    """Views name the kind of failure, and the header tracks the connection."""
+
+    @pytest.mark.parametrize(
+        ("exc", "kind"),
+        [
+            ("auth", "connection"),
+            ((None,), "connection"),
+            ((401,), "connection"),
+            ((403,), "access"),
+            ((400,), "rejected"),
+            ((500,), "other"),
+            ("value", "other"),
+        ],
+    )
+    def test_classify(self, exc, kind):
+        from cja_audit_log_monitor.auth import AuthenticationError
+        from cja_audit_log_monitor.client import APIError
+        from cja_audit_log_monitor.tui.screens.base import classify_error
+
+        if exc == "auth":
+            error = AuthenticationError("invalid_client")
+        elif exc == "value":
+            error = ValueError("boom")
+        else:
+            error = APIError("failed", status_code=exc[0])
+        assert classify_error(error) == kind
+
+    async def test_stats_bad_request_is_not_called_not_connected(self, mock_app_state):
+        from cja_audit_log_monitor.client import APIError
+
+        mock_app_state.client.get_logs_sample.side_effect = APIError(
+            "API request failed: 400 - invalid_parameters", status_code=400
+        )
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, "s")
+            text = _empty_text(view)
+            assert "request rejected" in text
+            assert "not connected" not in text
+            assert "disconnected" not in str(app.query_one("#status-row").render())
+
+    async def test_logs_forbidden_says_access_denied(self, mock_app_state):
+        from cja_audit_log_monitor.client import APIError
+
+        mock_app_state.client.get_logs.side_effect = APIError(
+            "API request failed: 403 - forbidden", status_code=403
+        )
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, "l")
+            assert "access denied" in str(view.query_one("#table-message", Static).render())
+
+    async def test_login_failure_in_any_view_updates_header(self, mock_app_state):
+        from cja_audit_log_monitor.auth import AuthenticationError
+
+        mock_app_state.client.get_logs.side_effect = AuthenticationError(
+            "invalid_client: invalid client_secret parameter\nCheck that CLIENT_ID is right."
+        )
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await _show_and_load(app, pilot, "l")
+            header = str(app.query_one("#status-row").render())
+            assert "disconnected" in header
+            assert "invalid client_secret parameter" in header
+            assert "\n" not in header
+            assert "CLIENT_ID" not in header
+
+    async def test_header_recovers_after_a_good_load(self, mock_app_state):
+        from cja_audit_log_monitor.auth import AuthenticationError
+
+        mock_app_state.client.get_logs.side_effect = AuthenticationError("expired")
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await _show_and_load(app, pilot, "l")
+            assert "disconnected" in str(app.query_one("#status-row").render())
+            mock_app_state.client.get_logs.side_effect = None
+            await _show_and_load(app, pilot, "l")
+            header = str(app.query_one("#status-row").render())
+            assert "● connected" in header
+
+
+async def test_alert_test_login_failure_updates_header(mock_app_state):
+    from cja_audit_log_monitor.auth import AuthenticationError
+
+    mock_app_state.client.get_all_logs.side_effect = AuthenticationError("expired")
+    app = _make_app(mock_app_state)
+    async with app.run_test(size=(140, 40)) as pilot:
+        await pilot.press("a")
+        await pilot.pause()
+        await pilot.click("#test-rules")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert "disconnected" in str(app.query_one("#status-row").render())

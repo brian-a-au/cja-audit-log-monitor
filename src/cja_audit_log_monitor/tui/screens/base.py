@@ -1,12 +1,16 @@
 """Base class for the views shown in the main content area."""
 
 from collections.abc import Iterator
+from typing import Literal
 
 from textual.app import ComposeResult
 from textual.containers import Vertical
+from textual.markup import escape
 from textual.widget import Widget
 from textual.widgets import LoadingIndicator, Static
 
+from ...auth import AuthenticationError
+from ...client import APIError
 from ...formatters import resolve_tcss_markup
 from ..state import AppState
 
@@ -14,9 +18,54 @@ from ..state import AppState
 def not_connected_message(error: str) -> str:
     """Empty-state copy shown when the API connection fails."""
     return resolve_tcss_markup(
-        f"[$danger]●[/$danger] not connected · {error}\n"
+        f"[$danger]●[/$danger] not connected · {escape(error)}\n"
         "[$text-muted]press c to open config, or run: "
         "cja-audit-log-monitor cli verify[/$text-muted]"
+    )
+
+
+ErrorKind = Literal["connection", "access", "rejected", "other"]
+
+_ERROR_COPY: dict[ErrorKind, tuple[str, str]] = {
+    "connection": (
+        "not connected",
+        "press c to open config, or run: cja-audit-log-monitor cli verify",
+    ),
+    "access": (
+        "access denied",
+        "check that the API credential has a CJA product profile and the right scopes",
+    ),
+    "rejected": (
+        "request rejected",
+        "check the filters or the number of days, then press r",
+    ),
+    "other": ("could not load data", "press r to try again"),
+}
+
+
+def classify_error(error: Exception) -> ErrorKind:
+    """Sort a failed API call into the kind of problem the user has to fix."""
+    if isinstance(error, AuthenticationError):
+        return "connection"
+    if isinstance(error, APIError):
+        status = error.status_code
+        if status is None or status == 401:
+            return "connection"  # network failure, or the token was rejected
+        if status == 403:
+            return "access"
+        if status in (400, 422):
+            return "rejected"
+    return "other"
+
+
+def error_message(error: Exception) -> str:
+    """Empty-state copy for a failed API call: what went wrong and what to do next."""
+    if classify_error(error) == "connection":
+        return not_connected_message(str(error))
+    headline, hint = _ERROR_COPY[classify_error(error)]
+    return resolve_tcss_markup(
+        f"[$danger]●[/$danger] {headline} · {escape(str(error))}\n"
+        f"[$text-muted]{hint}[/$text-muted]"
     )
 
 

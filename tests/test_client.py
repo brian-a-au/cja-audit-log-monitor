@@ -205,11 +205,9 @@ class TestGetLogsSample:
     def test_uses_largest_page_size(self, client, httpx_mock) -> None:
         import re
 
-        httpx_mock.add_response(
-            url=re.compile(r"https://cja\.adobe\.io/auditlogs/api/v1/auditlogs.*"),
-            json=self._page(1000, 0, 5000, last=False),
-            is_reusable=True,
-        )
+        url = re.compile(r"https://cja\.adobe\.io/auditlogs/api/v1/auditlogs.*")
+        for start in (0, 1000, 2000):
+            httpx_mock.add_response(url=url, json=self._page(1000, start, 5000, last=False))
         with client:
             entries, total = client.get_logs_sample(max_entries=3000)
         requests = [r for r in httpx_mock.get_requests() if "auditlogs" in str(r.url)]
@@ -217,6 +215,20 @@ class TestGetLogsSample:
         assert all("pageSize=1000" in str(r.url) for r in requests)
         assert len(entries) == 3000
         assert total == 5000
+
+    def test_stops_when_a_page_adds_nothing_new(self, client, httpx_mock) -> None:
+        import re
+
+        httpx_mock.add_response(
+            url=re.compile(r"https://cja\.adobe\.io/auditlogs/api/v1/auditlogs.*"),
+            json=self._page(10, 0, 5000, last=False),
+            is_reusable=True,
+        )
+        with client:
+            entries, _ = client.get_logs_sample(max_entries=3000)
+            paged = list(client.get_logs_paginated())
+        assert len(entries) == 10
+        assert len(paged) == 10
 
     def test_small_result_stops_at_last_page(self, client, httpx_mock) -> None:
         import re
@@ -252,11 +264,17 @@ class TestPagingStops:
     def test_paginated_stops_at_total_pages(self, client, httpx_mock) -> None:
         import re
 
-        httpx_mock.add_response(
-            url=re.compile(r"https://cja\.adobe\.io/auditlogs/api/v1/auditlogs.*"),
-            json={"content": [{"id": "a"}], "totalElements": 2, "totalPages": 2, "last": False},
-            is_reusable=True,
-        )
+        url = re.compile(r"https://cja\.adobe\.io/auditlogs/api/v1/auditlogs.*")
+        for entry_id in ("a", "b"):
+            httpx_mock.add_response(
+                url=url,
+                json={
+                    "content": [{"id": entry_id}],
+                    "totalElements": 2,
+                    "totalPages": 2,
+                    "last": False,
+                },
+            )
         with client:
             entries = list(client.get_logs_paginated())
         assert len(entries) == 2
@@ -264,11 +282,17 @@ class TestPagingStops:
     def test_paginated_requests_page_number(self, client, httpx_mock) -> None:
         import re
 
-        httpx_mock.add_response(
-            url=re.compile(r"https://cja\.adobe\.io/auditlogs/api/v1/auditlogs.*"),
-            json={"content": [{"id": "a"}], "totalElements": 2, "totalPages": 2, "last": False},
-            is_reusable=True,
-        )
+        url = re.compile(r"https://cja\.adobe\.io/auditlogs/api/v1/auditlogs.*")
+        for entry_id in ("a", "b"):
+            httpx_mock.add_response(
+                url=url,
+                json={
+                    "content": [{"id": entry_id}],
+                    "totalElements": 2,
+                    "totalPages": 2,
+                    "last": False,
+                },
+            )
         with client:
             list(client.get_logs_paginated())
         urls = [str(r.url) for r in httpx_mock.get_requests() if "auditlogs" in str(r.url)]
@@ -277,12 +301,64 @@ class TestPagingStops:
     def test_sample_stops_at_total_pages(self, client, httpx_mock) -> None:
         import re
 
-        httpx_mock.add_response(
-            url=re.compile(r"https://cja\.adobe\.io/auditlogs/api/v1/auditlogs.*"),
-            json={"content": [{"id": "a"}], "totalElements": 2, "totalPages": 2, "last": False},
-            is_reusable=True,
-        )
+        url = re.compile(r"https://cja\.adobe\.io/auditlogs/api/v1/auditlogs.*")
+        for entry_id in ("a", "b"):
+            httpx_mock.add_response(
+                url=url,
+                json={
+                    "content": [{"id": entry_id}],
+                    "totalElements": 2,
+                    "totalPages": 2,
+                    "last": False,
+                },
+            )
         with client:
             entries, total = client.get_logs_sample(max_entries=1000)
         assert len(entries) == 2
         assert total == 2
+
+
+class TestPagingDedup:
+    """Entries repeated across a page boundary (new events arriving) are dropped."""
+
+    def test_sample_drops_repeated_ids(self, client, httpx_mock) -> None:
+        import re
+
+        url = re.compile(r"https://cja\.adobe\.io/auditlogs/api/v1/auditlogs.*")
+        httpx_mock.add_response(
+            url=url,
+            json={
+                "content": [{"id": "a"}, {"id": "b"}],
+                "totalElements": 4,
+                "totalPages": 2,
+                "last": False,
+            },
+        )
+        httpx_mock.add_response(
+            url=url,
+            json={"content": [{"id": "b"}, {"id": "c"}], "totalElements": 4, "totalPages": 2},
+        )
+        with client:
+            entries, _ = client.get_logs_sample(max_entries=2000)
+        assert [e.id for e in entries] == ["a", "b", "c"]
+
+    def test_paginated_drops_repeated_ids(self, client, httpx_mock) -> None:
+        import re
+
+        url = re.compile(r"https://cja\.adobe\.io/auditlogs/api/v1/auditlogs.*")
+        httpx_mock.add_response(
+            url=url,
+            json={
+                "content": [{"id": "a"}, {"id": "b"}],
+                "totalElements": 4,
+                "totalPages": 2,
+                "last": False,
+            },
+        )
+        httpx_mock.add_response(
+            url=url,
+            json={"content": [{"id": "b"}, {"id": "c"}], "totalElements": 4, "totalPages": 2},
+        )
+        with client:
+            entries = list(client.get_logs_paginated())
+        assert [e.id for e in entries] == ["a", "b", "c"]

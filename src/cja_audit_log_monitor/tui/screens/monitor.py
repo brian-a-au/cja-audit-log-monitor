@@ -191,6 +191,7 @@ class MonitorScreen(ContentView):
                 if self._state.monitor.is_running:
                     self.app.call_from_thread(self._update_stats_display)
             except Exception as e:
+                self.app.call_from_thread(self.app.note_api_error, e)
                 self.app.call_from_thread(self._show_error, str(e))
 
             # Wait for interval
@@ -211,6 +212,7 @@ class MonitorScreen(ContentView):
             if self._state.monitor.is_running:
                 self.app.call_from_thread(self._update_stats_display)
         except Exception as e:
+            self.app.call_from_thread(self.app.note_api_error, e)
             self.app.call_from_thread(self._show_error, str(e))
 
     async def _poll_for_new_entries(self) -> None:
@@ -255,6 +257,7 @@ class MonitorScreen(ContentView):
                     "High event volume detected; only the most recent pages were fetched.",
                 )
         except Exception as e:
+            self.app.call_from_thread(self.app.note_api_error, e)
             self.app.call_from_thread(self._show_error, f"API error: {e}")
             return
 

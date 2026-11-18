@@ -184,18 +184,28 @@ class AuditLogsClient:
 
         page = 0
         pages_fetched = 0
+        # New events shift newest-first pages while we read them, which can
+        # repeat entries across a page boundary; skip ids already yielded.
+        seen_ids: set[str] = set()
 
         while True:
             query.page = page
             response = self.get_logs(query)
 
-            yield from response.content
+            new_entries = 0
+            for entry in response.content:
+                if entry.id is not None:
+                    if entry.id in seen_ids:
+                        continue
+                    seen_ids.add(entry.id)
+                new_entries += 1
+                yield entry
 
             pages_fetched += 1
 
             if (
                 response.last
-                or not response.content
+                or not new_entries
                 or _is_final_page(page, response)
                 or (max_pages and pages_fetched >= max_pages)
             ):
@@ -244,14 +254,23 @@ class AuditLogsClient:
         base = query.model_copy() if query else AuditLogQuery()
         base.page_size = min(MAX_PAGE_SIZE, max_entries)
         entries: list[AuditLogEntry] = []
+        seen_ids: set[str] = set()  # see get_logs_paginated
         total = 0
         page = 0
         while len(entries) < max_entries:
             base.page = page
             response = self.get_logs(base)
             total = response.total_elements
-            entries.extend(response.content)
-            if response.last or not response.content or _is_final_page(page, response):
+            before = len(entries)
+            for entry in response.content:
+                if entry.id is not None:
+                    if entry.id in seen_ids:
+                        continue
+                    seen_ids.add(entry.id)
+                entries.append(entry)
+            # Stop on the last page, or on a page that added nothing new
+            # (which also guards against a server that ignores paging).
+            if response.last or len(entries) == before or _is_final_page(page, response):
                 break
             page += 1
         return entries[:max_entries], total

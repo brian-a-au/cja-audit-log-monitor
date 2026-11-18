@@ -32,6 +32,13 @@ This is the first public release.
 - Filtering by an email address works. The app now sends emails as `userEmail`, because the API matches `userId` only against IMS user IDs.
 - The dashboard and statistics show the true number of entries in the window, and say when the charts use only the newest entries.
 - The app no longer crashes when the export dialog closes itself after an export.
+- Component types `IMAGE`, `CONTAINER` and `FULL_TABLE_EXPORT`, and actions `FAVORITE`, `UNFAVORITE`, `PIN` and `LABEL`, are now known. You can filter by them and name them in alert rules.
+- Users are counted per account, so two accounts with the same display name stay separate. Alert rules match a user by IMS ID, email or name.
+- The dashboard's active users count includes every account, not just the top 10.
+- `n` on the last page of the log browser no longer goes past the end.
+- Paging skips entries repeated across pages when new events arrive mid-fetch.
+- Views name the kind of failure: not connected, access denied, request rejected, or could not load data. The header updates when any view loses or regains the connection.
+- In the TUI, off-hours anomalies use your local hours, and every off-hours anomaly names its time zone.
 
 ### Added in the TUI
 

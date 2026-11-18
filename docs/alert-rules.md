@@ -58,7 +58,7 @@ Or open the [Alerts screen](screens/alerts.md) in the TUI and click `test rules`
 ## Tips
 
 - **Toggle, don't delete** — the [Alerts screen](screens/alerts.md) lets you enable/disable rules per session without touching YAML, useful during planned change windows where one rule would otherwise be noisy.
-- **Off-hours rules need timezone awareness** — by default, "off-hours" thresholds are evaluated against UTC timestamps; tune `threshold_count` accordingly if your org concentrates in a single business region.
+- **Off-hours activity depends on the time zone.** The `off_hours_activity` anomaly flags unusual activity between midnight and 5am. The CLI judges those hours in UTC. The TUI dashboard judges them in your local time zone, the same zone its charts use. Each anomaly's description names the zone, e.g., "Unusual activity at 02:00 PST".
 - **Start with the bundled defaults** — they're tuned to surface real signal (bulk deletes, sensitive exports, anomalous volume) without flooding the alert summary.
 
 ## Delivery channels

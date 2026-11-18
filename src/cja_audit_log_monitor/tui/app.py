@@ -14,7 +14,7 @@ from textual.screen import ModalScreen
 from textual.widgets import ContentSwitcher, Footer, Static
 
 from ..formatters import resolve_tcss_markup
-from .screens.base import ContentView
+from .screens.base import ContentView, classify_error
 from .state import AppState
 
 ConnectionStatus = Literal["connecting", "connected", "disconnected"]
@@ -181,14 +181,29 @@ class CJAAuditApp(App):
             text += f" · [$text-muted]{escape(detail)}[/$text-muted]"
         return text
 
+    _connection_status: ConnectionStatus = "connecting"
+
     def set_connection_status(self, status: ConnectionStatus, detail: str = "") -> None:
         """Show the API connection state in the header row.
 
         Args:
             status: One of ``connecting``, ``connected`` or ``disconnected``.
-            detail: Org id, or the error when disconnected.
+            detail: Org id, or the error when disconnected. Only its first
+                line is shown; views show the full error.
         """
-        self.query_one("#status-row", Static).update(self._status_row_text(status, detail))
+        self._connection_status = status
+        first_line = detail.strip().splitlines()[0] if detail.strip() else ""
+        self.query_one("#status-row", Static).update(self._status_row_text(status, first_line))
+
+    def note_api_error(self, error: Exception) -> None:
+        """Mark the header disconnected when a view's API call failed to connect."""
+        if classify_error(error) == "connection":
+            self.set_connection_status("disconnected", str(error))
+
+    def note_api_ok(self) -> None:
+        """Mark the header connected again after any successful API call."""
+        if self._connection_status != "connected":
+            self.set_connection_status("connected")
 
     async def on_mount(self) -> None:
         """Handle application mount."""

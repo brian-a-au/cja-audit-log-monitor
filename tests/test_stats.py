@@ -107,3 +107,34 @@ class TestLocalDistributions:
         entry = self._entry(3, day=18)
         assert get_daily_distribution([entry]) == {"2026-11-18": 1}
         assert get_daily_distribution([entry], local=True) == {"2026-11-17": 1}
+
+
+class TestGroupByAccount:
+    """Users are counted per account, not per display name."""
+
+    @staticmethod
+    def _entry(user_id, name=None, email=None):
+        from cja_audit_log_monitor.models import AuditLogEntry
+
+        return AuditLogEntry(id=user_id, user_id=user_id, user_name=name, user_email=email)
+
+    def test_same_name_different_accounts_stay_separate(self):
+        from cja_audit_log_monitor.stats import calculate_stats, get_user_activity
+
+        entries = [
+            self._entry("AAA11111@techacct.adobe.com", name="Integration"),
+            self._entry("BBB22222@techacct.adobe.com", name="Integration"),
+        ]
+        ranking = get_user_activity(entries)
+        assert len(ranking) == 2
+        assert len({label for label, _ in ranking}) == 2
+        assert all(label.startswith("Integration (") for label, _ in ranking)
+        assert len(calculate_stats(entries)["top_users"]) == 2
+
+    def test_user_count_is_every_account(self):
+        from cja_audit_log_monitor.stats import calculate_stats
+
+        entries = [self._entry(f"U{i}@x.e", email=f"u{i}@example.com") for i in range(25)]
+        stats = calculate_stats(entries)
+        assert stats["user_count"] == 25
+        assert len(stats["top_users"]) == 10

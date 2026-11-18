@@ -10,7 +10,7 @@ from rich.panel import Panel
 
 from .formatters import format_alert
 from .models import ActionType, AlertRule, AuditLogEntry, ComponentType
-from .utils import get_user_identifier
+from .utils import get_user_identifier, group_by_user, local_tz_name, to_local, user_identities
 
 logger = logging.getLogger(__name__)
 
@@ -184,8 +184,8 @@ class AlertEngine:
 
         # Check user match
         if rule.users:
-            user = get_user_identifier(entry)
-            if user not in rule.users:
+            # A rule may name a user by IMS id, email or display name.
+            if not user_identities(entry) & set(rule.users):
                 return False
 
         return True
@@ -278,13 +278,17 @@ class AlertEngine:
         ]
 
 
-def analyze_for_anomalies(entries: list[AuditLogEntry]) -> list[dict[str, Any]]:
+def analyze_for_anomalies(
+    entries: list[AuditLogEntry], local: bool = False
+) -> list[dict[str, Any]]:
     """Analyze entries for anomalous patterns.
 
     This performs batch analysis looking for unusual patterns.
 
     Args:
         entries: List of audit log entries.
+        local: Judge off-hours (midnight to 5am) by the local time zone
+            instead of UTC. The TUI sets this; the CLI keeps UTC.
 
     Returns:
         List of anomaly reports.
@@ -301,10 +305,7 @@ def analyze_for_anomalies(entries: list[AuditLogEntry]) -> list[dict[str, Any]]:
         return anomalies
 
     # Group by user
-    user_actions: dict[str, list[AuditLogEntry]] = defaultdict(list)
-    for entry in entries:
-        user = get_user_identifier(entry)
-        user_actions[user].append(entry)
+    user_actions = group_by_user(entries)
 
     # Check for users with unusually high activity
     total_actions = len(entries)
@@ -323,7 +324,7 @@ def analyze_for_anomalies(entries: list[AuditLogEntry]) -> list[dict[str, Any]]:
     # Check for concentrated delete activity
     delete_entries = [e for e in entries if e.action == ActionType.DELETE.value]
     if len(delete_entries) > 10:
-        delete_users = set(get_user_identifier(e) for e in delete_entries)
+        delete_users = set(group_by_user(delete_entries))
         if len(delete_users) == 1:
             anomalies.append({
                 "type": "bulk_delete_single_user",
@@ -333,10 +334,13 @@ def analyze_for_anomalies(entries: list[AuditLogEntry]) -> list[dict[str, Any]]:
             })
 
     # Check for unusual time patterns (if timestamps available)
+    # Hours are UTC unless ``local`` is set; the description names the zone either way.
+    zone = local_tz_name() if local else "UTC"
     hour_counts: dict[int, int] = defaultdict(int)
     for entry in entries:
         if entry.timestamp:
-            hour_counts[entry.timestamp.hour] += 1
+            ts = to_local(entry.timestamp) if local else entry.timestamp
+            hour_counts[ts.hour] += 1
 
     if hour_counts:
         avg_per_hour = sum(hour_counts.values()) / 24
@@ -347,7 +351,9 @@ def analyze_for_anomalies(entries: list[AuditLogEntry]) -> list[dict[str, Any]]:
                     "type": "off_hours_activity",
                     "hour": hour,
                     "action_count": count,
-                    "description": f"Unusual activity at {hour}:00 ({count} actions)",
+                    "description": (
+                        f"Unusual activity at {hour:02d}:00 {zone} ({count} actions)"
+                    ),
                 })
 
     return anomalies

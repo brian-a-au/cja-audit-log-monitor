@@ -12,11 +12,14 @@ from ...formatters import resolve_tcss_markup
 from ...models import ActionType, ComponentType
 from ..modals import EntryDetailPanel
 from ..widgets import FilterBar, LogTable
-from .base import ContentView, not_connected_message
+from .base import ContentView, error_message
 
 
 class LogBrowserScreen(ContentView):
     """Screen for browsing and filtering audit logs."""
+
+    # Page count from the last load; bounds the n key like the next button.
+    _total_pages: int = 1
 
     BINDINGS = [
         ("enter", "view_details", "details"),
@@ -77,10 +80,11 @@ class LogBrowserScreen(ContentView):
             if worker.is_cancelled:
                 return
 
+            self.app.call_from_thread(self.app.note_api_ok)
             self.app.call_from_thread(self._update_table, entries, total)
 
         except Exception as e:
-            self.app.call_from_thread(self._show_error, str(e))
+            self.app.call_from_thread(self._show_error, e)
         finally:
             self.app.call_from_thread(self.set_loading, False)
 
@@ -106,6 +110,7 @@ class LogBrowserScreen(ContentView):
         page = self._state.filters.page
         page_size = self._state.filters.page_size
         total_pages = max(1, (total + page_size - 1) // page_size)
+        self._total_pages = total_pages
 
         self.query_one("#page-info", Label).update(f"page {page + 1} of {total_pages}")
         self.query_one("#entry-count", Static).update(f"· {total:,} entries")
@@ -114,10 +119,11 @@ class LogBrowserScreen(ContentView):
         self.query_one("#prev-page", Button).disabled = page == 0
         self.query_one("#next-page", Button).disabled = page >= total_pages - 1
 
-    def _show_error(self, error: str) -> None:
+    def _show_error(self, error: Exception) -> None:
         """Show why the table is empty, above it, so the filters stay usable."""
+        self.app.note_api_error(error)
         self.query_one("#log-table", LogTable).load_entries([])
-        self._set_table_message(not_connected_message(error))
+        self._set_table_message(error_message(error))
 
     def _set_table_message(self, message: str | None) -> None:
         """Show ``message`` above the table, or hide it when None."""
@@ -172,7 +178,9 @@ class LogBrowserScreen(ContentView):
             self.action_next_page()
 
     def action_next_page(self) -> None:
-        """Go to next page."""
+        """Go to the next page, if there is one."""
+        if self._state.filters.page + 1 >= self._total_pages:
+            return
         self._state.filters.page += 1
         self.refresh_data()
 

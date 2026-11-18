@@ -292,3 +292,98 @@ class TestAnalyzeForAnomalies:
         anomalies = analyze_for_anomalies(entries)
         off_hours = [a for a in anomalies if a["type"] == "off_hours_activity"]
         assert len(off_hours) >= 1
+
+
+def test_rule_can_name_image_component():
+    from cja_audit_log_monitor.alerts import AlertEngine
+
+    rule = AlertRule(
+        name="image_deletes",
+        description="deleted images",
+        actions=[ActionType.DELETE],
+        components=[ComponentType("IMAGE")],
+        threshold_count=1,
+        threshold_window_minutes=60,
+    )
+    engine = AlertEngine(rules=[rule])
+    entry = AuditLogEntry(
+        id="1", timestamp=datetime.now(UTC), action="DELETE", component_type="IMAGE"
+    )
+    assert engine._matches_rule(entry, rule)
+
+
+class TestOffHoursZone:
+    """Off-hours anomalies can use local hours, and always name the zone."""
+
+    @staticmethod
+    def _at(entry_id, hour, minute):
+        ts = datetime(2026, 11, 17, hour, minute, tzinfo=UTC)
+        return AuditLogEntry(id=entry_id, user_id="u", timestamp=ts)
+
+    def _entries(self):
+        # 30 actions at 10:00 UTC (02:00 in Los Angeles), plus a spread of daytime ones.
+        busy = [
+            self._at(f"b{i}", 10, i) for i in range(30)
+        ]
+        spread = [
+            self._at(f"s{h}", h, 0) for h in range(16, 23)
+        ]
+        return busy + spread
+
+    def test_utc_by_default(self, los_angeles_tz):
+        anomalies = analyze_for_anomalies(self._entries())
+        assert not [a for a in anomalies if a["type"] == "off_hours_activity"]
+
+    def test_local_hours_when_asked(self, los_angeles_tz):
+        anomalies = analyze_for_anomalies(self._entries(), local=True)
+        off = [a for a in anomalies if a["type"] == "off_hours_activity"]
+        assert [a["hour"] for a in off] == [2]
+        assert off[0]["description"].startswith("Unusual activity at 02:00 PST")
+
+    def test_utc_description_names_utc(self):
+        entries = [
+            self._at(f"b{i}", 3, i) for i in range(30)
+        ]
+        off = [a for a in analyze_for_anomalies(entries) if a["type"] == "off_hours_activity"]
+        assert off[0]["description"].startswith("Unusual activity at 03:00 UTC")
+
+
+class TestAccountMatching:
+    def _rule(self, users):
+        return AlertRule(
+            name="r", description="d", actions=[ActionType.DELETE], users=users,
+            threshold_count=1, threshold_window_minutes=60,
+        )
+
+    @pytest.mark.parametrize(
+        "listed", ["ABC@techacct.adobe.com", "My Integration"]
+    )
+    def test_rule_matches_ims_id_or_name(self, listed):
+        engine = AlertEngine(rules=[])
+        entry = AuditLogEntry(
+            id="1", action="DELETE", user_id="ABC@techacct.adobe.com", user_name="My Integration"
+        )
+        assert engine._matches_rule(entry, self._rule([listed]))
+
+    def test_rule_matches_email(self):
+        engine = AlertEngine(rules=[])
+        entry = AuditLogEntry(
+            id="1", action="DELETE", user_id="X@abc.e", user_email="pat@example.com"
+        )
+        assert engine._matches_rule(entry, self._rule(["pat@example.com"]))
+        assert engine._matches_rule(entry, self._rule(["X@abc.e"]))
+
+    def test_anomalies_do_not_merge_accounts_with_same_name(self):
+        entries = [
+            AuditLogEntry(id=f"a{i}", user_id="A@techacct.adobe.com", user_name="Integration")
+            for i in range(5)
+        ] + [
+            AuditLogEntry(id=f"b{i}", user_id="B@techacct.adobe.com", user_name="Integration")
+            for i in range(5)
+        ] + [
+            AuditLogEntry(id=f"c{i}", user_id=f"C{i}@x.e", user_email=f"c{i}@example.com")
+            for i in range(4)
+        ]
+        high = [a for a in analyze_for_anomalies(entries) if a["type"] == "high_activity_user"]
+        # 14 actions over 6 accounts: average 2.3, so no account has 3x the average.
+        assert high == []
