@@ -21,6 +21,21 @@ logger = logging.getLogger(__name__)
 _MONITOR_PAGE_SIZE = 100
 _MAX_POLL_PAGES = 20
 
+# Each poll re-reads this much before the last poll, so late-arriving events are not missed.
+POLL_OVERLAP = timedelta(minutes=5)
+# How many recent entry keys to remember for de-duplicating the overlap.
+SEEN_IDS_MAX = 5000
+
+
+def build_poll_query(since: datetime | None, now: datetime, page_size: int) -> AuditLogQuery:
+    """Build the query for one poll: from just before ``since`` (or ``now``) up to ``now``."""
+    return AuditLogQuery(
+        start_date=(since or now) - POLL_OVERLAP,
+        end_date=now,
+        page=0,
+        page_size=page_size,
+    )
+
 
 class AuditLogMonitor:
     """Real-time monitor for CJA audit logs."""

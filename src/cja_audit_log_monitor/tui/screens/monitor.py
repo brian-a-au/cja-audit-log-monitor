@@ -11,7 +11,7 @@ from textual.worker import Worker
 
 from ...formatters import resolve_tcss_markup
 from ...models import AuditLogQuery
-from ...utils import to_local
+from ...utils import entry_key, to_local
 from ..state import AppState
 from ..widgets import AlertSummary, LogTable
 from .base import ContentView
@@ -286,13 +286,9 @@ class MonitorScreen(ContentView):
         # Filter out already seen entries
         new_entries = []
         for entry in entries:
-            entry_key = (
-                entry.id
-                or f"{entry.timestamp}-{entry.action}-{entry.component_type}-{entry.component_id}-"
-                f"{entry.user_id}-{entry.user_email}"
-            )
-            if entry_key not in self._seen_ids:
-                self._seen_ids.add(entry_key)
+            key = entry_key(entry)
+            if key not in self._seen_ids:
+                self._seen_ids.add(key)
                 new_entries.append(entry)
 
         # Prune _seen_ids if it grows too large

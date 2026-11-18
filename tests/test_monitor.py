@@ -1,12 +1,12 @@
 """Tests for monitoring module."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
 
 import pytest
 
 from cja_audit_log_monitor.models import AuditLogEntry, AuditLogResponse
-from cja_audit_log_monitor.monitor import AuditLogMonitor
+from cja_audit_log_monitor.monitor import POLL_OVERLAP, AuditLogMonitor, build_poll_query
 
 
 @pytest.fixture
@@ -266,3 +266,22 @@ class TestAuditLogMonitor:
         # Expect console.print called with a [yellow]...[/yellow] formatted warning
         warning_calls = [c for c in fake_console.print.call_args_list if "yellow" in str(c)]
         assert warning_calls, "Expected console.print to emit a yellow-tagged warning"
+
+
+class TestBuildPollQuery:
+    """build_poll_query overlaps the last poll and always bounds both dates."""
+
+    def test_with_since(self):
+        now = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
+        since = now - timedelta(minutes=1)
+        query = build_poll_query(since, now, 100)
+        assert query.start_date == since - POLL_OVERLAP
+        assert query.end_date == now
+        assert query.page == 0
+        assert query.page_size == 100
+
+    def test_without_since(self):
+        now = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
+        query = build_poll_query(None, now, 50)
+        assert query.start_date == now - POLL_OVERLAP
+        assert query.page_size == 50
