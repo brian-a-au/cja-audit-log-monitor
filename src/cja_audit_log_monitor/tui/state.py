@@ -145,6 +145,22 @@ class AppState:
             self._alert_engine = AlertEngine(self.settings.alert_rules or None)
         return self._alert_engine
 
+    def new_test_engine(self) -> AlertEngine:
+        """Build a throwaway engine with the live rules' current enabled flags.
+
+        "Test rules" runs on this so it never adds to the live engine's event history.
+        """
+        return AlertEngine(self.alert_engine.rules)
+
+    def reset_alert_rules(self) -> None:
+        """Rebuild the live engine from settings (or built-in defaults when none).
+
+        The new engine is built first and then swapped in with one assignment, so a
+        monitor worker mid-``check_alerts`` finishes on the old engine and the next
+        call picks up the new one. Nothing is mutated in place, so nothing can crash.
+        """
+        self._alert_engine = AlertEngine(self.settings.alert_rules or None)
+
     @property
     def notification_manager(self) -> NotificationManager:
         """Get notification manager, creating if necessary."""
@@ -226,9 +242,11 @@ class AppState:
             for fa in fired:
                 try:
                     nm.notify_alert(fa.rule_name, fa.message, fa.entry)
-                except Exception:
-                    logger.exception(
-                        "Notification dispatch failed for rule %s", fa.rule_name
+                except Exception as e:
+                    logger.error(
+                        "Notification dispatch failed for rule %s: %s",
+                        fa.rule_name,
+                        type(e).__name__,
                     )
         return fired
 

@@ -2008,3 +2008,24 @@ class TestEmptyResultsAndStreams:
         assert result.exit_code == 0, result.output
         assert "[/red]bo..." in result.output
         assert "[bold]ci..." in result.output
+
+
+def test_anomaly_dispatch_error_log_has_no_exception_text(caplog):
+    """An unexpected notify_anomaly error is logged by type only."""
+    import logging
+
+    from cja_audit_log_monitor.cli import _run_anomalies_cycle
+    from cja_audit_log_monitor.notifications import AnomalyDedupFilter
+
+    client = MagicMock()
+    client.get_all_logs.return_value = iter([])
+    nm = MagicMock()
+    nm.notify_anomaly.side_effect = RuntimeError("https://hooks.slack.com/SECRET")
+    nm.pop_first_failure.return_value = None
+    anomaly = {"type": "t", "description": "d"}
+
+    with patch("cja_audit_log_monitor.cli.analyze_for_anomalies", return_value=[anomaly]):
+        with caplog.at_level(logging.DEBUG):
+            _run_anomalies_cycle(client, nm, AnomalyDedupFilter(), 1)
+    assert "RuntimeError" in caplog.text
+    assert "SECRET" not in caplog.text

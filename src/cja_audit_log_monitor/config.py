@@ -246,7 +246,11 @@ monitor_interval: 60
 # OAuth scopes
 scopes: openid,AdobeID,read_organizations,additional_info.projectedProductContext
 
-# Alert rules (example)
+# Alert rules (example). If you define any rules here, they replace the built-in rules.
+# Fields: name (required), description, enabled (default true), actions, components,
+# users, threshold_count (default 1), threshold_window_minutes (default 60),
+# per_user (default false). Action and component names are not case sensitive.
+# Off-hours activity (midnight to 5am) is an anomaly check, not a rule.
 # alert_rules:
 #   - name: bulk_delete
 #     description: Alert on multiple delete operations
@@ -255,13 +259,20 @@ scopes: openid,AdobeID,read_organizations,additional_info.projectedProductContex
 #       - DELETE
 #     threshold_count: 5
 #     threshold_window_minutes: 60
-#   - name: sensitive_export
-#     description: Alert on data exports
+#     per_user: true   # count each user's events separately
+#   - name: bulk_export
+#     description: Multiple export operations
 #     enabled: true
 #     actions:
 #       - EXPORT
-#     threshold_count: 1
-#     threshold_window_minutes: 1440
+#     threshold_count: 3
+#     threshold_window_minutes: 30
+#     per_user: true
+#   - name: named_account_deletes
+#     actions:
+#       - DELETE
+#     users:   # user id, email, or display name
+#       - someone@example.com
 
 # Notification channels (uncomment to enable delivery to Slack and/or webhooks)
 # notifications:

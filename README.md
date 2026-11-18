@@ -19,7 +19,7 @@ A terminal app for monitoring and analyzing Adobe Customer Journey Analytics (CJ
 - **Real-time monitor.** New audit events appear as they happen, at a polling interval you choose.
 - **Filtering.** You can search by user, action type, component type, and text.
 - **Charts.** You can see action counts, activity by hour, and activity by day.
-- **Alerts and anomalies.** Rules detect bulk deletes, exports, and activity outside business hours. You can send alerts to Slack or to a webhook.
+- **Alerts and anomalies.** Rules detect bulk deletes, exports, and unusual activity between midnight and 5am. You can send alerts to Slack or to a webhook.
 - **Export.** You can save filtered logs as JSON, CSV, or TSV, either the page you see or every matching entry.
 
 ## Install

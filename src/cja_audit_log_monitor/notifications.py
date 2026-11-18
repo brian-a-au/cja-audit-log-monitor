@@ -8,15 +8,57 @@ from typing import Any
 import httpx
 
 from .models import AuditLogEntry, NotificationConfig, WebhookConfig
-from .utils import get_user_identifier
+from .utils import get_user_identifier, redact_url
 
 logger = logging.getLogger(__name__)
+
+
+def slack_escape(text: str) -> str:
+    """Escape ``&``, ``<`` and ``>`` so Slack shows text as is, with no mentions or links."""
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 class NotificationError(Exception):
     """Raised when notification delivery fails."""
 
     pass
+
+
+class _RedactWebhookUrls(logging.Filter):
+    """Replace configured webhook URLs in httpx's own request log lines.
+
+    httpx logs every request URL at INFO, which would put a webhook secret in the logs.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._secret_urls: set[str] = set()
+
+    def add(self, url: str) -> None:
+        self._secret_urls.add(url)
+        try:
+            self._secret_urls.add(str(httpx.URL(url)))
+        except Exception:
+            pass
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.args, tuple) and self._secret_urls:
+            record.args = tuple(
+                redact_url(str(a)) if str(a) in self._secret_urls else a for a in record.args
+            )
+        return True
+
+
+_url_redactor = _RedactWebhookUrls()
+logging.getLogger("httpx").addFilter(_url_redactor)
+
+
+def _describe_error(error: Exception) -> str:
+    """Describe a request error without its message, which may contain the URL."""
+    response = getattr(error, "response", None)
+    status = getattr(response, "status_code", None)
+    name = type(error).__name__
+    return f"{name} (HTTP {status})" if status else name
 
 
 class NotificationManager:
@@ -37,6 +79,10 @@ class NotificationManager:
     def client(self) -> httpx.Client:
         """Get or create HTTP client."""
         if self._client is None:
+            for webhook in self.config.webhooks:
+                _url_redactor.add(webhook.url)
+            if self.config.slack_webhook_url:
+                _url_redactor.add(self.config.slack_webhook_url)
             self._client = httpx.Client(timeout=30.0)
         return self._client
 
@@ -132,18 +178,19 @@ class NotificationManager:
                 "type": "section",
                 "text": {
                     "type": "mrkdwn",
-                    "text": message,
+                    "text": slack_escape(message),
                 },
             },
         ]
 
         if entry:
-            user = get_user_identifier(entry)
+            user = slack_escape(get_user_identifier(entry))
+            name = entry.component_name or entry.component_id or "N/A"
             fields = [
-                f"*Action:* {entry.action or 'N/A'}",
+                f"*Action:* {slack_escape(str(entry.action or 'N/A'))}",
                 f"*User:* {user}",
-                f"*Component:* {entry.component_type or 'N/A'}",
-                f"*Name:* {entry.component_name or entry.component_id or 'N/A'}",
+                f"*Component:* {slack_escape(str(entry.component_type or 'N/A'))}",
+                f"*Name:* {slack_escape(str(name))}",
             ]
             blocks.append({
                 "type": "section",
@@ -154,7 +201,7 @@ class NotificationManager:
             })
 
             if entry.timestamp:
-                ts_str = entry.timestamp.strftime('%Y-%m-%d %H:%M:%S UTC')
+                ts_str = entry.timestamp.astimezone(UTC).strftime('%Y-%m-%d %H:%M:%S UTC')
                 blocks.append({
                     "type": "context",
                     "elements": [
@@ -209,6 +256,7 @@ class NotificationManager:
             if webhook.headers:
                 headers.update(webhook.headers)
 
+            _url_redactor.add(webhook.url)
             response = self.client.request(
                 method=webhook.method,
                 url=webhook.url,
@@ -217,13 +265,15 @@ class NotificationManager:
                 timeout=webhook.timeout,
             )
             response.raise_for_status()
-            logger.info("Webhook notification sent to %s", webhook.url)
+            logger.info("Webhook notification sent to %s", redact_url(webhook.url))
             self._mark_success(webhook.url)
             return True
 
-        except httpx.HTTPError as e:
-            logger.error("Failed to send webhook to %s: %s", webhook.url, e)
-            self._mark_failure(webhook.url, webhook.url)
+        except (httpx.HTTPError, httpx.InvalidURL) as e:
+            # str(e) can embed the full URL, so log only the type, status and host.
+            label = redact_url(webhook.url)
+            logger.error("Failed to send webhook to %s: %s", label, _describe_error(e))
+            self._mark_failure(webhook.url, label)
             return False
 
     def send_slack(
@@ -245,11 +295,17 @@ class NotificationManager:
         if not self.config.slack_webhook_url:
             return False
 
-        payload = self._build_slack_payload(rule_name, message, entry)
+        return self._post_slack(self._build_slack_payload(rule_name, message, entry))
 
+    def _post_slack(self, payload: dict[str, Any]) -> bool:
+        """Post a payload to the Slack webhook, tracking failures without leaking the URL."""
+        url = self.config.slack_webhook_url
+        if not url:
+            return False
+        _url_redactor.add(url)
         try:
             response = self.client.post(
-                self.config.slack_webhook_url,
+                url,
                 json=payload,
                 headers={"Content-Type": "application/json"},
             )
@@ -258,9 +314,9 @@ class NotificationManager:
             self._mark_success("slack")
             return True
 
-        except httpx.HTTPError as e:
-            logger.error("Failed to send Slack notification: %s", e)
-            self._mark_failure("slack", "slack")
+        except (httpx.HTTPError, httpx.InvalidURL) as e:
+            logger.error("Failed to send Slack notification: %s", _describe_error(e))
+            self._mark_failure("slack", f"slack, {redact_url(url)}")
             return False
 
     def notify_alert(
@@ -324,38 +380,28 @@ class NotificationManager:
 
         # Send to Slack
         if self.config.slack_webhook_url:
-            slack_payload = {
-                "blocks": [
-                    {
-                        "type": "header",
-                        "text": {
-                            "type": "plain_text",
-                            "text": "CJA Audit Anomaly Detected",
-                        },
-                    },
-                    {
-                        "type": "section",
-                        "text": {
-                            "type": "mrkdwn",
-                            "text": anomaly.get("description", "Unknown anomaly"),
-                        },
-                    },
-                ]
-            }
-            try:
-                response = self.client.post(
-                    self.config.slack_webhook_url,
-                    json=slack_payload,
-                    headers={"Content-Type": "application/json"},
-                )
-                response.raise_for_status()
-                self._mark_success("slack")
+            if self._post_slack(self._build_slack_anomaly_payload(anomaly)):
                 sent += 1
-            except httpx.HTTPError as e:
-                logger.error("Failed to send Slack anomaly notification: %s", e)
-                self._mark_failure("slack", "slack")
 
         return sent
+
+    def _build_slack_anomaly_payload(self, anomaly: dict[str, Any]) -> dict[str, Any]:
+        """Build a Slack payload for an anomaly, with its text escaped."""
+        return {
+            "blocks": [
+                {
+                    "type": "header",
+                    "text": {"type": "plain_text", "text": "CJA Audit Anomaly Detected"},
+                },
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": slack_escape(str(anomaly.get("description", "Unknown anomaly"))),
+                    },
+                },
+            ]
+        }
 
     def pop_first_failure(self) -> str | None:
         """Return and consume the next pending failure warning, or None.

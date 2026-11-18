@@ -877,11 +877,12 @@ def _run_anomalies_cycle(
         console.print(f"[yellow]•[/yellow] {escape(description)}")
         try:
             nm.notify_anomaly(anomaly)
-        except Exception:
+        except Exception as e:
             # Network failures are surfaced via pop_first_failure; this catches
             # unexpected programming errors so one bad anomaly doesn't kill the cycle.
-            logging.getLogger(__name__).exception(
-                "notify_anomaly raised unexpectedly; continuing"
+            # Log only the type: the message and traceback locals could hold a webhook URL.
+            logging.getLogger(__name__).error(
+                "notify_anomaly raised %s unexpectedly; continuing", type(e).__name__
             )
 
     while True:

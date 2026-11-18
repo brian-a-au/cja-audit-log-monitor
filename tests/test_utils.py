@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from cja_audit_log_monitor.utils import RecentIds, display_path, entry_key
+from cja_audit_log_monitor.utils import RecentIds, display_path, entry_key, redact_url
 
 
 class TestDisplayPath:
@@ -85,3 +85,17 @@ class TestEntryKey:
         entry = sample_audit_entry.model_copy(update={"id": None})
         key = entry_key(entry)
         assert key and str(entry.action) in key
+
+
+class TestRedactUrl:
+    """redact_url keeps only the scheme and host."""
+
+    def test_drops_path_and_query(self):
+        url = "https://hooks.slack.com/services/T0/B0/SECRET?token=SECRET"
+        assert redact_url(url) == "https://hooks.slack.com/\u2026"
+
+    def test_drops_userinfo_and_keeps_port(self):
+        assert redact_url("http://user:SECRET@example.com:8080/x") == "http://example.com:8080/\u2026"
+
+    def test_unparseable_value_leaks_nothing(self):
+        assert "SECRET" not in redact_url("SECRET")

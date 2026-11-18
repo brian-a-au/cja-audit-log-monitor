@@ -10,9 +10,24 @@ from rich.panel import Panel
 
 from .formatters import format_alert
 from .models import ActionType, AlertRule, AuditLogEntry, ComponentType
-from .utils import get_user_identifier, group_by_user, local_tz_name, to_local, user_identities
+from .utils import (
+    get_user_identifier,
+    get_user_key,
+    group_by_user,
+    local_tz_name,
+    to_local,
+    user_identities,
+)
 
 logger = logging.getLogger(__name__)
+
+_EPOCH = datetime.min.replace(tzinfo=UTC)
+
+# Anomaly thresholds: a check needs this much activity before it means anything.
+OFF_HOURS_END = 5  # off-hours are 00:00 up to, not including, 05:00
+OFF_HOURS_MIN_COUNT = 5
+HIGH_ACTIVITY_MIN_COUNT = 20
+BULK_DELETE_MIN_COUNT = 11
 
 
 @dataclass
@@ -34,6 +49,7 @@ DEFAULT_ALERT_RULES = [
         actions=[ActionType.DELETE],
         threshold_count=5,
         threshold_window_minutes=60,
+        per_user=True,
     ),
     AlertRule(
         name="bulk_export",
@@ -42,6 +58,7 @@ DEFAULT_ALERT_RULES = [
         actions=[ActionType.EXPORT],
         threshold_count=3,
         threshold_window_minutes=30,
+        per_user=True,
     ),
     AlertRule(
         name="sensitive_component_delete",
@@ -64,8 +81,17 @@ DEFAULT_ALERT_RULES = [
         actions=[ActionType.SHARE],
         threshold_count=10,
         threshold_window_minutes=60,
+        per_user=True,
     ),
 ]
+
+
+def order_oldest_first(entries: list[AuditLogEntry]) -> list[AuditLogEntry]:
+    """Sort entries by event time, oldest first, so rule windows slide forward.
+
+    Entries without a timestamp are treated as happening now and go last.
+    """
+    return sorted(entries, key=lambda e: (e.timestamp is None, e.timestamp or _EPOCH))
 
 
 class AlertEngine:
@@ -77,12 +103,12 @@ class AlertEngine:
         Args:
             rules: Alert rules to use. Defaults to DEFAULT_ALERT_RULES.
         """
-        # Create a copy of rules to avoid sharing state between instances
-        if rules is not None:
-            self.rules = list(rules)
-        else:
-            self.rules = [AlertRule(**rule.model_dump()) for rule in DEFAULT_ALERT_RULES]
-        self._event_history: dict[str, list[tuple[datetime, AuditLogEntry]]] = defaultdict(list)
+        # Deep-copy so toggling a rule here never changes the caller's rule objects
+        source = DEFAULT_ALERT_RULES if rules is None else rules
+        self.rules = [rule.model_copy(deep=True) for rule in source]
+        self._event_history: dict[tuple[str, str], list[tuple[datetime, AuditLogEntry]]] = (
+            defaultdict(list)
+        )
 
     def add_rule(self, rule: AlertRule) -> None:
         """Add an alert rule.
@@ -137,15 +163,18 @@ class AlertEngine:
                 return True
         return False
 
-    def _clean_old_events(self, rule: AlertRule) -> None:
-        """Remove events outside the rule's time window.
+    def _clean_old_events(self, key: tuple[str, str], window: timedelta, now: datetime) -> None:
+        """Remove events older than the window, measured back from ``now``.
+
+        ``now`` is the newest event time seen for the key, not the wall clock,
+        so replayed or late-indexed events are judged by when they happened.
 
         Args:
-            rule: Rule to clean events for.
+            key: History key, ``(rule_name, user_key)``.
+            window: Length of the rule's time window.
+            now: Reference time; events at or before ``now - window`` are dropped.
         """
-        cutoff = datetime.now(UTC) - timedelta(minutes=rule.threshold_window_minutes)
-        key = rule.name
-
+        cutoff = now - window
         self._event_history[key] = [
             (ts, entry) for ts, entry in self._event_history[key] if ts > cutoff
         ]
@@ -160,27 +189,15 @@ class AlertEngine:
         Returns:
             True if entry matches rule criteria.
         """
-        # Check action match
-        if rule.actions:
-            if not entry.action:
-                return False
-            try:
-                entry_action = ActionType(entry.action)
-                if entry_action not in rule.actions:
-                    return False
-            except ValueError:
-                return False
+        # Check action match (names are upper-cased strings; unknown ones match too)
+        if rule.actions and (not entry.action or entry.action.upper() not in rule.actions):
+            return False
 
         # Check component match
-        if rule.components:
-            if not entry.component_type:
-                return False
-            try:
-                entry_component = ComponentType(entry.component_type)
-                if entry_component not in rule.components:
-                    return False
-            except ValueError:
-                return False
+        if rule.components and (
+            not entry.component_type or entry.component_type.upper() not in rule.components
+        ):
+            return False
 
         # Check user match
         if rule.users:
@@ -209,14 +226,22 @@ class AlertEngine:
             if not self._matches_rule(entry, rule):
                 continue
 
-            # Add to event history
-            self._event_history[rule.name].append((timestamp, entry))
+            key = (rule.name, get_user_key(entry) if rule.per_user else "")
 
-            # Clean old events
-            self._clean_old_events(rule)
+            # Add to event history
+            self._event_history[key].append((timestamp, entry))
+
+            # Clean old events, measured from the newest event time for this key. A
+            # timestamp in the future must not push the window past real events.
+            newest = max(ts for ts, _ in self._event_history[key])
+            self._clean_old_events(
+                key,
+                timedelta(minutes=rule.threshold_window_minutes),
+                min(newest, datetime.now(UTC)),
+            )
 
             # Check threshold
-            event_count = len(self._event_history[rule.name])
+            event_count = len(self._event_history[key])
             if event_count >= rule.threshold_count:
                 message = (
                     f"{rule.description or rule.name}: "
@@ -239,12 +264,14 @@ class AlertEngine:
                 )
 
                 # Clear history to avoid repeated alerts
-                self._event_history[rule.name] = []
+                self._event_history[key] = []
 
         return fired
 
     def check_batch(self, entries: list[AuditLogEntry]) -> list[FiredAlert]:
         """Check a batch of entries against all rules.
+
+        Entries are processed oldest first, whatever order they arrive in.
 
         Args:
             entries: List of audit log entries.
@@ -252,8 +279,9 @@ class AlertEngine:
         Returns:
             List of FiredAlert objects for triggered rules.
         """
+        ordered = order_oldest_first(entries)
         all_fired: list[FiredAlert] = []
-        for entry in entries:
+        for entry in ordered:
             all_fired.extend(self.check_entry(entry))
         return all_fired
 
@@ -268,11 +296,17 @@ class AlertEngine:
                 "name": rule.name,
                 "description": rule.description,
                 "enabled": rule.enabled,
-                "actions": [a.value for a in rule.actions] if rule.actions else None,
-                "components": [c.value for c in rule.components] if rule.components else None,
+                "actions": list(rule.actions) if rule.actions else None,
+                "components": list(rule.components) if rule.components else None,
+                "users": list(rule.users) if rule.users else None,
+                "per_user": rule.per_user,
                 "threshold_count": rule.threshold_count,
                 "threshold_window_minutes": rule.threshold_window_minutes,
-                "pending_events": len(self._event_history[rule.name]),
+                "pending_events": sum(
+                    len(events)
+                    for (name, _user), events in self._event_history.items()
+                    if name == rule.name
+                ),
             }
             for rule in self.rules
         ]
@@ -306,31 +340,33 @@ def analyze_for_anomalies(
 
     # Group by user
     user_actions = group_by_user(entries)
-
-    # Check for users with unusually high activity
     total_actions = len(entries)
-    avg_per_user = total_actions / len(user_actions) if user_actions else 0
 
-    for user, actions in user_actions.items():
-        if len(actions) > avg_per_user * 3:  # 3x average
-            anomalies.append({
-                "type": "high_activity_user",
-                "user": user,
-                "action_count": len(actions),
-                "average": avg_per_user,
-                "description": f"User {user} has {len(actions)} actions ({avg_per_user:.1f} avg)",
-            })
+    # Check for users with unusually high activity, judged against the other users
+    if len(user_actions) > 1:
+        for user, actions in user_actions.items():
+            others_mean = (total_actions - len(actions)) / (len(user_actions) - 1)
+            if len(actions) >= HIGH_ACTIVITY_MIN_COUNT and len(actions) > others_mean * 3:
+                anomalies.append({
+                    "type": "high_activity_user",
+                    "user": user,
+                    "action_count": len(actions),
+                    "average": others_mean,
+                    "description": (
+                        f"User {user} has {len(actions)} actions "
+                        f"({others_mean:.1f} avg for other users)"
+                    ),
+                })
 
-    # Check for concentrated delete activity
+    # Check for concentrated delete activity, one report per user
     delete_entries = [e for e in entries if e.action == ActionType.DELETE.value]
-    if len(delete_entries) > 10:
-        delete_users = set(group_by_user(delete_entries))
-        if len(delete_users) == 1:
+    for user, deletes in group_by_user(delete_entries).items():
+        if len(deletes) >= BULK_DELETE_MIN_COUNT:
             anomalies.append({
                 "type": "bulk_delete_single_user",
-                "user": list(delete_users)[0],
-                "delete_count": len(delete_entries),
-                "description": f"Single user performed {len(delete_entries)} deletes",
+                "user": user,
+                "delete_count": len(deletes),
+                "description": f"User {user} performed {len(deletes)} deletes",
             })
 
     # Check for unusual time patterns (if timestamps available)
@@ -345,8 +381,12 @@ def analyze_for_anomalies(
     if hour_counts:
         avg_per_hour = sum(hour_counts.values()) / 24
         for hour, count in hour_counts.items():
-            # Flag unusual activity in off-hours (midnight to 5am)
-            if 0 <= hour <= 5 and count > avg_per_hour * 2:
+            # Flag a real burst in off-hours (midnight up to OFF_HOURS_END)
+            if (
+                0 <= hour < OFF_HOURS_END
+                and count >= OFF_HOURS_MIN_COUNT
+                and count > avg_per_hour * 2
+            ):
                 anomalies.append({
                     "type": "off_hours_activity",
                     "hour": hour,
