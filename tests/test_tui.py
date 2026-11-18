@@ -1451,7 +1451,7 @@ class TestExportScope:
             dialog = await self._open(app, pilot)
             dialog.query_one("#output-path").value = str(tmp_path / "x.json")
             await pilot.click("#export-button")
-            await pilot.pause(0.15)
+            await pilot.pause(0.3)
             assert not isinstance(app.screen, ExportDialog)
         assert app._exception is None
 
@@ -1460,7 +1460,8 @@ class TestExportScope:
     ):
         from cja_audit_log_monitor.tui.modals import ExportDialog
 
-        monkeypatch.setattr(ExportDialog, "AUTO_CLOSE_SECONDS", 0.05)
+        # Long enough that Escape reliably lands before the timer fires.
+        monkeypatch.setattr(ExportDialog, "AUTO_CLOSE_SECONDS", 0.3)
         mock_app_state.entries = sample_audit_entries
         app = _make_app(mock_app_state)
         async with app.run_test(size=(120, 40)) as pilot:
@@ -1469,7 +1470,10 @@ class TestExportScope:
             await pilot.click("#export-button")
             await pilot.pause()
             await pilot.press("escape")
-            await pilot.pause(0.15)
+            assert not isinstance(app.screen, ExportDialog)
+            await pilot.pause(0.4)  # past the timer, which now fires on a closed dialog
+            assert not isinstance(app.screen, ExportDialog)
+            assert app.is_running
         assert app._exception is None
 
     async def test_dialog_uses_lowercase_labels(self, mock_app_state):
