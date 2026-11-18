@@ -2,6 +2,7 @@
 
 import csv
 import json
+import sys
 from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -237,3 +238,72 @@ class TestUserName:
         export_to_tsv([self._entry()], out)
         rows = list(csv.DictReader(StringIO(out.getvalue()), delimiter="\t"))
         assert rows[0]["user_name"] == "Pat Example"
+
+
+def _exploding(entries: list[AuditLogEntry]):
+    for i, entry in enumerate(entries):
+        if i == 2:
+            raise RuntimeError("boom")
+        yield entry
+
+
+class TestAtomicWrites:
+    """Exports write atomically, privately and as UTF-8."""
+
+    @pytest.mark.parametrize("fmt", ["json", "csv", "tsv"])
+    def test_failed_export_leaves_nothing(
+        self, tmp_path: Path, sample_audit_entries: list[AuditLogEntry], fmt: str
+    ) -> None:
+        target = tmp_path / f"out.{fmt}"
+        with pytest.raises(RuntimeError):
+            export_entries(_exploding(sample_audit_entries), target, fmt)
+        assert list(tmp_path.iterdir()) == []
+
+    @pytest.mark.parametrize("fmt", ["json", "csv", "tsv"])
+    def test_failed_export_keeps_existing_file(
+        self, tmp_path: Path, sample_audit_entries: list[AuditLogEntry], fmt: str
+    ) -> None:
+        target = tmp_path / f"out.{fmt}"
+        target.write_text("original", encoding="utf-8")
+        with pytest.raises(RuntimeError):
+            export_entries(_exploding(sample_audit_entries), target, fmt)
+        assert target.read_text(encoding="utf-8") == "original"
+        assert [p.name for p in tmp_path.iterdir()] == [target.name]
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="symlinks need privileges on Windows")
+    def test_symlink_is_replaced_not_followed(
+        self, tmp_path: Path, sample_audit_entry: AuditLogEntry
+    ) -> None:
+        real = tmp_path / "real.json"
+        real.write_text("keep", encoding="utf-8")
+        link = tmp_path / "link.json"
+        link.symlink_to(real)
+        export_to_json([sample_audit_entry], link)
+        assert real.read_text(encoding="utf-8") == "keep"
+        assert not link.is_symlink()
+        assert json.loads(link.read_text(encoding="utf-8"))["count"] == 1
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX permissions only")
+    def test_new_file_is_private(
+        self, tmp_path: Path, sample_audit_entry: AuditLogEntry
+    ) -> None:
+        target = tmp_path / "out.csv"
+        export_to_csv([sample_audit_entry], target)
+        assert target.stat().st_mode & 0o777 == 0o600
+
+    def test_unicode_round_trips(self, tmp_path: Path) -> None:
+        entry = AuditLogEntry(id="u1", description="✓ 日本")
+        json_path = tmp_path / "u.json"
+        csv_path = tmp_path / "u.csv"
+        export_to_json([entry], json_path)
+        export_to_csv([entry], csv_path)
+        data = json.loads(json_path.read_text(encoding="utf-8"))
+        assert data["entries"][0]["description"] == "✓ 日本"
+        with open(csv_path, encoding="utf-8", newline="") as f:
+            rows = list(csv.DictReader(f))
+        assert rows[0]["description"] == "✓ 日本"
+
+    def test_exported_at_is_utc(self, sample_audit_entry: AuditLogEntry) -> None:
+        output = StringIO()
+        export_to_json([sample_audit_entry], output)
+        assert json.loads(output.getvalue())["exported_at"].endswith("+00:00")

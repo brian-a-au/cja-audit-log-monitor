@@ -2,12 +2,37 @@
 
 import csv
 import json
+import os
+import tempfile
 from collections.abc import Iterator
-from datetime import datetime
+from contextlib import contextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, TextIO
 
 from .models import AuditLogEntry
+
+
+@contextmanager
+def atomic_write(path: Path, newline: str | None = None) -> Iterator[TextIO]:
+    """Write a UTF-8 text file atomically with private (0o600) permissions.
+
+    The data goes to a temp file in the same folder and replaces ``path`` only
+    when the block finishes. On any error the temp file is removed and an
+    existing ``path`` is left untouched. A symlink at ``path`` is replaced, not
+    followed.
+    """
+    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline=newline) as f:
+            yield f
+        os.replace(tmp_name, path)
+    except BaseException:
+        try:
+            os.unlink(tmp_name)
+        except FileNotFoundError:
+            pass
+        raise
 
 
 def entry_to_dict(entry: AuditLogEntry) -> dict[str, Any]:
@@ -55,13 +80,13 @@ def export_to_json(
         entries = list(entries)
 
     data = {
-        "exported_at": datetime.now().isoformat(),
+        "exported_at": datetime.now(UTC).isoformat(),
         "count": len(entries),
         "entries": [entry_to_dict(e) for e in entries],
     }
 
     if isinstance(output, Path):
-        with open(output, "w") as f:
+        with atomic_write(output) as f:
             if pretty:
                 json.dump(data, f, indent=2, default=str)
             else:
@@ -121,7 +146,7 @@ def export_to_csv(
         return count
 
     if isinstance(output, Path):
-        with open(output, "w", newline="") as f:
+        with atomic_write(output, newline="") as f:
             write_csv(f)
     else:
         write_csv(output)
@@ -174,7 +199,7 @@ def export_to_tsv(
         return count
 
     if isinstance(output, Path):
-        with open(output, "w", newline="") as f:
+        with atomic_write(output, newline="") as f:
             write_tsv(f)
     else:
         write_tsv(output)
@@ -229,12 +254,12 @@ def export_stats_to_json(
         pretty: Whether to format JSON with indentation.
     """
     data = {
-        "exported_at": datetime.now().isoformat(),
+        "exported_at": datetime.now(UTC).isoformat(),
         "statistics": stats,
     }
 
     if isinstance(output, Path):
-        with open(output, "w") as f:
+        with atomic_write(output) as f:
             if pretty:
                 json.dump(data, f, indent=2, default=str)
             else:
