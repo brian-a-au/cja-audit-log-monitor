@@ -3913,6 +3913,30 @@ class TestNarrowLayout:
             )
             assert "quit" in footer_text
 
+    async def test_footer_keeps_quit_visible_with_details_open(self, mock_app_state):
+        from textual.widgets import Footer
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            await _show_and_load(app, pilot, "l")
+            table = app.query_one("#log-table")
+            assert table.row_count > 0
+            await pilot.press("enter")
+            panel = app.screen_stack[0].query_one("#entry-detail-panel")
+            assert await _wait_for(panel.is_visible, pilot)
+            await pilot.pause()
+
+            def quit_visible() -> bool:
+                keys = [
+                    w
+                    for w in app.query_one(Footer).query("FooterKey")
+                    if "quit" in str(w.render())
+                ]
+                return bool(keys) and all(k.region.right <= app.size.width for k in keys)
+
+            assert await _wait_for(quit_visible, pilot)
+
     async def test_wide_sidebar_keeps_labels(self, mock_app_state):
         app = _make_app(mock_app_state)
         async with app.run_test(size=(140, 40)) as pilot:
