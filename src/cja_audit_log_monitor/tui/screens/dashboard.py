@@ -9,7 +9,7 @@ from textual.widgets import Button, LoadingIndicator, Static
 from textual.worker import get_current_worker
 
 from ...alerts import analyze_for_anomalies
-from ...formatters import resolve_tcss_markup
+from ...formatters import literal, resolve_tcss_markup
 from ...stats import build_date_range_query, calculate_stats, get_hourly_distribution
 from ...utils import local_tz_name
 from ..state import AppState
@@ -185,7 +185,9 @@ class DashboardScreen(ContentView):
 
         if anomalies:
             lines = [
-                resolve_tcss_markup(f"[$warning]⚠[/$warning] {anomaly['description']}")
+                resolve_tcss_markup(
+                    f"[$warning]⚠[/$warning] {literal(str(anomaly['description']))}"
+                )
                 for anomaly in anomalies[:5]
             ]
             self.query_one("#anomalies", Static).update("\n".join(lines))
@@ -213,7 +215,7 @@ class DashboardScreen(ContentView):
         lines = []
         for user, count in self._top_users[:8]:
             name = user if len(user) <= name_width else user[: name_width - 1] + "…"
-            lines.append(f"{name:<{name_width}} {count:>5,}")
+            lines.append(f"{literal(f'{name:<{name_width}}')} {count:>5,}")
         widget.update("\n".join(lines))
 
     def on_button_pressed(self, event: Button.Pressed) -> None:

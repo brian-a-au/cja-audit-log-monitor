@@ -2,7 +2,7 @@
 
 from textual.widgets import Static
 
-from ...formatters import ACTION_COLORS, TCSS_TOKEN_HEX, render_bar
+from ...formatters import ACTION_COLORS, TCSS_TOKEN_HEX, literal, render_bar
 
 _MUTED = TCSS_TOKEN_HEX["$text-muted"]
 
@@ -54,7 +54,8 @@ class ActionBarChart(Static):
             bar = render_bar(count, max_count, width).ljust(width)
             pct = count / total * 100 if total else 0
             lines.append(
-                f"[{color}]{action:<{label_width}}[/{color}]  [{color}]{bar}[/{color}] "
+                f"[{color}]{literal(f'{action:<{label_width}}')}[/{color}]  "
+                f"[{color}]{bar}[/{color}] "
                 f"{count:>5,}  [{_MUTED}]{pct:4.1f}%[/{_MUTED}]"
             )
         return "\n".join(lines)

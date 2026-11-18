@@ -3,12 +3,11 @@
 from collections.abc import Iterator
 
 from textual.containers import Container, Horizontal, Vertical
-from textual.markup import escape
 from textual.widget import Widget
 from textual.widgets import Button, Checkbox, LoadingIndicator, Static
 from textual.worker import get_current_worker
 
-from ...formatters import resolve_tcss_markup
+from ...formatters import literal, resolve_tcss_markup
 from ...stats import build_date_range_query
 from .base import ContentView
 
@@ -109,17 +108,17 @@ class AlertsScreen(ContentView):
         )
         if len(components) > 40:
             components = components[:39] + "…"
-        name = escape(rule.name)
+        name = literal(rule.name)
         noun = "event" if rule.threshold_count == 1 else "events"
         window = f"{rule.threshold_count} {noun} / {rule.threshold_window_minutes} min"
-        details = escape(f"{window} · {actions} · {components}")
+        details = literal(f"{window} · {actions} · {components}")
 
         return Vertical(
             Horizontal(
                 Checkbox(name, value=rule.enabled, id=f"rule-{index}", compact=True),
                 Static(
                     resolve_tcss_markup(
-                        f"[$text-muted]{escape(rule.description or '')}[/$text-muted]"
+                        f"[$text-muted]{literal(rule.description or '')}[/$text-muted]"
                     ),
                     classes="rule-description",
                 ),
@@ -141,7 +140,9 @@ class AlertsScreen(ContentView):
             return
         rules[index].enabled = event.value
         verb = "Enabled" if event.value else "Disabled"
-        self.app.notify(f"{verb} rule: {self._rule_names[checkbox_id]}", severity="information")
+        self.app.notify(
+            f"{verb} rule: {self._rule_names[checkbox_id]}", severity="information", markup=False
+        )
 
         # Update card styling
         card = self.query_one(f"#card-{index}")
@@ -190,7 +191,7 @@ class AlertsScreen(ContentView):
                     result_lines.append(
                         resolve_tcss_markup(
                             f"  [$danger]⚠[/$danger] "
-                            f"{escape(fa.rule_name)}: {escape(fa.message)}"
+                            f"{literal(fa.rule_name)}: {literal(fa.message)}"
                         )
                     )
                 self.app.call_from_thread(self._show_results, "\n".join(result_lines))
@@ -216,6 +217,6 @@ class AlertsScreen(ContentView):
     def _show_error(self, error: str) -> None:
         """Show a failed test run in the results box, plus a toast."""
         self._show_results(
-            resolve_tcss_markup(f"[$danger]test failed:[/$danger] {escape(error)}")
+            resolve_tcss_markup(f"[$danger]test failed:[/$danger] {literal(error)}")
         )
-        self.app.notify(f"Error: {error}", severity="error")
+        self.app.notify(f"Error: {error}", severity="error", markup=False)

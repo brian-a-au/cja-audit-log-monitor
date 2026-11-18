@@ -5,20 +5,19 @@ from typing import Literal
 
 from textual.app import ComposeResult
 from textual.containers import Vertical
-from textual.markup import escape
 from textual.widget import Widget
 from textual.widgets import LoadingIndicator, Static
 
 from ...auth import AuthenticationError
 from ...client import APIError
-from ...formatters import resolve_tcss_markup
+from ...formatters import literal, resolve_tcss_markup
 from ..state import AppState
 
 
 def not_connected_message(error: str) -> str:
     """Empty-state copy shown when the API connection fails."""
     return resolve_tcss_markup(
-        f"[$danger]●[/$danger] not connected · {escape(error)}\n"
+        f"[$danger]●[/$danger] not connected · {literal(error)}\n"
         "[$text-muted]press c to open config, or run: "
         "cja-audit-log-monitor cli verify[/$text-muted]"
     )
@@ -64,7 +63,7 @@ def error_message(error: Exception) -> str:
         return not_connected_message(str(error))
     headline, hint = _ERROR_COPY[classify_error(error)]
     return resolve_tcss_markup(
-        f"[$danger]●[/$danger] {headline} · {escape(str(error))}\n"
+        f"[$danger]●[/$danger] {headline} · {literal(str(error))}\n"
         f"[$text-muted]{hint}[/$text-muted]"
     )
 

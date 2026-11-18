@@ -8,7 +8,7 @@ from textual.widget import Widget
 from textual.widgets import Button, Input, Label, LoadingIndicator, Static
 from textual.worker import get_current_worker
 
-from ...formatters import TCSS_TOKEN_HEX, render_bar
+from ...formatters import TCSS_TOKEN_HEX, literal, render_bar
 from ...stats import (
     build_date_range_query,
     calculate_stats,
@@ -203,7 +203,8 @@ class StatsScreen(ContentView):
         primary = TCSS_TOKEN_HEX["$primary"]
         max_daily = max((count for _, count in self._daily), default=0)
         daily_lines = [
-            f"{day[5:]}  [{primary}]{render_bar(count, max_daily, bar_width).ljust(bar_width)}"
+            f"{literal(day[5:])}  "
+            f"[{primary}]{render_bar(count, max_daily, bar_width).ljust(bar_width)}"
             f"[/{primary}] {count:>5,}"
             for day, count in self._daily
         ]
@@ -215,7 +216,7 @@ class StatsScreen(ContentView):
         user_lines = []
         for rank, (user, count) in enumerate(self._users, 1):
             name = user if len(user) <= name_width else user[: name_width - 1] + "…"
-            user_lines.append(f"{rank:>2}. {name:<{name_width}} {count:>5,}")
+            user_lines.append(f"{rank:>2}. {literal(f'{name:<{name_width}}')} {count:>5,}")
         ranking_widget.update("\n".join(user_lines) or no_activity_message(self._days))
 
 

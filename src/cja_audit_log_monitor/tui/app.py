@@ -8,12 +8,11 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.css.query import NoMatches
-from textual.markup import escape
 from textual.message import Message
 from textual.screen import ModalScreen
 from textual.widgets import ContentSwitcher, Footer, Static
 
-from ..formatters import resolve_tcss_markup
+from ..formatters import literal, resolve_tcss_markup
 from .screens.base import ContentView, classify_error
 from .state import AppState
 
@@ -77,8 +76,8 @@ class HelpScreen(ModalScreen):
             for title, rows in HELP_SECTIONS:
                 yield Static(title.upper(), classes="section-label help-section")
                 body = "\n".join(
-                    resolve_tcss_markup(f"[$primary]{escape(key):<{key_width}}[/$primary]")
-                    + escape(description)
+                    resolve_tcss_markup(f"[$primary]{literal(key):<{key_width}}[/$primary]")
+                    + literal(description)
                     for key, description in rows
                 )
                 yield Static(body, classes="help-section-body")
@@ -178,9 +177,9 @@ class CJAAuditApp(App):
             detail = f"org {org}" if org else ""
         text = f"cja-audit-log-monitor · [{color}]●[/{color}] {status}"
         if detail:
-            text += f" · [$text-muted]{escape(detail)}[/$text-muted]"
+            text += f" · [$text-muted]{literal(detail)}[/$text-muted]"
         if self.state.config_error_summary:
-            warning = escape(self.state.config_error_summary)
+            warning = literal(self.state.config_error_summary)
             text += f" · [$warning]⚠ {warning}[/$warning]"
         return text
 

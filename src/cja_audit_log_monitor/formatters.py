@@ -1,5 +1,6 @@
 """Rich formatters for CLI output."""
 
+import re
 from datetime import datetime
 from typing import Any
 
@@ -41,10 +42,21 @@ def resolve_tcss_markup(s: str) -> str:
     """Replace [$token] / [/$token] with hex equivalents so Rich can parse them."""
     out = s
     for token, hex_value in TCSS_TOKEN_HEX.items():
-        out = out.replace(f"[{token}]", f"[{hex_value}]").replace(
-            f"[/{token}]", f"[/{hex_value}]"
-        )
+        # A backslash before the bracket marks escaped (literal) text: leave it alone.
+        out = re.sub(rf"(?<!\\)\[{re.escape(token)}\]", f"[{hex_value}]", out)
+        out = re.sub(rf"(?<!\\)\[/{re.escape(token)}\]", f"[/{hex_value}]", out)
     return out
+
+
+def literal(text: str) -> str:
+    """Make ``text`` safe to put inside a markup string so it shows exactly as written.
+
+    ``textual.markup.escape`` misses an unclosed ``[/`` and a trailing backslash, either
+    of which can swallow a later tag. Here every ``[`` is escaped, and a trailing backslash
+    is followed by a zero-width space so it cannot escape the tag that comes after it.
+    """
+    out = text.replace("[", "\\[")
+    return out + "\u200b" if out.endswith("\\") else out
 
 
 ACTION_COLORS = {

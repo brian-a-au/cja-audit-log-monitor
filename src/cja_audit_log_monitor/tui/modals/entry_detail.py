@@ -14,6 +14,7 @@ from ...formatters import (
     format_timestamp,
     get_action_color,
     get_action_icon,
+    literal,
     resolve_tcss_markup,
 )
 from ...models import AuditLogEntry
@@ -114,8 +115,8 @@ class EntryDetailPanel(Container):
         title = self.query_one("#detail-title", Static)
         title.update(
             resolve_tcss_markup(
-                f"[{color}]{icon} {action}[/{color}] · "
-                f"[$text-muted]{entry.component_type or 'unknown'}[/$text-muted]"
+                f"[{color}]{literal(f'{icon} {action}')}[/{color}] · "
+                f"[$text-muted]{literal(entry.component_type or 'unknown')}[/$text-muted]"
             )
         )
 

@@ -410,15 +410,15 @@ class MonitorScreen(ContentView):
 
     def _show_error(self, error: str) -> None:
         """Show error message."""
-        self.app.notify(f"Monitor error: {error}", severity="error")
+        self.app.notify(f"Monitor error: {error}", severity="error", markup=False)
 
     def _show_warning(self, warning: str) -> None:
         """Show warning message."""
-        self.app.notify(warning, severity="warning")
+        self.app.notify(warning, severity="warning", markup=False)
 
     def _show_alert(self, rule_name: str, message: str) -> None:
         """Show alert notification."""
         text = f"{rule_name}: {message}"
-        self.app.notify(text, severity="warning")
+        self.app.notify(text, severity="warning", markup=False)
         alert_summary = self.query_one("#alert-summary", AlertSummary)
         alert_summary.add_alert(rule_name, message)

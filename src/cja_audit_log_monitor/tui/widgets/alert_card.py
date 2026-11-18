@@ -1,9 +1,8 @@
 """Alert card widget for displaying alert notifications."""
 
-from textual.markup import escape
 from textual.widgets import Static
 
-from ...formatters import format_timestamp, resolve_tcss_markup
+from ...formatters import format_timestamp, literal, resolve_tcss_markup
 from ...models import AuditLogEntry
 from ...utils import get_user_identifier, local_tz_name
 
@@ -26,9 +25,11 @@ class AlertCard(Static):
             entry: Optional related audit log entry.
             **kwargs: Additional arguments for Static.
         """
-        content = resolve_tcss_markup(f"[$danger]⚠ {alert_name}[/$danger]\n{message}")
+        content = resolve_tcss_markup(
+            f"[$danger]⚠ {literal(alert_name)}[/$danger]\n{literal(message)}"
+        )
         if entry:
-            content += (
+            content += literal(
                 f"\nTime: {format_timestamp(entry.timestamp, local=True)} {local_tz_name()}"
                 f"\nUser: {get_user_identifier(entry, default='-')}"
                 f"\nAction: {entry.action}"
@@ -77,6 +78,6 @@ class AlertSummary(Static):
         for name, message in reversed(self._alerts):
             short = message if len(message) <= 60 else message[:59] + "…"
             lines.append(
-                resolve_tcss_markup(f"[$danger]⚠[/$danger] {escape(name)}: {escape(short)}")
+                resolve_tcss_markup(f"[$danger]⚠[/$danger] {literal(name)}: {literal(short)}")
             )
         self.update("\n".join(lines))

@@ -2996,3 +2996,110 @@ async def test_header_keeps_connection_status_with_bad_config(mock_app_state, tm
         assert "config.yaml: monitor_interval: Input should be a valid integer" in header
         assert "\n" not in header
         assert "pydantic text" not in header
+
+
+# ---------------------------------------------------------------------------
+# Data is never parsed as markup
+# ---------------------------------------------------------------------------
+
+_BRACKET_USER = "[/b]eve@x.com"
+_BRACKET_COMPONENT = "Q3 [/final] report"
+_BRACKET_ERROR = "[bold red]boom[/] [/oops]"
+
+
+def _rendered(widget) -> str:
+    """What the widget shows, parsed the way Textual parses it (so bad markup raises)."""
+    return widget.render().plain
+
+
+async def test_bracket_data_shows_literally_in_every_view(
+    mock_app_state, sample_audit_entry, monkeypatch
+):
+    from cja_audit_log_monitor.tui.modals import EntryDetailPanel
+    from cja_audit_log_monitor.tui.screens.monitor import MonitorScreen
+    from cja_audit_log_monitor.tui.widgets import LogTable
+
+    entry = sample_audit_entry.model_copy(
+        update={
+            "user_email": _BRACKET_USER,
+            "component_name": _BRACKET_COMPONENT,
+            "component_type": "[/type]",
+            "action": "[/act]",
+            "description": "[/desc]",
+        }
+    )
+    state = mock_app_state
+    state.client.get_logs_sample.return_value = ([entry], 1)
+    state.client.get_logs.return_value = _logs_response([entry], total_elements=1, total_pages=1)
+    monkeypatch.setattr(
+        "cja_audit_log_monitor.tui.screens.dashboard.analyze_for_anomalies",
+        lambda entries, local=False: [{"description": f"odd {_BRACKET_USER} [/x]"}],
+    )
+    app = _make_app(state)
+    async with app.run_test(size=(140, 40)) as pilot:
+        # dashboard
+        view = await _show_and_load(app, pilot, "d")
+        assert _BRACKET_USER in _rendered(view.query_one("#top-users", Static))
+        assert "[/x]" in _rendered(view.query_one("#anomalies", Static))
+
+        # log browser: table cell text is the literal string, detail panel too
+        view = await _show_and_load(app, pilot, "l")
+        table = view.query_one("#log-table", LogTable)
+        assert await _wait_for(lambda: table.row_count == 1, pilot)
+        cells = [
+            str(table.get_cell_at((0, col)).plain if hasattr(table.get_cell_at((0, col)), "plain")
+                else table.get_cell_at((0, col)))
+            for col in range(len(table.columns))
+        ]
+        assert _BRACKET_USER in cells
+        assert _BRACKET_COMPONENT in cells
+        panel = view.query_one("#entry-detail-panel", EntryDetailPanel)
+        panel.show_entry(entry)
+        await pilot.pause()
+        assert "[/type]" in _rendered(panel.query_one("#detail-title", Static))
+
+        # stats
+        view = await _show_and_load(app, pilot, "s")
+        assert _BRACKET_USER in _rendered(view.query_one("#user-ranking", Static))
+        assert "[/act]" in _rendered(view.query_one("#stats-action-chart", Static))
+
+        # monitor: one poll with a fired alert whose name and message have brackets
+        fired = FiredAlert(
+            rule_name="[/rule]", message="[bold]msg[/", entry=entry, panel=MagicMock()
+        )
+        monkeypatch.setattr(state, "check_alerts", lambda entries: [fired])
+        screen = await _start_monitor_without_loop(app, pilot, monkeypatch)
+        assert isinstance(screen, MonitorScreen)
+        screen._last_poll_time = screen._last_poll_time or __import__("datetime").datetime.now(
+            __import__("datetime").UTC
+        )
+        await _drive_poll(screen, pilot)
+        assert await _wait_for(lambda: len(app._notifications) > 0, pilot)
+        assert any("[/rule]" in n.message for n in app._notifications)
+        await pilot.pause()
+        screen._show_error(_BRACKET_ERROR)
+        screen._show_warning("[/warn]")
+        await pilot.pause()
+
+        # settings: verify with an API error body
+        state.client.verify_connection.return_value = {
+            "connected": False,
+            "authenticated": False,
+            "error": _BRACKET_ERROR,
+        }
+        view = await _show_and_load(app, pilot, "c")
+        assert _BRACKET_ERROR in _rendered(view.query_one("#connection-status", Static))
+
+
+_LITERAL_CASES = ["[/b]x", "[bold]msg[/", "[/", "tail\\", "a\\[b]", "[/]", "[$danger]"]
+
+
+@pytest.mark.parametrize("text", _LITERAL_CASES)
+def test_literal_survives_markup_parsing(text):
+    from textual.content import Content
+
+    from cja_audit_log_monitor.formatters import literal, resolve_tcss_markup
+
+    markup = f"[$danger]{literal(text)}[/$danger]\n[b]x[/b]"
+    content = Content.from_markup(resolve_tcss_markup(markup))
+    assert content.plain.split("\n")[0].rstrip("​") == text
