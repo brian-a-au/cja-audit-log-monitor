@@ -75,7 +75,14 @@ def handle_cli_errors(func: Callable[P, R]) -> Callable[P, R]:
         except BrokenPipeError:
             # Reader closed the pipe (e.g. `| head`). Point stdout at devnull so the
             # interpreter's exit flush does not raise again, and leave quietly.
-            os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+            try:
+                devnull = os.open(os.devnull, os.O_WRONLY)
+                try:
+                    os.dup2(devnull, sys.stdout.fileno())
+                finally:
+                    os.close(devnull)
+            except (OSError, ValueError):  # stdout has no real fd (e.g. under test)
+                pass
             sys.exit(1)
         except ConfigError as e:
             label = "Configuration error"

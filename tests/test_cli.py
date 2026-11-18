@@ -1948,7 +1948,9 @@ class TestEmptyResultsAndStreams:
 
         result = runner.invoke(main, ["cli", "list", "-F", "json"])
 
+        assert isinstance(result.exception, SystemExit)
         assert result.exit_code == 1
+        assert result.stderr == ""
         assert "Broken pipe" not in result.output
         assert "File error" not in result.output
 
