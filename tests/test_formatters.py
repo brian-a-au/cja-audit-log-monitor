@@ -313,3 +313,62 @@ def test_alert_time_names_utc():
     console = Console(file=io.StringIO(), width=100, record=True, color_system=None)
     console.print(format_alert(entry, "rule", "fired"))
     assert "2026-11-17 23:25:13 UTC" in console.export_text()
+
+
+class TestDataIsNotMarkup:
+    """API-supplied text must render literally, never as Rich markup."""
+
+    @staticmethod
+    def _render(renderable) -> str:
+        from rich.console import Console
+
+        buf = io.StringIO()
+        Console(file=buf, width=200).print(renderable)
+        return buf.getvalue()
+
+    @staticmethod
+    def _entry(**overrides) -> AuditLogEntry:
+        fields = {
+            "id": "e1",
+            "timestamp": datetime(2024, 1, 15, 10, 30, tzinfo=UTC),
+            "user_id": "u1",
+            "user_email": "[/]evil@example.com",
+            "action": "CREATE",
+            "component_type": "PROJECT",
+            "component_id": "c1",
+            "component_name": "[bold]x[/bold]",
+            "description": "Q3 [/final] report",
+            "ip_address": "1.2.3.4",
+        }
+        fields.update(overrides)
+        return AuditLogEntry(**fields)
+
+    def test_logs_table_shows_brackets_literally(self) -> None:
+        out = self._render(format_logs_table([self._entry()], show_details=True))
+        assert "[bold]x[/bold]" in out
+        assert "Q3 [/final] report" in out
+        assert "[/]evil@example.com" in out
+
+    def test_single_entry_panel_shows_brackets_literally(self) -> None:
+        out = self._render(format_single_entry(self._entry(component_type="[/x]")))
+        assert "[bold]x[/bold]" in out
+        assert "Q3 [/final] report" in out
+        assert "[/x]" in out
+
+    def test_stats_and_user_tables_show_brackets_literally(self) -> None:
+        from cja_audit_log_monitor.formatters import (
+            format_action_stats_table,
+            format_user_stats_table,
+        )
+
+        assert "[/]evil" in self._render(format_user_stats_table([("[/]evil", 3)]))
+        assert "[/odd]" in self._render(format_action_stats_table({"[/odd]": 3}))
+        panel = format_stats_panel({"top_users": [("[/]evil", 2)]})
+        assert "[/]evil" in self._render(panel)
+
+    def test_alert_panel_shows_brackets_literally(self) -> None:
+        from cja_audit_log_monitor.formatters import format_alert
+
+        out = self._render(format_alert(self._entry(), "Rule [/x]", "msg [/y]"))
+        assert "Rule [/x]" in out
+        assert "msg [/y]" in out

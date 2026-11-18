@@ -1601,3 +1601,113 @@ class TestJsonOutputIsMachineSafe:
         data = json.loads(result.stdout)
         if has_name:
             assert data["entries"][0]["component_name"] == self.NAME
+
+
+def _fake_client(entries):
+    client = MagicMock()
+    client.get_all_logs.return_value = entries
+    client.__enter__ = MagicMock(return_value=client)
+    client.__exit__ = MagicMock(return_value=False)
+    return client
+
+
+class TestDataIsNotMarkup:
+    """Names from the API render literally; they are never Rich markup."""
+
+    @patch("cja_audit_log_monitor.cli.get_client")
+    def test_list_shows_bracketed_component_name(
+        self, mock_get_client: MagicMock, runner: CliRunner, sample_audit_entry
+    ) -> None:
+        entry = sample_audit_entry.model_copy(update={"component_name": "Q3 [/final] report"})
+        mock_get_client.return_value = (_fake_client([entry]), MagicMock())
+
+        result = runner.invoke(main, ["cli", "list"], env={"COLUMNS": "200"})
+
+        assert result.exit_code == 0, result.output
+        assert "Q3 [/final] report" in result.output
+
+    @patch("cja_audit_log_monitor.cli.get_client")
+    def test_stats_survives_bracketed_user_id(
+        self, mock_get_client: MagicMock, runner: CliRunner, sample_audit_entry
+    ) -> None:
+        entry = sample_audit_entry.model_copy(
+            update={"user_id": "[/]evil", "user_email": None, "user_name": None}
+        )
+        mock_get_client.return_value = (_fake_client([entry]), MagicMock())
+
+        result = runner.invoke(main, ["cli", "stats"], env={"COLUMNS": "200"})
+
+        assert result.exit_code == 0, result.output
+        assert "[/]evil" in result.output
+
+
+class TestHandleCliErrors:
+    """One shared handler turns known failures into a clean stderr message."""
+
+    @patch("cja_audit_log_monitor.cli.get_client")
+    def test_api_error_text_is_shown_literally_on_stderr(
+        self, mock_get_client: MagicMock, runner: CliRunner
+    ) -> None:
+        from cja_audit_log_monitor.client import APIError
+
+        client = _fake_client([])
+        client.get_all_logs.side_effect = APIError("boom [/oops]")
+        mock_get_client.return_value = (client, MagicMock())
+
+        result = runner.invoke(main, ["cli", "list"])
+
+        assert result.exit_code == 1
+        assert "[/oops]" in result.stderr
+        assert "[/oops]" not in result.stdout
+
+    @patch("cja_audit_log_monitor.cli.get_client")
+    def test_config_error_message_keeps_pydantic_brackets(
+        self, mock_get_client: MagicMock, runner: CliRunner
+    ) -> None:
+        from cja_audit_log_monitor.config import ConfigError
+
+        message = (
+            "1 validation error for CJASettings\n"
+            "default_page_size\n  Input should be a valid integer "
+            "[type=int_parsing, input_value='x', input_type=str]"
+        )
+        mock_get_client.side_effect = ConfigError(message, "short")
+
+        result = runner.invoke(main, ["cli", "list"], env={"COLUMNS": "200"})
+
+        assert result.exit_code == 1
+        assert "[type=int_parsing, input_value='x', input_type=str]" in result.stderr
+
+    @patch("cja_audit_log_monitor.cli.get_client")
+    def test_os_error_exits_1(
+        self, mock_get_client: MagicMock, runner: CliRunner, tmp_path
+    ) -> None:
+        client = _fake_client([])
+        mock_get_client.return_value = (client, MagicMock())
+        target = tmp_path / "missing-dir" / "out.json"
+        client.get_all_logs.return_value = [MagicMock()]
+
+        with patch(
+            "cja_audit_log_monitor.cli.export_entries", side_effect=OSError("disk [/full]")
+        ):
+            result = runner.invoke(main, ["cli", "export", "-o", str(target)])
+
+        assert result.exit_code == 1
+        assert "disk [/full]" in result.stderr
+
+    def test_usage_errors_still_exit_2(self, runner: CliRunner) -> None:
+        result = runner.invoke(main, ["cli", "list", "--limit", "abc"])
+        assert result.exit_code == 2
+
+    @patch("cja_audit_log_monitor.cli.get_client")
+    def test_keyboard_interrupt_is_not_swallowed(
+        self, mock_get_client: MagicMock, runner: CliRunner
+    ) -> None:
+        client = _fake_client([])
+        client.get_all_logs.side_effect = KeyboardInterrupt
+        mock_get_client.return_value = (client, MagicMock())
+
+        result = runner.invoke(main, ["cli", "list"])
+
+        assert result.exit_code != 0
+        assert isinstance(result.exception, (KeyboardInterrupt, SystemExit))

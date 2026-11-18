@@ -182,7 +182,7 @@ class AuditLogMonitor:
             if self.notification_manager:
                 warning = self.notification_manager.pop_first_failure()
                 if warning:
-                    self.console.print(f"[yellow]{warning}[/yellow]")
+                    self.console.print(f"[yellow]{escape(str(warning))}[/yellow]")
 
         self._display_entry(entry)
 
