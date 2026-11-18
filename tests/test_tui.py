@@ -1429,7 +1429,9 @@ class TestLogBrowserMessages:
     """The log browser explains an empty table instead of showing a blank grid."""
 
     async def test_connection_error_is_shown_in_view(self, mock_app_state):
-        mock_app_state.client.get_logs.side_effect = RuntimeError(
+        from cja_audit_log_monitor.auth import AuthenticationError
+
+        mock_app_state.client.get_logs.side_effect = AuthenticationError(
             "invalid_client: invalid client_secret parameter"
         )
         app = _make_app(mock_app_state)
@@ -1710,3 +1712,99 @@ class TestReviewFixes:
             await app.workers.wait_for_complete()
             await pilot.pause()
         assert threads == [False]
+
+
+class TestErrorKinds:
+    """Views name the kind of failure, and the header tracks the connection."""
+
+    @pytest.mark.parametrize(
+        ("exc", "kind"),
+        [
+            ("auth", "connection"),
+            ((None,), "connection"),
+            ((401,), "connection"),
+            ((403,), "access"),
+            ((400,), "rejected"),
+            ((500,), "other"),
+            ("value", "other"),
+        ],
+    )
+    def test_classify(self, exc, kind):
+        from cja_audit_log_monitor.auth import AuthenticationError
+        from cja_audit_log_monitor.client import APIError
+        from cja_audit_log_monitor.tui.screens.base import classify_error
+
+        if exc == "auth":
+            error = AuthenticationError("invalid_client")
+        elif exc == "value":
+            error = ValueError("boom")
+        else:
+            error = APIError("failed", status_code=exc[0])
+        assert classify_error(error) == kind
+
+    async def test_stats_bad_request_is_not_called_not_connected(self, mock_app_state):
+        from cja_audit_log_monitor.client import APIError
+
+        mock_app_state.client.get_logs_sample.side_effect = APIError(
+            "API request failed: 400 - invalid_parameters", status_code=400
+        )
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, "s")
+            text = _empty_text(view)
+            assert "request rejected" in text
+            assert "not connected" not in text
+            assert "disconnected" not in str(app.query_one("#status-row").render())
+
+    async def test_logs_forbidden_says_access_denied(self, mock_app_state):
+        from cja_audit_log_monitor.client import APIError
+
+        mock_app_state.client.get_logs.side_effect = APIError(
+            "API request failed: 403 - forbidden", status_code=403
+        )
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, "l")
+            assert "access denied" in str(view.query_one("#table-message", Static).render())
+
+    async def test_login_failure_in_any_view_updates_header(self, mock_app_state):
+        from cja_audit_log_monitor.auth import AuthenticationError
+
+        mock_app_state.client.get_logs.side_effect = AuthenticationError(
+            "invalid_client: invalid client_secret parameter\nCheck that CLIENT_ID is right."
+        )
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await _show_and_load(app, pilot, "l")
+            header = str(app.query_one("#status-row").render())
+            assert "disconnected" in header
+            assert "invalid client_secret parameter" in header
+            assert "\n" not in header
+            assert "CLIENT_ID" not in header
+
+    async def test_header_recovers_after_a_good_load(self, mock_app_state):
+        from cja_audit_log_monitor.auth import AuthenticationError
+
+        mock_app_state.client.get_logs.side_effect = AuthenticationError("expired")
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await _show_and_load(app, pilot, "l")
+            assert "disconnected" in str(app.query_one("#status-row").render())
+            mock_app_state.client.get_logs.side_effect = None
+            await _show_and_load(app, pilot, "l")
+            header = str(app.query_one("#status-row").render())
+            assert "● connected" in header
+
+
+async def test_alert_test_login_failure_updates_header(mock_app_state):
+    from cja_audit_log_monitor.auth import AuthenticationError
+
+    mock_app_state.client.get_all_logs.side_effect = AuthenticationError("expired")
+    app = _make_app(mock_app_state)
+    async with app.run_test(size=(140, 40)) as pilot:
+        await pilot.press("a")
+        await pilot.pause()
+        await pilot.click("#test-rules")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert "disconnected" in str(app.query_one("#status-row").render())

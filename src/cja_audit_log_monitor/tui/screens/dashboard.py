@@ -16,6 +16,7 @@ from ..state import AppState
 from ..widgets import ActionBarChart, HourlyChart
 from .base import (
     ContentView,
+    error_message,
     no_activity_message,
     not_connected_message,
     sample_note,
@@ -127,9 +128,14 @@ class DashboardScreen(ContentView):
             self.app.call_from_thread(self._update_stats, stats, anomalies, hourly, total)
 
         except Exception as e:
-            self.app.call_from_thread(self._show_disconnected, str(e))
+            self.app.call_from_thread(self._show_error, e)
         finally:
             self.app.call_from_thread(self.set_loading, False)
+
+    def _show_error(self, error: Exception) -> None:
+        """Report a failed API call in the view, and in the header if it was a connection."""
+        self.app.note_api_error(error)
+        self.set_empty_state(error_message(error))
 
     def _show_disconnected(self, error: str) -> None:
         """Report a failed connection in the header and the view."""
