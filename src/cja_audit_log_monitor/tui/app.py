@@ -6,7 +6,7 @@ from typing import Literal
 from textual import events
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.css.query import NoMatches
 from textual.message import Message
 from textual.screen import ModalScreen
@@ -72,7 +72,7 @@ class HelpScreen(ModalScreen):
     def compose(self) -> ComposeResult:
         """Compose help screen content."""
         key_width = max(len(key) for _, rows in HELP_SECTIONS for key, _ in rows) + 2
-        with Vertical(id="help-overlay"):
+        with VerticalScroll(id="help-overlay"):
             yield Static("keyboard shortcuts", id="help-title", classes="modal-title")
             for title, rows in HELP_SECTIONS:
                 yield Static(title.upper(), classes="section-label help-section")

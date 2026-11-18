@@ -134,7 +134,7 @@ Screen.-narrow #sidebar .nav-item.active {
 .stat-card,
 .settings-section,
 .rule-card,
-#monitor-status {
+.monitor-status {
     height: auto;
     padding: 1 2;
     background: $surface;
@@ -163,6 +163,11 @@ Screen.-narrow #sidebar .nav-item.active {
     width: 1fr;
     height: 5;
     margin: 0 1 0 0;
+}
+
+/* Tighter padding at 80 columns so labels like "total entries" stay on one line. */
+Screen.-narrow .stat-card {
+    padding: 1 1;
 }
 
 .stat-value {
@@ -301,6 +306,10 @@ AlertSummary {
     border-left: heavy $danger;
 }
 
+.monitor-error {
+    border-left: heavy $warning;
+}
+
 #alert-summary {
     max-height: 8;
 }
@@ -424,7 +433,7 @@ ExportDialog .modal-buttons Button {
 /* ---- Settings ---- */
 #settings-grid {
     layout: grid;
-    grid-size: 2;
+    grid-size: 1;
     grid-gutter: 1 2;
     height: auto;
     margin: 1 0 0 0;
@@ -432,6 +441,11 @@ ExportDialog .modal-buttons Button {
 
 .settings-section {
     margin: 0;
+}
+
+/* Two columns only from 160 columns: a 36-character config path needs a wide column. */
+Screen.-wide #settings-grid {
+    grid-size: 2;
 }
 
 .settings-row {
@@ -488,6 +502,7 @@ HelpScreen {
 
 #help-overlay {
     width: 56;
+    max-width: 100%;
     height: auto;
     max-height: 100%;
     padding: 1 2;
@@ -603,6 +618,20 @@ ContentView LoadingIndicator {
 #dash-right {
     width: 1fr;
     height: auto;
+}
+
+/* From 160 columns the dashboard fills the terminal: the hourly chart takes the spare rows. */
+Screen.-wide #dash-columns {
+    height: 1fr;
+    min-height: 12;
+}
+
+Screen.-wide #dash-left {
+    height: 1fr;
+}
+
+Screen.-wide #hourly-chart {
+    height: 1fr;
 }
 
 /* ---- Status indicators (used in dashboard/connection text) ---- */

@@ -3967,3 +3967,76 @@ class TestNarrowLayout:
             await pilot.pause()
             await pilot.click("#nav-logs")
             assert await _wait_for(lambda: app._current_screen == "logs", pilot)
+
+
+class TestConfigHelpDashboardFit:
+    """The config view, help overlay and dashboard fit every terminal size."""
+
+    @staticmethod
+    def _value_for(view, label: str):
+        from textual.widgets import Static as _Static
+
+        for row in view.query(".settings-row"):
+            texts = [str(w.render()) for w in row.query(_Static)]
+            if texts and texts[0].strip() == label:
+                return row.query(".settings-value").first()
+        raise AssertionError(f"no config row {label!r}")
+
+    async def test_config_shows_api_url_at_80_columns(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.press("c")
+            await pilot.pause()
+            value = self._value_for(app._screens["settings"], "api base url")
+            assert value.region.width >= len(str(mock_app_state.settings.api_base_url))
+            assert str(mock_app_state.settings.api_base_url) in str(value.render())
+
+    async def test_config_path_on_one_line_at_100_columns(self, mock_app_state):
+        from pathlib import Path
+
+        mock_app_state._config_path = Path.home() / ".cja-audit-log-monitor" / "config.yaml"
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(100, 30)) as pilot:
+            await pilot.press("c")
+            await pilot.pause()
+            value = self._value_for(app._screens["settings"], "config file")
+            assert value.region.height == 1
+            assert "config.yaml" in str(value.render())
+
+    async def test_help_body_scrolls_with_keyboard_at_80x24(self, mock_app_state):
+        from textual.containers import VerticalScroll
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            await pilot.press("question_mark")
+            assert await _wait_for(lambda: isinstance(app.screen, HelpScreen), pilot)
+            body = app.screen.query_one("#help-overlay")
+            assert isinstance(body, VerticalScroll)
+            assert await _wait_for(lambda: app.screen.focused is body, pilot)
+            assert body.max_scroll_y > 0
+            await pilot.press("pagedown")
+            assert await _wait_for(lambda: body.scroll_y > 0, pilot)
+
+    async def test_dashboard_charts_grow_on_wide_terminals(self, mock_app_state):
+        heights = {}
+        for size in [(140, 42), (200, 60)]:
+            app = _make_app(mock_app_state)
+            async with app.run_test(size=size) as pilot:
+                view = await _show_and_load(app, pilot, "d")
+                heights[size] = view.query_one("#hourly-chart").region.height
+        assert heights[(200, 60)] > heights[(140, 42)], heights
+
+    async def test_monitor_status_border_follows_state(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 42)) as pilot:
+            await pilot.press("m")
+            await pilot.pause()
+            view = app._screens["monitor"]
+            row = view.query_one("#monitor-status")
+            colors = {}
+            for state in ("stopped", "running", "error"):
+                view._set_status(state)
+                await pilot.pause()
+                colors[state] = row.styles.border_left[1]
+            assert len({str(c) for c in colors.values()}) == 3, colors
