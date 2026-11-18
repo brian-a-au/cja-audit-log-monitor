@@ -3919,3 +3919,51 @@ class TestNarrowLayout:
             await pilot.pause()
             assert app.screen.has_class("-normal")
             assert app.query_one("#sidebar").region.width == 22
+
+    @staticmethod
+    def _label(app, nav_id: str) -> str:
+        return str(app.screen_stack[0].query_one(f"#{nav_id}").render()).strip()
+
+    async def test_command_palette_opens_with_ctrl_p(self, mock_app_state):
+        from textual.command import CommandPalette
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            await pilot.press("ctrl+p")
+            assert await _wait_for(lambda: isinstance(app.screen, CommandPalette), pilot)
+
+    async def test_narrow_nav_label_is_key_only(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            assert self._label(app, "nav-logs") == "l"
+
+    async def test_labels_follow_resize(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.pause()
+            assert self._label(app, "nav-logs") == "l logs"
+            await pilot.resize_terminal(80, 24)
+            assert await _wait_for(lambda: self._label(app, "nav-logs") == "l", pilot)
+            await pilot.resize_terminal(140, 40)
+            assert await _wait_for(lambda: self._label(app, "nav-logs") == "l logs", pilot)
+
+    async def test_resize_under_modal_updates_labels(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.pause()
+            await pilot.press("question_mark")
+            assert await _wait_for(lambda: isinstance(app.screen, HelpScreen), pilot)
+            await pilot.resize_terminal(80, 24)
+            assert await _wait_for(lambda: self._label(app, "nav-logs") == "l", pilot)
+            await pilot.press("escape")
+            assert await _wait_for(lambda: not isinstance(app.screen, HelpScreen), pilot)
+            assert self._label(app, "nav-logs") == "l"
+
+    async def test_click_nav_item_at_80_columns(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            await pilot.click("#nav-logs")
+            assert await _wait_for(lambda: app._current_screen == "logs", pilot)

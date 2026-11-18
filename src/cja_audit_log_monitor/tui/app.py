@@ -122,6 +122,7 @@ class CJAAuditApp(App):
         self._current_screen = "dashboard"
         self._screens: dict[str, ContentView] = {}
         self._mounted_views: set[str] = set()
+        self._nav_narrow: bool | None = None
 
     NAV_KEYS = {
         "nav-dashboard": "d",
@@ -244,9 +245,19 @@ class CJAAuditApp(App):
         # Show dashboard by default
         await self._show_screen("dashboard")
 
-    def on_resize(self) -> None:
-        """Re-render the sidebar labels when the width crosses the narrow breakpoint."""
-        for item in self.query("#sidebar .nav-item"):
+    async def _on_resize(self, event: events.Resize) -> None:
+        """Re-render the sidebar labels when the width crosses the narrow breakpoint.
+
+        Textual's own handler stops the event before a plain ``on_resize`` would run,
+        so this extends it. Nav items are looked up on the base screen, because
+        ``App.query`` only sees the active screen (a modal may be open).
+        """
+        await super()._on_resize(event)
+        narrow = event.size.width < self._NARROW_BELOW
+        if narrow == self._nav_narrow:
+            return
+        self._nav_narrow = narrow
+        for item in self.screen_stack[0].query("#sidebar .nav-item"):
             item.update(self._nav_text(item.id, item.has_class("active")))
 
     async def _show_screen(self, screen_name: str) -> None:
