@@ -2,6 +2,7 @@
 
 import json
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -359,6 +360,117 @@ class TestVerifyCommand:
         assert '"connected"' in result.output
 
 
+class TestExportSafety:
+    """Export to stdout, no silent overwrite, clean errors."""
+
+    @staticmethod
+    def _client(entries):
+        client = MagicMock()
+        client.get_all_logs.return_value = entries
+        client.get_logs_paginated.return_value = iter(entries)
+        client.__enter__ = MagicMock(return_value=client)
+        client.__exit__ = MagicMock(return_value=False)
+        return client
+
+    @patch("cja_audit_log_monitor.cli.get_client")
+    def test_export_dash_writes_json_to_stdout(
+        self, mock_get_client: MagicMock, runner: CliRunner, sample_audit_entries
+    ) -> None:
+        mock_get_client.return_value = (self._client(sample_audit_entries), MagicMock())
+
+        with runner.isolated_filesystem():
+            result = runner.invoke(main, ["cli", "export", "-o", "-", "--days", "1"])
+            assert not Path("-").exists()
+
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.stdout)
+        assert data["count"] == len(sample_audit_entries)
+        assert "Exported" in result.stderr
+
+    @patch("cja_audit_log_monitor.cli.get_client")
+    def test_export_dash_csv_to_stdout(
+        self, mock_get_client: MagicMock, runner: CliRunner, sample_audit_entries
+    ) -> None:
+        mock_get_client.return_value = (self._client(sample_audit_entries), MagicMock())
+
+        result = runner.invoke(main, ["cli", "export", "-f", "csv", "-o", "-", "--days", "1"])
+
+        assert result.exit_code == 0, result.output
+        assert result.stdout.splitlines()[0].startswith("id,timestamp")
+        assert "Exported" not in result.stdout
+
+    @patch("cja_audit_log_monitor.cli.get_client")
+    def test_existing_file_refused_before_fetch(
+        self, mock_get_client: MagicMock, runner: CliRunner, tmp_path
+    ) -> None:
+        target = tmp_path / "out.json"
+        target.write_text("old")
+
+        result = runner.invoke(main, ["cli", "export", "-o", str(target)])
+
+        assert result.exit_code == 1
+        assert "--force" in result.stderr
+        assert target.read_text() == "old"
+        mock_get_client.assert_not_called()
+
+    @patch("cja_audit_log_monitor.cli.get_client")
+    def test_force_overwrites(
+        self, mock_get_client: MagicMock, runner: CliRunner, sample_audit_entries, tmp_path
+    ) -> None:
+        mock_get_client.return_value = (self._client(sample_audit_entries), MagicMock())
+        target = tmp_path / "out.json"
+        target.write_text("old")
+
+        result = runner.invoke(main, ["cli", "export", "-o", str(target), "--force"])
+
+        assert result.exit_code == 0, result.output
+        assert json.loads(target.read_text())["count"] == len(sample_audit_entries)
+
+    @patch("cja_audit_log_monitor.cli.get_client")
+    def test_missing_directory_is_one_line_error(
+        self, mock_get_client: MagicMock, runner: CliRunner, sample_audit_entries, tmp_path
+    ) -> None:
+        mock_get_client.return_value = (self._client(sample_audit_entries), MagicMock())
+        target = tmp_path / "missing" / "x.csv"
+
+        result = runner.invoke(
+            main, ["cli", "export", "-f", "csv", "-o", str(target)], env={"COLUMNS": "500"}
+        )
+
+        assert result.exit_code == 1
+        assert "Traceback" not in result.stderr
+        assert result.stderr.strip().count("\n") == 0  # one line, before any fetch
+        assert "File error" in result.stderr
+        mock_get_client.assert_not_called()
+
+    @patch("cja_audit_log_monitor.cli.get_client")
+    def test_report_truncated_only_when_total_exceeds_cap(
+        self, mock_get_client: MagicMock, runner: CliRunner, sample_audit_entries
+    ) -> None:
+        entries = sample_audit_entries[:2]
+        mock_get_client.return_value = (self._client(entries), MagicMock())
+
+        exact = runner.invoke(main, ["cli", "report", "--max-entries", "2"])
+        over = runner.invoke(main, ["cli", "report", "--max-entries", "1"])
+
+        assert json.loads(exact.stdout)["truncated"] is False
+        assert "truncated" not in exact.stderr.lower()
+        assert json.loads(over.stdout)["truncated"] is True
+
+    @patch("cja_audit_log_monitor.cli.get_client")
+    def test_report_refuses_existing_file(
+        self, mock_get_client: MagicMock, runner: CliRunner, tmp_path
+    ) -> None:
+        target = tmp_path / "r.json"
+        target.write_text("old")
+
+        result = runner.invoke(main, ["cli", "report", "-o", str(target)])
+
+        assert result.exit_code == 1
+        assert "--force" in result.stderr
+        mock_get_client.assert_not_called()
+
+
 class TestReportCommand:
     """Tests for report command."""
 
@@ -408,7 +520,7 @@ class TestReportCommand:
     ) -> None:
         """Test report command forwards --max-entries to client fetch."""
         mock_client = MagicMock()
-        mock_client.get_all_logs.return_value = sample_audit_entries[:1]
+        mock_client.get_all_logs.return_value = sample_audit_entries[:2]
         mock_client.__enter__ = MagicMock(return_value=mock_client)
         mock_client.__exit__ = MagicMock(return_value=False)
         mock_get_client.return_value = (mock_client, MagicMock())
@@ -416,7 +528,7 @@ class TestReportCommand:
         result = runner.invoke(main, ["cli", "report", "--days", "1", "--max-entries", "1"])
         assert result.exit_code == 0
         _, kwargs = mock_client.get_all_logs.call_args
-        assert kwargs["max_entries"] == 1
+        assert kwargs["max_entries"] == 2  # one extra entry detects truncation
         assert '"truncated": true' in result.output
 
 
@@ -1684,7 +1796,7 @@ class TestHandleCliErrors:
     ) -> None:
         client = _fake_client([])
         mock_get_client.return_value = (client, MagicMock())
-        target = tmp_path / "missing-dir" / "out.json"
+        target = tmp_path / "out.json"
         client.get_all_logs.return_value = [MagicMock()]
 
         with patch(
