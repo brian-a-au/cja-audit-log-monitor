@@ -3,10 +3,12 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+import pytest
 import yaml
 
 from cja_audit_log_monitor.config import (
     CJASettings,
+    ConfigError,
     create_default_config,
     load_config,
     save_config,
@@ -102,6 +104,26 @@ class TestLoadConfig:
 
             settings = load_config(config_path)
             assert settings.default_page_size == 100  # Default value
+
+
+class TestBadConfigFile:
+    """A bad config file raises ConfigError naming the file."""
+
+    @pytest.mark.parametrize(
+        "text", ["- a\n- b\n", "hello\n", "monitor_interval: [1, \n", "monitor_interval: abc\n"]
+    )
+    def test_invalid_file_raises_config_error(self, tmp_path: Path, text: str) -> None:
+        path = tmp_path / "config.yaml"
+        path.write_text(text)
+        with pytest.raises(ConfigError, match=str(path)):
+            load_config(path)
+
+    def test_unknown_key_warns(self, tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+        path = tmp_path / "config.yaml"
+        path.write_text("monitor_intervall: 5\n")
+        with caplog.at_level("WARNING"):
+            load_config(path)
+        assert "monitor_intervall" in caplog.text
 
 
 class TestConfigPriority:

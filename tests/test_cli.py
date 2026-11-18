@@ -1480,3 +1480,13 @@ class TestAnomaliesCommand:
         finally:
             signal_mod.signal(signal_mod.SIGINT, prior_int)
             signal_mod.signal(signal_mod.SIGTERM, prior_term)
+
+
+class TestBadConfigFile:
+    def test_invalid_config_exits_cleanly(self, tmp_path) -> None:
+        path = tmp_path / "config.yaml"
+        path.write_text("monitor_interval: [1, \n")
+        result = CliRunner().invoke(main, ["-c", str(path), "cli", "list"])
+        assert result.exit_code == 1
+        assert str(path) in result.output.replace("\n", "")
+        assert "Traceback" not in result.output

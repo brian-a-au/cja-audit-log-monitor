@@ -1,12 +1,13 @@
 """Configuration handling for CJA Audit CLI."""
 
+import logging
 import os
 from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import Field, field_validator
+from pydantic import Field, ValidationError, field_validator
 from pydantic.fields import FieldInfo
 from pydantic_settings import (
     BaseSettings,
@@ -16,11 +17,17 @@ from pydantic_settings import (
 
 from .models import AlertRule, NotificationConfig
 
+logger = logging.getLogger(__name__)
+
 DEFAULT_CONFIG_DIR = Path.home() / ".cja-audit-log-monitor"
 DEFAULT_CONFIG_FILE = DEFAULT_CONFIG_DIR / "config.yaml"
 
 # Parsed YAML for the load_config call in progress; read by ConfigFileSource.
 _config_file_data: ContextVar[dict[str, Any]] = ContextVar("_config_file_data", default={})
+
+
+class ConfigError(Exception):
+    """The config file could not be read or holds invalid settings."""
 
 
 class ConfigFileSource(PydanticBaseSettingsSource):
@@ -129,13 +136,24 @@ def load_config(config_path: Path | None = None) -> CJASettings:
     # Load from YAML config file if it exists
     if config_path.exists():
         with open(config_path) as f:
-            yaml_config = yaml.safe_load(f)
-            if yaml_config:
-                config_data.update(yaml_config)
+            try:
+                yaml_config = yaml.safe_load(f)
+            except yaml.YAMLError as e:
+                detail = (str(e).strip().splitlines() or ["unknown error"])[0]
+                raise ConfigError(f"{config_path}: not valid YAML ({detail})") from e
+        if yaml_config is not None and not isinstance(yaml_config, dict):
+            raise ConfigError(f"{config_path}: expected a mapping of settings at the top level")
+        if yaml_config:
+            config_data.update(yaml_config)
+            for key in config_data:
+                if key not in CJASettings.model_fields:
+                    logger.warning("%s: ignoring unknown setting %r", config_path, key)
 
     token = _config_file_data.set(config_data)
     try:
         return CJASettings()
+    except ValidationError as e:
+        raise ConfigError(f"{config_path}: {e}") from e
     finally:
         _config_file_data.reset(token)
 

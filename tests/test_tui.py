@@ -2082,3 +2082,14 @@ async def test_lists_stay_blank_until_data_loads(mock_app_state, key, widget_id)
         await pilot.pause()
         view = app._screens[app._current_screen]
         assert "no audit activity" not in _plain(view.query_one(widget_id, Static))
+
+
+def test_state_survives_bad_config_file(tmp_path) -> None:
+    """A bad config file is reported, not raised, when the TUI reads settings."""
+    from cja_audit_log_monitor.tui.state import AppState
+
+    path = tmp_path / "config.yaml"
+    path.write_text("monitor_interval: [1, \n")
+    state = AppState(path)
+    assert state.settings.monitor_interval == 60
+    assert str(path) in (state.config_error or "")

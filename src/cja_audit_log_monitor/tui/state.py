@@ -8,7 +8,7 @@ from pathlib import Path
 from ..alerts import AlertEngine, FiredAlert
 from ..auth import TokenManager
 from ..client import AuditLogsClient
-from ..config import CJASettings, get_config_path, load_config
+from ..config import CJASettings, ConfigError, get_config_path, load_config
 from ..models import ActionType, AuditLogEntry, AuditLogQuery, ComponentType
 from ..notifications import NotificationManager
 
@@ -96,13 +96,20 @@ class AppState:
         # Connection state
         self.is_connected: bool = False
         self.connection_error: str | None = None
+        self.config_error: str | None = None
         self.last_refresh: datetime | None = None
 
     @property
     def settings(self) -> CJASettings:
         """Get settings, loading if necessary."""
         if self._settings is None:
-            self._settings = load_config(self.config_path)
+            try:
+                self._settings = load_config(self.config_path)
+            except ConfigError as e:
+                # Keep the app usable: fall back to env-only settings and
+                # let the header show what is wrong with the file.
+                self.config_error = str(e)
+                self._settings = load_config(Path("/nonexistent/config.yaml"))
         return self._settings
 
     @property
