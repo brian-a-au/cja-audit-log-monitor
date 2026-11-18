@@ -96,6 +96,23 @@ FooterKey:hover {
     padding: 0 1;        /* offset to compensate for the left border */
 }
 
+/* Narrow terminals (< 100 columns): the sidebar shows only the key letters. */
+Screen.-narrow #sidebar {
+    width: 5;
+}
+
+Screen.-narrow #sidebar .nav-section-label {
+    display: none;
+}
+
+Screen.-narrow #sidebar .nav-item {
+    padding: 0 1;
+}
+
+Screen.-narrow #sidebar .nav-item.active {
+    padding: 0;
+}
+
 /* ---- Main content ---- */
 #main-content {
     width: 1fr;

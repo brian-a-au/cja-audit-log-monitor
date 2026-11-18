@@ -93,6 +93,9 @@ class CJAAuditApp(App):
 
     TITLE = "CJA Audit Log Monitor"
     CSS_PATH = "styles.tcss"
+    # Width classes on the screen (-narrow / -normal / -wide) drive layout in styles.tcss.
+    HORIZONTAL_BREAKPOINTS = [(0, "-narrow"), (100, "-normal"), (160, "-wide")]
+    _NARROW_BELOW = 100
 
     BINDINGS = [
         Binding("d", "switch_screen('dashboard')", "dashboard", show=False),
@@ -156,12 +159,15 @@ class CJAAuditApp(App):
             ),
             ContentSwitcher(id="main-content"),
         )
-        yield Footer()
+        yield Footer(show_command_palette=False)
 
     def _nav_text(self, nav_id: str, active: bool) -> str:
         """Sidebar label: active marker, the view's key, then its name."""
-        prefix = "▸ " if active else "  "
         key = self.NAV_KEYS[nav_id]
+        if self.size.width < self._NARROW_BELOW:
+            # Compact sidebar: just the key letter (the marker is the active style).
+            return resolve_tcss_markup(f"[$primary]{key}[/$primary]")
+        prefix = "▸ " if active else "  "
         return prefix + resolve_tcss_markup(
             f"[$primary]{key}[/$primary] {self.NAV_LABELS[nav_id]}"
         )
@@ -237,6 +243,11 @@ class CJAAuditApp(App):
 
         # Show dashboard by default
         await self._show_screen("dashboard")
+
+    def on_resize(self) -> None:
+        """Re-render the sidebar labels when the width crosses the narrow breakpoint."""
+        for item in self.query("#sidebar .nav-item"):
+            item.update(self._nav_text(item.id, item.has_class("active")))
 
     async def _show_screen(self, screen_name: str) -> None:
         """Show a screen in the main content area.

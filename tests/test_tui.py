@@ -3790,3 +3790,27 @@ class TestFilterDropdownEscape:
             await pilot.press("escape")
             await pilot.pause()
             assert app.focused is not select
+
+
+class TestNarrowLayout:
+    """At 80 columns the sidebar is compact and the footer still shows quit."""
+
+    async def test_narrow_sidebar_and_footer(self, mock_app_state):
+        from textual.widgets import Footer
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            assert app.screen.has_class("-narrow")
+            assert app.query_one("#sidebar").region.width <= 6
+            footer_text = " ".join(
+                str(w.render()) for w in app.query_one(Footer).query("*") if hasattr(w, "render")
+            )
+            assert "quit" in footer_text
+
+    async def test_wide_sidebar_keeps_labels(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.pause()
+            assert app.screen.has_class("-normal")
+            assert app.query_one("#sidebar").region.width == 22
