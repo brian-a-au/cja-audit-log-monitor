@@ -1,22 +1,21 @@
 """Dashboard screen showing summary statistics."""
 
 from collections.abc import Iterator
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
 from textual.containers import Horizontal, Vertical
 from textual.widget import Widget
 from textual.widgets import Button, LoadingIndicator, Static
-from textual.worker import get_current_worker
 
 from ...alerts import analyze_for_anomalies
-from ...formatters import resolve_tcss_markup
+from ...formatters import literal, resolve_tcss_markup
 from ...stats import build_date_range_query, calculate_stats, get_hourly_distribution
 from ...utils import local_tz_name
 from ..state import AppState
 from ..widgets import ActionBarChart, FittedStatic, HourlyChart
 from .base import (
     ContentView,
-    error_message,
     no_activity_message,
     not_connected_message,
     sample_note,
@@ -24,8 +23,19 @@ from .base import (
     stat_card,
 )
 
-DASHBOARD_DAYS = 7
 DASHBOARD_SAMPLE = 1000
+
+
+@dataclass
+class _DashboardLoad:
+    """What one dashboard load found. ``stats`` is None when the window was empty."""
+
+    connection: dict
+    stats: dict | None = None
+    anomalies: list = field(default_factory=list)
+    hourly: dict[int, int] = field(default_factory=dict)
+    total: int | None = None
+    error: Exception | None = None
 
 
 class DashboardScreen(ContentView):
@@ -39,7 +49,6 @@ class DashboardScreen(ContentView):
             **kwargs: Additional arguments for the view.
         """
         super().__init__(state, **kwargs)
-        self._stats: dict = {}
         self._top_users: list[tuple[str, int]] | None = None  # None until data loads
 
     def compose_header(self) -> Iterator[Widget]:
@@ -53,7 +62,7 @@ class DashboardScreen(ContentView):
             stat_card("total entries", "stat-total"),
             stat_card("active users", "stat-users"),
             stat_card("anomalies", "stat-alerts"),
-            stat_card(f"last {DASHBOARD_DAYS} days", "stat-range"),
+            stat_card(f"last {self._days} days", "stat-range"),
             classes="dashboard-stats",
         )
         yield sample_note()
@@ -88,59 +97,59 @@ class DashboardScreen(ContentView):
         """Load data the first time the dashboard is shown."""
         self.refresh_data()
 
+    @property
+    def _days(self) -> int:
+        """Days the dashboard looks back: the configured default_days."""
+        return self._state.settings.default_days
+
+    def on_settings_reloaded(self) -> None:
+        """Relabel the window for the reloaded default_days and reload."""
+        card = self.query_one("#stat-range").parent
+        card.query_one(".stat-label", Static).update(f"last {self._days} days")
+        self.refresh_data()
+
     def refresh_data(self) -> None:
         """Refresh dashboard data."""
-        self.set_loading(True)
-        self.run_worker(self._load_data(), exclusive=True, thread=True)
+        self.run_load(self._fetch, self._show_load)
 
-    async def _load_data(self) -> None:
-        """Load dashboard data."""
-        worker = get_current_worker()
-
+    def _fetch(self) -> _DashboardLoad:
+        """Check the connection, then sample and analyze the window (worker thread)."""
+        connection = self._state.verify_connection()
+        if not connection.get("connected"):
+            return _DashboardLoad(connection)
         try:
-            result = self._state.verify_connection()
-
-            if worker.is_cancelled:
-                return
-
-            if not result.get("connected"):
-                error = str(result.get("error", "connection failed"))
-                self.app.call_from_thread(self._show_disconnected, error)
-                return
-
-            self.app.call_from_thread(
-                self.app.set_connection_status,
-                "connected",
-                f"org {result.get('org_id', 'unknown')}",
+            query = build_date_range_query(self._days)
+            entries, total = self._state.client.get_logs_sample(
+                query, max_entries=DASHBOARD_SAMPLE
             )
-
-            query = build_date_range_query(DASHBOARD_DAYS)
-            entries, total = self._state.client.get_logs_sample(query, max_entries=DASHBOARD_SAMPLE)
-
-            if worker.is_cancelled:
-                return
-
             if not entries:
-                self.app.call_from_thread(
-                    self.set_empty_state, no_activity_message(DASHBOARD_DAYS)
-                )
-                return
+                return _DashboardLoad(connection)
+            return _DashboardLoad(
+                connection,
+                stats=calculate_stats(entries),
+                anomalies=analyze_for_anomalies(entries, local=True),
+                hourly=get_hourly_distribution(entries, local=True),
+                total=total,
+            )
+        except Exception as error:
+            # The connection worked, so the header says so even though this failed.
+            return _DashboardLoad(connection, error=error)
 
-            stats = calculate_stats(entries)
-            anomalies = analyze_for_anomalies(entries, local=True)
-            hourly = get_hourly_distribution(entries, local=True)
-
-            self.app.call_from_thread(self._update_stats, stats, anomalies, hourly, total)
-
-        except Exception as e:
-            self.app.call_from_thread(self._show_error, e)
-        finally:
-            self.app.call_from_thread(self.set_loading, False)
-
-    def _show_error(self, error: Exception) -> None:
-        """Report a failed API call in the view, and in the header if it was a connection."""
-        self.app.note_api_error(error)
-        self.set_empty_state(error_message(error))
+    def _show_load(self, load: _DashboardLoad) -> None:
+        """Show a finished load: disconnected, an error, no activity, or the stats."""
+        connection = load.connection
+        if not connection.get("connected"):
+            self._show_disconnected(str(connection.get("error", "connection failed")))
+            return
+        self.app.set_connection_status(
+            "connected", f"org {connection.get('org_id', 'unknown')}"
+        )
+        if load.error is not None:
+            self.show_load_error(load.error)
+        elif load.stats is None:
+            self.set_empty_state(no_activity_message(self._days))
+        else:
+            self._update_stats(load.stats, load.anomalies, load.hourly, load.total)
 
     def _show_disconnected(self, error: str) -> None:
         """Report a failed connection in the header and the view."""
@@ -151,7 +160,6 @@ class DashboardScreen(ContentView):
         self, stats: dict, anomalies: list, hourly: dict[int, int], total: int | None = None
     ) -> None:
         """Update statistics display."""
-        self._stats = stats
         self.set_empty_state(None)
 
         shown = stats.get("total_entries", 0)
@@ -160,7 +168,7 @@ class DashboardScreen(ContentView):
         show_sample_note(self, shown, total)
 
         now = datetime.now().astimezone()
-        start = now - timedelta(days=DASHBOARD_DAYS)
+        start = now - timedelta(days=self._days)
         self.query_one("#stat-range", Static).update(f"{start:%m-%d} → {now:%m-%d}")
 
         top_users = stats.get("top_users", [])
@@ -185,7 +193,9 @@ class DashboardScreen(ContentView):
 
         if anomalies:
             lines = [
-                resolve_tcss_markup(f"[$warning]⚠[/$warning] {anomaly['description']}")
+                resolve_tcss_markup(
+                    f"[$warning]⚠[/$warning] {literal(str(anomaly['description']))}"
+                )
                 for anomaly in anomalies[:5]
             ]
             self.query_one("#anomalies", Static).update("\n".join(lines))
@@ -206,14 +216,14 @@ class DashboardScreen(ContentView):
             return
         widget = self.query_one("#top-users", Static)
         if not self._top_users:
-            widget.update(no_activity_message(DASHBOARD_DAYS))
+            widget.update(no_activity_message(self._days))
             return
         # Fit "name count" on one line: count takes 6 cells (space + 5 digits).
         name_width = max(8, min(28, widget.content_region.width - 6))
         lines = []
         for user, count in self._top_users[:8]:
             name = user if len(user) <= name_width else user[: name_width - 1] + "…"
-            lines.append(f"{name:<{name_width}} {count:>5,}")
+            lines.append(f"{literal(f'{name:<{name_width}}')} {count:>5,}")
         widget.update("\n".join(lines))
 
     def on_button_pressed(self, event: Button.Pressed) -> None:

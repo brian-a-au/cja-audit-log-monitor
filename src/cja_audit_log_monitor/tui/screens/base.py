@@ -1,24 +1,29 @@
 """Base class for the views shown in the main content area."""
 
-from collections.abc import Iterator
-from typing import Literal
+import logging
+from collections.abc import Callable, Iterator
+from typing import Literal, TypeVar
 
 from textual.app import ComposeResult
 from textual.containers import Vertical
-from textual.markup import escape
 from textual.widget import Widget
 from textual.widgets import LoadingIndicator, Static
 
 from ...auth import AuthenticationError
 from ...client import APIError
-from ...formatters import resolve_tcss_markup
+from ...formatters import literal, resolve_tcss_markup
 from ..state import AppState
+from ..widgets.stats_panel import ActionBarChart, HourlyChart
+
+logger = logging.getLogger(__name__)
+
+T = TypeVar("T")
 
 
 def not_connected_message(error: str) -> str:
     """Empty-state copy shown when the API connection fails."""
     return resolve_tcss_markup(
-        f"[$danger]●[/$danger] not connected · {escape(error)}\n"
+        f"[$danger]●[/$danger] not connected · {literal(error)}\n"
         "[$text-muted]press c to open config, or run: "
         "cja-audit-log-monitor cli verify[/$text-muted]"
     )
@@ -64,7 +69,7 @@ def error_message(error: Exception) -> str:
         return not_connected_message(str(error))
     headline, hint = _ERROR_COPY[classify_error(error)]
     return resolve_tcss_markup(
-        f"[$danger]●[/$danger] {headline} · {escape(str(error))}\n"
+        f"[$danger]●[/$danger] {headline} · {literal(str(error))}\n"
         f"[$text-muted]{hint}[/$text-muted]"
     )
 
@@ -133,6 +138,8 @@ class ContentView(Vertical):
         """
         super().__init__(**kwargs)
         self._state = state
+        # Bumped by each run_load; a load whose number is no longer current is stale.
+        self._load_generation = 0
 
     def compose(self) -> ComposeResult:
         """Compose the view: header, an (initially hidden) empty state, then the body."""
@@ -169,9 +176,63 @@ class ContentView(Vertical):
             body.display = False
 
     def set_loading(self, loading: bool) -> None:
-        """Show or hide the view's loading indicator, if it has one."""
+        """Show or hide the view's loading indicator, and put its charts in "loading…"."""
         for indicator in self.query(LoadingIndicator):
             indicator.display = loading
+        for chart in self.query(ActionBarChart):
+            chart.set_loading(loading)
+        for chart in self.query(HourlyChart):
+            chart.set_loading(loading)
+
+    def run_load(
+        self,
+        fetch: Callable[[], T],
+        apply: Callable[[T], None],
+        on_error: Callable[[Exception], None] | None = None,
+    ) -> None:
+        """Load data off the UI thread and show it, unless a newer load started since.
+
+        ``fetch`` runs in a thread worker and must not touch the UI. Its result goes
+        to ``apply`` (or its exception to ``on_error``, default ``show_load_error``)
+        on the UI thread. Each call supersedes the previous one: a superseded load's
+        result or error is dropped, and only the newest load hides the loading
+        indicator.
+        """
+        self._load_generation += 1
+        generation = self._load_generation
+        handle_error = on_error or self.show_load_error
+        self.set_loading(True)
+
+        def deliver(callback: Callable, value: object) -> None:
+            if generation != self._load_generation:
+                return  # superseded by a newer load
+            try:
+                callback(value)
+            except Exception as error:  # a failure while showing data is shown too
+                if callback is handle_error:
+                    raise
+                logger.exception("Applying loaded data failed")
+                handle_error(error)
+            finally:
+                self.set_loading(False)
+
+        def work() -> None:
+            try:
+                result = fetch()
+            except Exception as error:
+                self.app.call_from_thread(deliver, handle_error, error)
+            else:
+                self.app.call_from_thread(deliver, apply, result)
+
+        self.run_worker(work, group="load", exclusive=True, thread=True)
+
+    def show_load_error(self, error: Exception) -> None:
+        """Show why a load failed in place of the view body, and in the header."""
+        self.app.note_api_error(error)
+        self.set_empty_state(error_message(error))
+
+    def on_settings_reloaded(self) -> None:
+        """Hook called when the settings were re-read; take the new defaults here."""
 
     def on_content_mounted(self) -> None:
         """Hook called once, the first time the view is shown."""

@@ -1,9 +1,11 @@
 """Filter bar widget for log filtering."""
 
+from textual import events
 from textual.app import ComposeResult
 from textual.containers import Horizontal
 from textual.message import Message
 from textual.widgets import Button, Input, Select, Static
+from textual.widgets._select import SelectOverlay
 
 from ...models import ActionType, ComponentType
 
@@ -53,6 +55,21 @@ class FilterBar(Static):
             )
             yield Button("reset", id="filter-reset", compact=True)
 
+    def on_key(self, event: events.Key) -> None:
+        """Escape leaves a filter input for the view's main widget, keeping what was typed."""
+        if event.key != "escape":
+            return
+        if isinstance(self.screen.focused, SelectOverlay):
+            return  # the dropdown closes itself; the next Escape leaves the bar
+        event.stop()  # not also the view's "close details"
+        event.prevent_default()
+        for ancestor in self.ancestors:
+            default_focus = getattr(ancestor, "default_focus", None)
+            if callable(default_focus):
+                self.screen.set_focus(default_focus())
+                return
+        self.screen.set_focus(None)
+
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle filter button presses."""
         if event.button.id == "filter-reset":
@@ -85,7 +102,3 @@ class FilterBar(Static):
         self.query_one("#filter-action", Select).value = Select.BLANK
         self.query_one("#filter-component", Select).value = Select.BLANK
         self.post_message(self.FilterReset())
-
-    def focus_search(self) -> None:
-        """Focus the search input."""
-        self.query_one("#filter-search", Input).focus()

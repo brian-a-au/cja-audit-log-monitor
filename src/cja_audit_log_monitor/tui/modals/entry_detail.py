@@ -6,7 +6,7 @@ from rich.console import Group, RenderableType
 from rich.table import Table
 from rich.text import Text
 from textual.app import ComposeResult
-from textual.containers import Container
+from textual.containers import VerticalScroll
 from textual.widgets import Static
 
 from ...formatters import (
@@ -14,6 +14,7 @@ from ...formatters import (
     format_timestamp,
     get_action_color,
     get_action_icon,
+    literal,
     resolve_tcss_markup,
 )
 from ...models import AuditLogEntry
@@ -54,18 +55,17 @@ def build_detail_table(entry: AuditLogEntry) -> Table:
     return table
 
 
-class EntryDetailPanel(Container):
+class EntryDetailPanel(VerticalScroll):
     """Side panel that displays a single audit log entry's details.
 
-    Hidden by default. Toggle visibility via the `hidden` class.
+    Focusable, so the keyboard can scroll a long entry. Hidden by default.
+    Toggle visibility via the `hidden` class.
     Mount inside a horizontal container next to the log table.
     """
 
-    DEFAULT_ID = "entry-detail-panel"
-
     def __init__(self, **kwargs) -> None:
         """Initialize EntryDetailPanel."""
-        kwargs.setdefault("id", self.DEFAULT_ID)
+        kwargs.setdefault("id", "entry-detail-panel")
         super().__init__(**kwargs)
         self._entry: AuditLogEntry | None = None
         self.add_class("hidden")
@@ -114,8 +114,8 @@ class EntryDetailPanel(Container):
         title = self.query_one("#detail-title", Static)
         title.update(
             resolve_tcss_markup(
-                f"[{color}]{icon} {action}[/{color}] · "
-                f"[$text-muted]{entry.component_type or 'unknown'}[/$text-muted]"
+                f"[{color}]{literal(f'{icon} {action}')}[/{color}] · "
+                f"[$text-muted]{literal(entry.component_type or 'unknown')}[/$text-muted]"
             )
         )
 

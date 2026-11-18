@@ -2,9 +2,10 @@
 
 from textual.widgets import Static
 
-from ...formatters import ACTION_COLORS, TCSS_TOKEN_HEX, render_bar
+from ...formatters import ACTION_COLORS, TCSS_TOKEN_HEX, literal, render_bar
 
 _MUTED = TCSS_TOKEN_HEX["$text-muted"]
+LOADING_MARKUP = f"[{_MUTED}]loading…[/{_MUTED}]"
 
 
 class ActionBarChart(Static):
@@ -15,6 +16,7 @@ class ActionBarChart(Static):
         super().__init__(**kwargs)
         self._data: dict[str, int] = {}
         self._max_width = 30
+        self._loading = False
 
     def update_data(self, data: dict[str, int], width: int = 30) -> None:
         """Update chart data.
@@ -27,11 +29,19 @@ class ActionBarChart(Static):
         self._max_width = width
         self._redraw()
 
+    def set_loading(self, loading: bool) -> None:
+        """Show "loading…" in place of the chart while a load runs."""
+        self._loading = loading
+        self._redraw()
+
     def on_resize(self) -> None:
         """Redraw so bars fit the new width."""
         self._redraw()
 
     def _redraw(self) -> None:
+        if self._loading:
+            self.update(LOADING_MARKUP)
+            return
         available = self.content_region.width
         width = self._max_width
         if available > 0 and self._data:
@@ -54,7 +64,8 @@ class ActionBarChart(Static):
             bar = render_bar(count, max_count, width).ljust(width)
             pct = count / total * 100 if total else 0
             lines.append(
-                f"[{color}]{action:<{label_width}}[/{color}]  [{color}]{bar}[/{color}] "
+                f"[{color}]{literal(f'{action:<{label_width}}')}[/{color}]  "
+                f"[{color}]{bar}[/{color}] "
                 f"{count:>5,}  [{_MUTED}]{pct:4.1f}%[/{_MUTED}]"
             )
         return "\n".join(lines)
@@ -70,6 +81,7 @@ class HourlyChart(Static):
         """Initialize HourlyChart."""
         super().__init__(**kwargs)
         self._data: dict[int, int] = {}
+        self._loading = False
 
     def update_data(self, data: dict[int, int]) -> None:
         """Update chart data.
@@ -80,11 +92,19 @@ class HourlyChart(Static):
         self._data = data
         self._redraw()
 
+    def set_loading(self, loading: bool) -> None:
+        """Show "loading…" in place of the chart while a load runs."""
+        self._loading = loading
+        self._redraw()
+
     def on_resize(self) -> None:
         """Redraw with narrow columns when the widget is too small for wide ones."""
         self._redraw()
 
     def _redraw(self) -> None:
+        if self._loading:
+            self.update(LOADING_MARKUP)
+            return
         available = self.content_region.width
         cell = 1 if 0 < available < 48 else 2
         self.update(self.build_markup(self._data, cell))

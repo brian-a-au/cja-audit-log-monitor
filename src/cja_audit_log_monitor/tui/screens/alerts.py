@@ -3,12 +3,10 @@
 from collections.abc import Iterator
 
 from textual.containers import Container, Horizontal, Vertical
-from textual.markup import escape
 from textual.widget import Widget
 from textual.widgets import Button, Checkbox, LoadingIndicator, Static
-from textual.worker import get_current_worker
 
-from ...formatters import resolve_tcss_markup
+from ...formatters import literal, resolve_tcss_markup
 from ...stats import build_date_range_query
 from .base import ContentView
 
@@ -69,6 +67,10 @@ class AlertsScreen(ContentView):
             exclusive=True,
         )
 
+    def on_settings_reloaded(self) -> None:
+        """Show the rules of the new engine, so toggles reach the rule on the card."""
+        self.refresh_data()
+
     async def _refresh_rules_list(self) -> None:
         """Rebuild the alert rules list safely."""
         rules_list = self.query_one("#rules-list", Vertical)
@@ -109,17 +111,17 @@ class AlertsScreen(ContentView):
         )
         if len(components) > 40:
             components = components[:39] + "…"
-        name = escape(rule.name)
+        name = literal(rule.name)
         noun = "event" if rule.threshold_count == 1 else "events"
         window = f"{rule.threshold_count} {noun} / {rule.threshold_window_minutes} min"
-        details = escape(f"{window} · {actions} · {components}")
+        details = literal(f"{window} · {actions} · {components}")
 
         return Vertical(
             Horizontal(
                 Checkbox(name, value=rule.enabled, id=f"rule-{index}", compact=True),
                 Static(
                     resolve_tcss_markup(
-                        f"[$text-muted]{escape(rule.description or '')}[/$text-muted]"
+                        f"[$text-muted]{literal(rule.description or '')}[/$text-muted]"
                     ),
                     classes="rule-description",
                 ),
@@ -141,7 +143,9 @@ class AlertsScreen(ContentView):
             return
         rules[index].enabled = event.value
         verb = "Enabled" if event.value else "Disabled"
-        self.app.notify(f"{verb} rule: {self._rule_names[checkbox_id]}", severity="information")
+        self.app.notify(
+            f"{verb} rule: {self._rule_names[checkbox_id]}", severity="information", markup=False
+        )
 
         # Update card styling
         card = self.query_one(f"#card-{index}")
@@ -151,8 +155,7 @@ class AlertsScreen(ContentView):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button presses."""
         if event.button.id == "test-rules":
-            self.set_loading(True)
-            self.run_worker(self._test_rules(), exclusive=True, thread=True)
+            self.run_load(self._test_rules, self._show_results)
         elif event.button.id == "reset-rules":
             self._reset_rules()
 
@@ -162,60 +165,37 @@ class AlertsScreen(ContentView):
         self.app.notify("Rules reset", severity="information")
         self.refresh_data()
 
-    async def _test_rules(self) -> None:
-        """Test rules against recent data."""
-        worker = get_current_worker()
+    def _test_rules(self) -> str:
+        """Test fresh rules against the last day's logs (worker thread); returns the report."""
+        query = build_date_range_query(1)
+        entries = self._state.client.get_all_logs(query, max_entries=1000)
+        if not entries:
+            return "[dim]No audit logs found to test against[/dim]"
 
-        try:
-            query = build_date_range_query(1)
-            entries = self._state.client.get_all_logs(query, max_entries=1000)
-
-            if worker.is_cancelled:
-                return
-
-            if not entries:
-                self.app.call_from_thread(
-                    self._show_results,
-                    "[dim]No audit logs found to test against[/dim]",
+        fired = self._state.new_test_engine().check_batch(entries)
+        if not fired:
+            return resolve_tcss_markup(
+                f"[$success]no alerts triggered[/$success] "
+                f"(tested against {len(entries)} entries)"
+            )
+        result_lines = [resolve_tcss_markup(f"[$warning]found {len(fired)} alerts[/$warning]")]
+        for fa in fired[:10]:
+            result_lines.append(
+                resolve_tcss_markup(
+                    f"  [$danger]⚠[/$danger] {literal(fa.rule_name)}: {literal(fa.message)}"
                 )
-                return
-
-            fired = self._state.new_test_engine().check_batch(entries)
-
-            if fired:
-                result_lines = [
-                    resolve_tcss_markup(f"[$warning]found {len(fired)} alerts[/$warning]")
-                ]
-                for fa in fired[:10]:
-                    result_lines.append(
-                        resolve_tcss_markup(
-                            f"  [$danger]⚠[/$danger] "
-                            f"{escape(fa.rule_name)}: {escape(fa.message)}"
-                        )
-                    )
-                self.app.call_from_thread(self._show_results, "\n".join(result_lines))
-            else:
-                self.app.call_from_thread(
-                    self._show_results,
-                    resolve_tcss_markup(
-                        f"[$success]no alerts triggered[/$success] "
-                        f"(tested against {len(entries)} entries)"
-                    ),
-                )
-
-        except Exception as e:
-            self.app.call_from_thread(self.app.note_api_error, e)
-            self.app.call_from_thread(self._show_error, str(e))
-        finally:
-            self.app.call_from_thread(self.set_loading, False)
+            )
+        return "\n".join(result_lines)
 
     def _show_results(self, text: str) -> None:
         """Show test results."""
         self.query_one("#test-results", Static).update(text)
 
-    def _show_error(self, error: str) -> None:
+    def show_load_error(self, error: Exception) -> None:
         """Show a failed test run in the results box, plus a toast."""
+        self.app.note_api_error(error)
+        message = str(error)
         self._show_results(
-            resolve_tcss_markup(f"[$danger]test failed:[/$danger] {escape(error)}")
+            resolve_tcss_markup(f"[$danger]test failed:[/$danger] {literal(message)}")
         )
-        self.app.notify(f"Error: {error}", severity="error")
+        self.app.notify(f"Error: {message}", severity="error", markup=False)

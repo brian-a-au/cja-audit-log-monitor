@@ -29,9 +29,8 @@ MONITOR_MAX_ROWS = 1000
 _POLL_PAGE_SIZE = 100
 # Rows the first poll of a session shows as context. They are not alerted on or counted.
 _CONTEXT_ROWS = 100
-# Allowed polling interval, in seconds.
+# Shortest allowed polling interval, in seconds. There is no upper limit.
 _MIN_INTERVAL = 5
-_MAX_INTERVAL = 3600
 
 
 class _IntervalInput(Input):
@@ -84,11 +83,11 @@ class MonitorScreen(ContentView):
             Button("■ stop", id="stop-button", variant="error", disabled=True, compact=True),
             Label("interval"),
             _IntervalInput(
-                value="60",
+                value=str(self._state.monitor.interval),
                 id="interval-input",
                 type="integer",
                 compact=True,
-                validators=[Integer(minimum=_MIN_INTERVAL, maximum=_MAX_INTERVAL)],
+                validators=[Integer(minimum=_MIN_INTERVAL)],
             ),
             Label("s"),
             id="monitor-controls",
@@ -142,8 +141,14 @@ class MonitorScreen(ContentView):
         if event.input.id == "interval-input":
             self._apply_interval()
 
+    def on_settings_reloaded(self) -> None:
+        """Show the reloaded default interval (the monitor is stopped; reload needs that)."""
+        box = self.query_one("#interval-input", Input)
+        box.value = str(self._state.monitor.interval)
+        box.validate(box.value)  # clears a stale -invalid mark
+
     def _apply_interval(self) -> bool:
-        """Use the interval box's value if it is 5 to 3600 seconds.
+        """Use the interval box's value if it is 5 seconds or more.
 
         Otherwise keep the current interval and mark the box invalid.
 
@@ -176,7 +181,7 @@ class MonitorScreen(ContentView):
         """Start the monitoring loop."""
         if not self._apply_interval():
             self._show_warning(
-                f"Interval must be {_MIN_INTERVAL} to {_MAX_INTERVAL} seconds; "
+                f"Interval must be at least {_MIN_INTERVAL} seconds; "
                 f"using {self._state.monitor.interval}."
             )
         monitor = self._state.monitor
@@ -410,15 +415,15 @@ class MonitorScreen(ContentView):
 
     def _show_error(self, error: str) -> None:
         """Show error message."""
-        self.app.notify(f"Monitor error: {error}", severity="error")
+        self.app.notify(f"Monitor error: {error}", severity="error", markup=False)
 
     def _show_warning(self, warning: str) -> None:
         """Show warning message."""
-        self.app.notify(warning, severity="warning")
+        self.app.notify(warning, severity="warning", markup=False)
 
     def _show_alert(self, rule_name: str, message: str) -> None:
         """Show alert notification."""
         text = f"{rule_name}: {message}"
-        self.app.notify(text, severity="warning")
+        self.app.notify(text, severity="warning", markup=False)
         alert_summary = self.query_one("#alert-summary", AlertSummary)
         alert_summary.add_alert(rule_name, message)

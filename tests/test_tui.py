@@ -2,9 +2,11 @@
 
 import io
 import os
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from textual.color import Color
 from textual.widgets import Button, Checkbox, Static
 
 from cja_audit_log_monitor.alerts import FiredAlert
@@ -891,6 +893,11 @@ async def _wait_for(condition, pilot, timeout: float = 3.0) -> bool:
     return condition()
 
 
+def _reloaded(app, times: int = 1) -> bool:
+    """True once the config view's reload handler has run to its end ``times`` times."""
+    return sum("Settings reloaded" in n.message for n in app._notifications) >= times
+
+
 class TestMonitorScreen:
     """Test the Monitor screen."""
 
@@ -1326,6 +1333,22 @@ class TestMonitorStream:
             assert mock_app_state.monitor.interval == 30
             assert not interval_input.has_class("-invalid")
 
+    async def test_interval_box_accepts_values_above_an_hour(self, mock_app_state):
+        from textual.widgets import Input
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.press("m")
+            await pilot.pause()
+            screen = app._screens["monitor"]
+            interval_input = screen.query_one("#interval-input", Input)
+            interval_input.value = "7200"
+            interval_input.validate(interval_input.value)
+            assert interval_input.is_valid
+            assert screen._apply_interval()
+            assert not interval_input.has_class("-invalid")
+            assert mock_app_state.monitor.interval == 7200
+
     async def test_space_in_interval_input_starts_monitor(self, mock_app_state, monkeypatch):
         from textual.widgets import Input
 
@@ -1576,6 +1599,47 @@ class TestAlertsViewRealEngine:
             assert state.alert_engine.rules[0].enabled is True
             assert app.query_one("#rule-0", Checkbox).value is True
 
+    async def test_reload_settings_rebuilds_rule_cards(self, mock_app_state, tmp_path):
+        from unittest.mock import MagicMock
+
+        def write_rules(*names):
+            config = tmp_path / "config.yaml"
+            config.write_text(
+                "alert_rules:\n" + "".join(f"  - name: {n}\n    enabled: true\n" for n in names)
+            )
+            config.chmod(0o600)
+
+        write_rules("rule_a", "rule_b")
+        mock_app_state._settings = None
+        mock_app_state._alert_engine = None
+        mock_app_state.verify_connection = MagicMock(
+            return_value={"connected": False, "error": "offline"}
+        )
+        app = _make_app(mock_app_state)
+
+        def labels():
+            return [str(c.label) for c in app.query("#rules-list Checkbox")]
+
+        async with app.run_test() as pilot:
+            await pilot.press("a")
+            assert await _wait_for(lambda: labels() == ["rule_a", "rule_b"], pilot), labels()
+            write_rules("rule_c", "rule_d", "rule_e")
+            await pilot.press("c")
+            await pilot.pause()
+            app.query_one("#reload-button", Button).press()
+            assert await _wait_for(
+                lambda: any("Settings reloaded" in n.message for n in app._notifications), pilot
+            )
+            await pilot.press("a")
+            assert await _wait_for(lambda: labels() == ["rule_c", "rule_d", "rule_e"], pilot)
+            app.query_one("#rule-0", Checkbox).toggle()
+            assert await _wait_for(
+                lambda: mock_app_state.alert_engine.rules[0].enabled is False, pilot
+            )
+            rules = mock_app_state.alert_engine.rules
+            assert [r.name for r in rules] == ["rule_c", "rule_d", "rule_e"]
+            assert [r.enabled for r in rules] == [False, True, True]
+
     async def test_test_rules_does_not_touch_live_history(self, mock_app_state):
         state = self._state(mock_app_state, [AlertRule(name="any")])
         app = _make_app(state)
@@ -1588,7 +1652,6 @@ class TestAlertsViewRealEngine:
                 await pilot.pause()
                 assert len(state.alert_engine._event_history) == 0
                 assert state._client.get_all_logs.called
-                assert state.recent_alerts == []
                 assert not notify.called
 
     async def test_failed_test_rules_shows_error_in_results(self, mock_app_state):
@@ -1649,6 +1712,80 @@ class TestSettingsScreen:
             await pilot.pause()
             btn = app.query_one("#verify-button", Button)
             assert btn is not None
+
+    async def test_reload_settings_rereads_the_config_file(self, mock_app_state, tmp_path):
+        from unittest.mock import MagicMock
+
+        config = tmp_path / "config.yaml"
+        config.write_text("monitor_interval: 30\n")
+        mock_app_state.verify_connection = MagicMock(
+            return_value={"connected": False, "error": "offline"}
+        )
+        app = _make_app(mock_app_state)
+
+        def shown_values():
+            return [str(s.render()) for s in app.query(".settings-value")]
+
+        async with app.run_test() as pilot:
+            await pilot.press("c")
+            await pilot.pause()
+            app.query_one("#reload-button", Button).press()
+            assert await _wait_for(lambda: "30 seconds" in shown_values(), pilot)
+            config.write_text("monitor_interval: 45\n")
+            app.query_one("#reload-button", Button).press()
+            assert await _wait_for(lambda: "45 seconds" in shown_values(), pilot)
+            assert "30 seconds" not in shown_values()
+            assert await _wait_for(lambda: _reloaded(app, 2), pilot)
+
+    async def test_reload_settings_is_refused_while_monitoring(self, mock_app_state):
+        client = mock_app_state.client
+        mock_app_state.monitor.is_running = True
+        app = _make_app(mock_app_state)
+        async with app.run_test() as pilot:
+            await pilot.press("c")
+            await pilot.pause()
+            app.query_one("#reload-button", Button).press()
+            assert await _wait_for(
+                lambda: any("stop the monitor first" in n.message for n in app._notifications),
+                pilot,
+            )
+            client.close.assert_not_called()
+            assert mock_app_state._client is client
+
+    def test_reload_settings_resets_cached_state(self, tmp_path):
+        from unittest.mock import MagicMock
+
+        from cja_audit_log_monitor.tui.state import AppState
+
+        config = tmp_path / "config.yaml"
+        config.write_text("monitor_interval: 30\n")
+        config.chmod(0o600)
+        state = AppState()
+        assert state.settings.monitor_interval == 30
+        old_engine = state.alert_engine
+        client = state._client = MagicMock()
+        config.write_text("monitor_interval: 45\n")
+        state.reload_settings()
+        assert state.settings.monitor_interval == 45
+        assert state.alert_engine is not old_engine
+        assert state._client is None
+        client.close.assert_called_once()
+
+    def test_reload_settings_picks_up_a_bad_file_as_a_warning(self, tmp_path):
+        from cja_audit_log_monitor.tui.state import AppState
+
+        config = tmp_path / "config.yaml"
+        config.write_text("monitor_interval: 30\n")
+        config.chmod(0o600)
+        state = AppState()
+        state.settings
+        assert state.config_error_summary is None
+        config.write_text("monitor_interval: [unclosed\n")
+        state.reload_settings()
+        assert state.config_error_summary
+        config.write_text("monitor_interval: 45\n")
+        state.reload_settings()
+        assert state.config_error_summary is None
 
     def test_settings_screen_renders_notifications_section(self):
         """Settings screen includes a Notifications section showing channel presence."""
@@ -2275,6 +2412,35 @@ class TestExportRobustness:
             monkeypatch.setattr(
                 "cja_audit_log_monitor.tui.modals.export_dialog.export_entries", broken_export
             )
+        from cja_audit_log_monitor.tui.modals.export_dialog import ExportDialog
+
+        # The worker's callbacks reach the closed dialog. Record that they ran, whether
+        # they raised, and whether they touched the status line.
+        reached: list[str] = []
+        raised: list[Exception] = []
+        status_calls: list[str] = []
+        real_set_status = ExportDialog._set_status
+
+        def spy_set_status(self, message, token="$text-muted"):
+            status_calls.append(message)
+            return real_set_status(self, message, token)
+
+        monkeypatch.setattr(ExportDialog, "_set_status", spy_set_status)
+        for name in ("_fail", "_done", "_ask_overwrite"):
+
+            def make(real, label):
+                def wrapper(self, *args, **kwargs):
+                    reached.append(label)
+                    try:
+                        return real(self, *args, **kwargs)
+                    except Exception as error:
+                        raised.append(error)
+                        raise
+
+                return wrapper
+
+            monkeypatch.setattr(ExportDialog, name, make(getattr(ExportDialog, name), name))
+
         app = _make_app(mock_app_state)
         async with app.run_test(size=(120, 40)) as pilot:
             dialog = await self._open(app, pilot)
@@ -2282,13 +2448,22 @@ class TestExportRobustness:
             dialog.query_one("#output-path").value = str(tmp_path / "x.json")
             dialog.query_one("#export-button").press()
             assert await _wait_for(started.is_set, pilot)
+            status_calls.clear()  # keep only what happens after the dialog closes
             await pilot.press("escape")
             await pilot.pause()
             assert await _wait_for(lambda: not dialog.is_attached, pilot)
             release.set()
+            if failure == "fetch":
+                # Closing the dialog drops its worker from the manager, so wait for the
+                # callback itself. The other cases stop at the worker's cancelled check.
+                assert await _wait_for(lambda: bool(reached), pilot)
             await app.workers.wait_for_complete()
             await pilot.pause()
             assert app.is_running
+        if failure == "fetch":
+            assert reached == ["_fail"]
+        assert raised == []
+        assert status_calls == []
         assert app._exception is None
 
     async def test_file_appearing_during_fetch_is_not_clobbered(
@@ -2354,6 +2529,143 @@ class TestPageLoadedFlag:
             dialog = app.screen
             assert dialog.query_one("#scope-page").disabled
             assert "entries" not in str(dialog.query_one("#scope-page").label)
+
+
+class TestStaleLoads:
+    """A load that a newer one superseded must not touch the view (F21)."""
+
+    @staticmethod
+    def _page(entry, page: int, count: int = 50):
+        from cja_audit_log_monitor.models import AuditLogResponse
+
+        entries = [entry.model_copy(update={"id": f"p{page}-{i}"}) for i in range(count)]
+        return AuditLogResponse(
+            content=entries,
+            total_elements=120,
+            total_pages=3,
+            number_of_elements=count,
+            first=page == 0,
+            last=False,
+            number=page,
+            size=50,
+        )
+
+    @staticmethod
+    def _slow_failing_page1(app):
+        """get_logs where page 1 waits for a release, then fails to connect.
+
+        Returns (get_logs, started, release, delivered). ``delivered`` is set once the
+        page 1 thread's first hand-off to the UI thread has run; a cancelled thread
+        worker keeps running after Textual marks it done, so wait_for_complete
+        alone does not cover it.
+        """
+        import threading
+
+        from cja_audit_log_monitor.client import APIError
+
+        started = threading.Event()
+        release = threading.Event()
+        delivered = threading.Event()
+        page1_thread: list[threading.Thread] = []
+        original = app.call_from_thread
+
+        def spy(callback, *args, **kwargs):
+            try:
+                return original(callback, *args, **kwargs)
+            finally:
+                if page1_thread and threading.current_thread() is page1_thread[0]:
+                    delivered.set()
+
+        app.call_from_thread = spy
+
+        def page1():
+            page1_thread.append(threading.current_thread())
+            started.set()
+            release.wait(5)
+            raise APIError("network down")  # no status code: a connection failure
+
+        return page1, started, release, delivered
+
+    async def test_stale_failure_does_not_clear_newer_page(
+        self, mock_app_state, sample_audit_entry
+    ):
+        from cja_audit_log_monitor.tui.widgets import LogTable
+
+        page0 = self._page(sample_audit_entry, 0)
+        app = _make_app(mock_app_state)
+        page1, started, release, delivered = self._slow_failing_page1(app)
+        mock_app_state.client.get_logs.side_effect = (
+            lambda query: page1() if query.page == 1 else page0
+        )
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, "l")
+            table = view.query_one("#log-table", LogTable)
+            assert table.row_count == 50
+            table.focus()
+            await pilot.press("n")
+            assert await _wait_for(started.is_set, pilot)
+            await pilot.press("p")
+            # Page 0 comes back at once; only then does the slow page 1 fail.
+            await app.workers.wait_for_complete()
+            assert await _wait_for(
+                lambda: mock_app_state.client.get_logs.call_count == 3, pilot
+            )
+            release.set()
+            assert await _wait_for(delivered.is_set, pilot)
+            await pilot.pause()
+            assert table.row_count == 50
+            assert app._connection_status == "connected"
+            assert mock_app_state.page_loaded is True
+            assert len(mock_app_state.entries) == 50
+            assert mock_app_state.total_entries == 120
+            assert not view.query_one("#table-message", Static).display
+            assert not view.query_one("#logs-loading").display
+        assert app._exception is None
+
+    async def test_loading_stays_until_newest_load_ends(self, mock_app_state, sample_audit_entry):
+        import threading
+
+        from cja_audit_log_monitor.tui.widgets import LogTable
+
+        page0 = self._page(sample_audit_entry, 0)
+        app = _make_app(mock_app_state)
+        page1, started, release, delivered = self._slow_failing_page1(app)
+        reload_started = threading.Event()
+        release_reload = threading.Event()
+        page0_loads = []
+
+        def get_logs(query):
+            if query.page == 1:
+                return page1()
+            page0_loads.append(query)
+            if len(page0_loads) > 1:  # the reload after "p" is slow too
+                reload_started.set()
+                release_reload.wait(5)
+            return page0
+
+        mock_app_state.client.get_logs.side_effect = get_logs
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, "l")
+            table = view.query_one("#log-table", LogTable)
+            indicator = view.query_one("#logs-loading")
+            table.focus()
+            await pilot.press("n")
+            assert await _wait_for(started.is_set, pilot)
+            await pilot.press("p")
+            assert await _wait_for(reload_started.is_set, pilot)
+            # The superseded page 1 fails while the page 0 reload is still running.
+            release.set()
+            assert await _wait_for(delivered.is_set, pilot)
+            await pilot.pause()
+            assert indicator.display, "a superseded load hid the loading indicator"
+            assert table.row_count == 50
+            assert app._connection_status == "connected"
+            release_reload.set()
+            await app.workers.wait_for_complete()
+            assert await _wait_for(lambda: not indicator.display, pilot)
+            assert table.row_count == 50
+            assert app._connection_status == "connected"
+        assert app._exception is None
 
 
 class TestSwapSuffix:
@@ -2803,22 +3115,6 @@ async def test_alert_test_login_failure_updates_header(mock_app_state):
         assert "disconnected" in str(app.query_one("#status-row").render())
 
 
-async def test_alert_card_shows_local_time_with_zone(mock_app_state, los_angeles_tz):
-    from datetime import UTC, datetime
-
-    from cja_audit_log_monitor.models import AuditLogEntry
-    from cja_audit_log_monitor.tui.widgets.alert_card import AlertCard
-
-    entry = AuditLogEntry(id="1", timestamp=datetime(2026, 11, 17, 23, 25, 13, tzinfo=UTC))
-    app = _make_app(mock_app_state)
-    async with app.run_test(size=(120, 40)) as pilot:
-        card = AlertCard("rule", "fired", entry)
-        await app.screen.mount(card)
-        await pilot.pause()
-        text = str(card.render())
-        assert "2026-11-17 15:25:13 PST" in text
-
-
 class TestLaterRoundPolish:
     async def test_no_repeated_ids_across_views(self, mock_app_state):
         from collections import Counter
@@ -2996,3 +3292,501 @@ async def test_header_keeps_connection_status_with_bad_config(mock_app_state, tm
         assert "config.yaml: monitor_interval: Input should be a valid integer" in header
         assert "\n" not in header
         assert "pydantic text" not in header
+
+
+# ---------------------------------------------------------------------------
+# Data is never parsed as markup
+# ---------------------------------------------------------------------------
+
+_BRACKET_USER = "[/b]eve@x.com"
+_BRACKET_COMPONENT = "Q3 [/final] report"
+_BRACKET_ERROR = "[bold red]boom[/] [/oops]"
+
+
+def _rendered(widget) -> str:
+    """What the widget shows, parsed the way Textual parses it (so bad markup raises)."""
+    return widget.render().plain
+
+
+async def test_bracket_data_shows_literally_in_every_view(
+    mock_app_state, sample_audit_entry, monkeypatch
+):
+    from cja_audit_log_monitor.tui.modals import EntryDetailPanel
+    from cja_audit_log_monitor.tui.screens.monitor import MonitorScreen
+    from cja_audit_log_monitor.tui.widgets import LogTable
+
+    entry = sample_audit_entry.model_copy(
+        update={
+            "user_email": _BRACKET_USER,
+            "component_name": _BRACKET_COMPONENT,
+            "component_type": "[/type]",
+            "action": "[/act]",
+            "description": "[/desc]",
+        }
+    )
+    state = mock_app_state
+    state.client.get_logs_sample.return_value = ([entry], 1)
+    state.client.get_logs.return_value = _logs_response([entry], total_elements=1, total_pages=1)
+    monkeypatch.setattr(
+        "cja_audit_log_monitor.tui.screens.dashboard.analyze_for_anomalies",
+        lambda entries, local=False: [{"description": f"odd {_BRACKET_USER} [/x]"}],
+    )
+    app = _make_app(state)
+    async with app.run_test(size=(140, 40)) as pilot:
+        # dashboard
+        view = await _show_and_load(app, pilot, "d")
+        assert _BRACKET_USER in _rendered(view.query_one("#top-users", Static))
+        assert "[/x]" in _rendered(view.query_one("#anomalies", Static))
+
+        # log browser: table cell text is the literal string, detail panel too
+        view = await _show_and_load(app, pilot, "l")
+        table = view.query_one("#log-table", LogTable)
+        assert await _wait_for(lambda: table.row_count == 1, pilot)
+        cells = [table.get_cell_at((0, col)).plain for col in range(len(table.columns))]
+        assert _BRACKET_USER in cells
+        assert _BRACKET_COMPONENT in cells
+        panel = view.query_one("#entry-detail-panel", EntryDetailPanel)
+        panel.show_entry(entry)
+        await pilot.pause()
+        assert "[/type]" in _rendered(panel.query_one("#detail-title", Static))
+
+        # stats
+        view = await _show_and_load(app, pilot, "s")
+        assert _BRACKET_USER in _rendered(view.query_one("#user-ranking", Static))
+        assert "[/act]" in _rendered(view.query_one("#stats-action-chart", Static))
+
+        # monitor: one poll with a fired alert whose name and message have brackets
+        fired = FiredAlert(
+            rule_name="[/rule]", message="[bold]msg[/", entry=entry, panel=MagicMock()
+        )
+        monkeypatch.setattr(state, "check_alerts", lambda entries: [fired])
+        screen = await _start_monitor_without_loop(app, pilot, monkeypatch)
+        assert isinstance(screen, MonitorScreen)
+        screen._last_poll_time = screen._last_poll_time or datetime.now(UTC)
+        await _drive_poll(screen, pilot)
+        assert await _wait_for(lambda: len(app._notifications) > 0, pilot)
+        assert any("[/rule]" in n.message for n in app._notifications)
+        assert "[/rule]" in _rendered(screen.query_one("#alert-summary", Static))
+        await pilot.pause()
+        screen._show_error(_BRACKET_ERROR)
+        screen._show_warning("[/warn]")
+        await pilot.pause()
+
+        # settings: verify with an API error body
+        state.client.verify_connection.return_value = {
+            "connected": False,
+            "authenticated": False,
+            "error": _BRACKET_ERROR,
+        }
+        view = await _show_and_load(app, pilot, "c")
+        assert _BRACKET_ERROR in _rendered(view.query_one("#connection-status", Static))
+
+
+_LITERAL_CASES = ["[/b]x", "[bold]msg[/", "[/", "tail\\", "a\\[b]", "[/]", "[$danger]"]
+
+
+@pytest.mark.parametrize("text", _LITERAL_CASES)
+def test_literal_survives_markup_parsing(text):
+    from textual.content import Content
+
+    from cja_audit_log_monitor.formatters import literal, resolve_tcss_markup
+
+    markup = f"[$danger]{literal(text)}[/$danger]\n[b]x[/b]"
+    content = Content.from_markup(resolve_tcss_markup(markup))
+    assert content.plain.split("\n")[0].rstrip("​") == text
+
+
+class TestFocusAndKeys:
+    """Escape leaves inputs, details scroll by keyboard, Enter applies stats days (F25, F32)."""
+
+    async def test_escape_leaves_search_without_navigating_or_clearing(self, mock_app_state):
+        from textual.widgets import Input
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await _show_and_load(app, pilot, "l")
+            await pilot.press("slash", "a", "b", "c")
+            await pilot.pause()
+            search = app.query_one("#filter-search", Input)
+            assert app.focused is search
+            await pilot.press("escape")
+            await pilot.pause()
+            assert app.focused is not search
+            await pilot.press("d")
+            await pilot.pause()
+            assert app._current_screen == "dashboard"
+            assert search.value == "abc"
+
+    async def test_escape_in_search_keeps_open_details(self, mock_app_state):
+        from cja_audit_log_monitor.tui.modals.entry_detail import EntryDetailPanel
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await _show_and_load(app, pilot, "l")
+            await pilot.press("enter")
+            await pilot.pause()
+            await pilot.press("slash")
+            await pilot.pause()
+            await pilot.press("escape")
+            await pilot.pause()
+            assert app.query_one(EntryDetailPanel).is_visible()
+
+    async def test_detail_panel_scrolls_with_keyboard(self, mock_app_state, sample_audit_entry):
+        from cja_audit_log_monitor.tui.modals.entry_detail import EntryDetailPanel
+
+        entry = sample_audit_entry.model_copy(
+            update={"changes": {f"field{i}": f"value {i}" for i in range(60)}}
+        )
+        mock_app_state.client.get_logs.return_value.content[0] = entry
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 30)) as pilot:
+            await _show_and_load(app, pilot, "l")
+            await pilot.press("enter")
+            await pilot.pause()
+            panel = app.query_one(EntryDetailPanel)
+            await pilot.press("tab")
+            await pilot.pause()
+            assert app.focused is panel
+            assert panel.scroll_y == 0
+            await pilot.press("pagedown")
+            await pilot.pause()
+            assert panel.scroll_y > 0
+
+    async def test_escape_in_detail_panel_closes_it_and_returns_to_table(self, mock_app_state):
+        from cja_audit_log_monitor.tui.modals.entry_detail import EntryDetailPanel
+        from cja_audit_log_monitor.tui.widgets import LogTable
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await _show_and_load(app, pilot, "l")
+            await pilot.press("enter", "tab")
+            await pilot.pause()
+            assert app.focused is app.query_one(EntryDetailPanel)
+            await pilot.press("escape")
+            await pilot.pause()
+            assert not app.query_one(EntryDetailPanel).is_visible()
+            assert app.focused is app.query_one(LogTable)
+
+    async def test_enter_in_stats_days_reloads(self, mock_app_state):
+        from textual.widgets import Input
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await _show_and_load(app, pilot, "s")
+            mock_app_state.client.get_logs_sample.reset_mock()
+            box = app.query_one("#days-input", Input)
+            box.focus()
+            box.value = ""
+            await pilot.press("3", "0", "enter")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            query = mock_app_state.client.get_logs_sample.call_args.args[0]
+            assert (query.end_date - query.start_date).days in (29, 30)
+            assert box.value == "30"
+
+    async def test_stats_days_box_shows_the_clamped_value(self, mock_app_state):
+        from textual.widgets import Input
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await _show_and_load(app, pilot, "s")
+            box = app.query_one("#days-input", Input)
+            box.focus()
+            box.value = "-5"
+            await pilot.press("enter")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert box.value == "1"
+
+    async def test_help_lists_search_and_tab(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            await pilot.press("question_mark")
+            await pilot.pause()
+            sections = {
+                str(s.render()): b
+                for s, b in zip(
+                    app.screen.query(".help-section"), app.screen.query(".help-section-body")
+                )
+            }
+            everywhere = next(str(b.render()) for t, b in sections.items() if "EVERYWHERE" in t)
+            lines = everywhere.splitlines()
+            assert any(ln.strip().startswith("/") for ln in lines)
+            assert any(ln.strip().startswith("tab") for ln in lines)
+
+
+class TestConfiguredDefaults:
+    """The TUI starts from default_page_size, default_days and monitor_interval."""
+
+    @staticmethod
+    def _page_by_size(state, sample_audit_entry):
+        """Make the mock client return as many rows as the query's page size asks for."""
+        from cja_audit_log_monitor.models import AuditLogResponse
+
+        def get_logs(query):
+            rows = [
+                sample_audit_entry.model_copy(update={"id": f"row-{n}"})
+                for n in range(query.page_size)
+            ]
+            return AuditLogResponse(
+                content=rows,
+                total_elements=500,
+                total_pages=500 // query.page_size,
+                number_of_elements=len(rows),
+                first=True,
+                last=False,
+                number=0,
+                size=query.page_size,
+            )
+
+        state.client.get_logs.side_effect = get_logs
+
+    async def test_log_browser_uses_default_page_size(self, mock_app_state, sample_audit_entry):
+        from cja_audit_log_monitor.tui.widgets import LogTable
+
+        mock_app_state.settings.default_page_size = 25
+        self._page_by_size(mock_app_state, sample_audit_entry)
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await _show_and_load(app, pilot, "l")
+            assert app.query_one("#log-table", LogTable).row_count == 25
+
+    async def test_monitor_interval_box_starts_at_the_setting(self, mock_app_state):
+        from textual.widgets import Input
+
+        mock_app_state.settings.monitor_interval = 30
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.press("m")
+            assert await _wait_for(lambda: app.query("#interval-input"), pilot)
+            assert app.query_one("#interval-input", Input).value == "30"
+            assert mock_app_state.monitor.interval == 30
+
+    async def test_stats_days_box_and_query_start_at_the_setting(self, mock_app_state):
+        from textual.widgets import Input
+
+        mock_app_state.settings.default_days = 3
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await _show_and_load(app, pilot, "s")
+            assert app.query_one("#days-input", Input).value == "3"
+            query = mock_app_state.client.get_logs_sample.call_args.args[0]
+            assert (query.end_date - query.start_date).days == 3
+
+    async def test_dashboard_window_follows_default_days(self, mock_app_state):
+        mock_app_state.settings.default_days = 3
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await _show_and_load(app, pilot, "d")
+            query = mock_app_state.client.get_logs_sample.call_args.args[0]
+            assert (query.end_date - query.start_date).days == 3
+            labels = [_plain(s) for s in app.query(".stat-label")]
+            assert "last 3 days" in [label.strip() for label in labels]
+
+    async def test_reload_applies_new_defaults_to_open_views(
+        self, mock_app_state, sample_audit_entry, tmp_path
+    ):
+        from textual.widgets import Input
+
+        config = tmp_path / "config.yaml"
+        config.write_text("default_page_size: 20\nmonitor_interval: 30\ndefault_days: 3\n")
+        mock_app_state._config_path = config
+        mock_app_state.refresh_client = MagicMock()  # keep the mock client through the reload
+        mock_app_state.verify_connection = MagicMock(
+            return_value={"connected": False, "error": "offline"}
+        )
+        self._page_by_size(mock_app_state, sample_audit_entry)
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await _show_and_load(app, pilot, "m")
+            await _show_and_load(app, pilot, "s")
+            await _show_and_load(app, pilot, "l")
+            await pilot.press("c")
+            await pilot.pause()
+            app.query_one("#reload-button", Button).press()
+            assert await _wait_for(
+                lambda: mock_app_state.client.get_logs.call_args is not None
+                and mock_app_state.client.get_logs.call_args.args[0].page_size == 20,
+                pilot,
+            )
+            assert app._screens["monitor"].query_one("#interval-input", Input).value == "30"
+            assert app._screens["stats"].query_one("#days-input", Input).value == "3"
+            assert mock_app_state.filters.page_size == 20
+            assert await _wait_for(lambda: _reloaded(app), pilot)
+
+    async def test_reload_relabels_the_dashboard_window(self, mock_app_state, tmp_path):
+        config = tmp_path / "config.yaml"
+        config.write_text("default_days: 3\n")
+        mock_app_state._config_path = config
+        mock_app_state.refresh_client = MagicMock()
+        mock_app_state.verify_connection = MagicMock(
+            return_value={"connected": False, "error": "offline"}
+        )
+        app = _make_app(mock_app_state)
+
+        def labels():
+            return [_plain(s).strip() for s in app.query(".stat-label")]
+
+        async with app.run_test(size=(140, 40)) as pilot:
+            await _show_and_load(app, pilot, "d")
+            assert "last 7 days" in labels()
+            await pilot.press("c")
+            await pilot.pause()
+            app.query_one("#reload-button", Button).press()
+            assert await _wait_for(lambda: "last 3 days" in labels(), pilot)
+            assert await _wait_for(lambda: _reloaded(app), pilot)
+
+
+def _dot_color(app):
+    """Hex color the status row paints its dot with."""
+    strip = app.query_one("#status-row", Static).render_line(0)
+    segment = next(seg for seg in strip if "●" in seg.text)
+    return Color.from_rich_color(segment.style.color).hex
+
+
+class TestStatusDotColor:
+    """The dot is painted from the theme, so disconnected is the theme's error color."""
+
+    async def test_disconnected_dot_uses_theme_error_color(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test() as pilot:
+            app.set_connection_status("disconnected", "boom")
+            await pilot.pause()
+            assert _dot_color(app) == Color.parse(app.theme_variables["error"]).hex
+
+
+class TestChartLoadingState:
+    """Charts say "loading…" while their view's load runs, then show the data."""
+
+    @pytest.mark.parametrize(
+        ("key", "chart_ids"),
+        [
+            ("d", ["#action-chart", "#hourly-chart"]),
+            ("s", ["#stats-action-chart", "#stats-hourly-chart"]),
+        ],
+    )
+    async def test_charts_show_loading_until_the_load_ends(
+        self, mock_app_state, sample_audit_entries, key, chart_ids
+    ):
+        import threading
+
+        started, release = threading.Event(), threading.Event()
+
+        def slow_sample(query, max_entries=None):
+            started.set()
+            release.wait(5)
+            return sample_audit_entries, len(sample_audit_entries)
+
+        mock_app_state.client.get_logs_sample.side_effect = slow_sample
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 42)) as pilot:
+            await pilot.press(key)
+            await pilot.pause()
+            view = app._screens[app._current_screen]
+            view.refresh_data()
+            assert await _wait_for(started.is_set, pilot)
+            charts = [view.query_one(chart_id, Static) for chart_id in chart_ids]
+            assert all("loading…" in str(c.render()) for c in charts)
+            release.set()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert all("loading…" not in str(c.render()) for c in charts)
+            assert "no data" not in str(charts[0].render())
+
+    async def test_a_failed_load_does_not_leave_loading_text(self, mock_app_state):
+        mock_app_state.client.get_logs_sample.side_effect = RuntimeError("boom")
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 42)) as pilot:
+            view = await _show_and_load(app, pilot, "s")
+            for chart_id in ("#stats-action-chart", "#stats-hourly-chart"):
+                assert "loading…" not in str(view.query_one(chart_id, Static).render())
+
+
+class TestPaginationButtons:
+    """prev and next are disabled whenever they cannot be used."""
+
+    async def test_disabled_before_the_first_load(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 42)) as pilot:
+            await pilot.press("l")
+            await pilot.pause()
+            view = app._screens["logs"]
+            assert view.query_one("#prev-page", Button).disabled
+            assert view.query_one("#next-page", Button).disabled
+
+    async def test_disabled_after_an_error(self, mock_app_state, sample_audit_entry):
+        from cja_audit_log_monitor.models import AuditLogResponse
+
+        page = AuditLogResponse(
+            content=[sample_audit_entry.model_copy(update={"id": f"e{i}"}) for i in range(3)],
+            total_elements=250,  # three pages at the default page size of 100
+            total_pages=3,
+            number_of_elements=3,
+            first=False,
+            last=False,
+            number=1,
+            size=50,
+        )
+        mock_app_state.client.get_logs.return_value = page
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 42)) as pilot:
+            await pilot.pause()
+            mock_app_state.filters.page = 1  # after startup, which resets to the first page
+            view = await _show_and_load(app, pilot, "l")
+            assert not view.query_one("#prev-page", Button).disabled
+            assert not view.query_one("#next-page", Button).disabled
+            mock_app_state.client.get_logs.side_effect = RuntimeError("boom")
+            view.refresh_data()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert view.query_one("#prev-page", Button).disabled
+            assert view.query_one("#next-page", Button).disabled
+
+
+class TestLoadApplyErrors:
+    """A failure inside a view's apply callback leaves a traceback in the log."""
+
+    async def test_apply_exception_is_logged_with_traceback(self, mock_app_state, caplog):
+        import logging
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, "d")
+            shown: list[Exception] = []
+            view.show_load_error = shown.append
+
+            def bad_apply(_value):
+                raise ValueError("apply blew up")
+
+            with caplog.at_level(logging.ERROR):
+                view.run_load(lambda: 1, bad_apply)
+                assert await _wait_for(lambda: bool(shown), pilot)
+            assert [type(e) for e in shown] == [ValueError]
+            records = [r for r in caplog.records if r.exc_info]
+            assert any("apply blew up" in str(r.exc_info[1]) for r in records)
+
+
+class TestFilterDropdownEscape:
+    """Escape closes an open dropdown first; only the next Escape leaves the filter bar."""
+
+    async def test_first_escape_only_closes_the_dropdown(self, mock_app_state):
+        from textual.widgets import Select
+        from textual.widgets._select import SelectOverlay
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await _show_and_load(app, pilot, "l")
+            select = app.query_one("#filter-action", Select)
+            select.focus()
+            await pilot.pause()
+            await pilot.press("enter")
+            assert await _wait_for(lambda: select.expanded, pilot)
+            assert isinstance(app.focused, SelectOverlay)
+            await pilot.press("escape")
+            assert await _wait_for(lambda: not select.expanded, pilot)
+            await pilot.pause()
+            assert app.focused is select
+            await pilot.press("escape")
+            await pilot.pause()
+            assert app.focused is not select

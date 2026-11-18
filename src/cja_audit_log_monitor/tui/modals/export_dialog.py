@@ -199,6 +199,8 @@ class ExportDialog(ModalScreen):
     ) -> None:
         """Worker: fetch (for "all matching"), write the file, then report on the UI thread."""
         worker = get_current_worker()
+        # Read the app now: once the dialog is closed it is detached and ``self.app`` fails.
+        app = self.app
         total: int | None = None
         if fetch_all:
             try:
@@ -206,14 +208,14 @@ class ExportDialog(ModalScreen):
                     self._state.filters.to_query(), max_entries=EXPORT_MAX
                 )
             except Exception as e:
-                self.app.call_from_thread(self._fail, f"could not fetch entries: {_one_line(e)}")
+                app.call_from_thread(self._fail, f"could not fetch entries: {_one_line(e)}")
                 return
         else:
             entries = page_entries
         if worker.is_cancelled:
             return
         if not entries:
-            self.app.call_from_thread(self._fail, "no entries to export")
+            app.call_from_thread(self._fail, "no entries to export")
             return
         try:
             count = export_entries(
@@ -221,13 +223,13 @@ class ExportDialog(ModalScreen):
             )
         except FileExistsError:
             # The file appeared after the check above; ask before replacing it.
-            self.app.call_from_thread(self._ask_overwrite, key)
+            app.call_from_thread(self._ask_overwrite, key)
             return
         except Exception as e:
-            self.app.call_from_thread(self._fail, f"export failed: {_one_line(e)}")
+            app.call_from_thread(self._fail, f"export failed: {_one_line(e)}")
             return
         if not worker.is_cancelled:
-            self.app.call_from_thread(self._done, count, total, output_path)
+            app.call_from_thread(self._done, count, total, output_path)
 
     def _is_live(self) -> bool:
         """True while this dialog is still the open screen (the user has not closed it)."""

@@ -8,12 +8,11 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.css.query import NoMatches
-from textual.markup import escape
 from textual.message import Message
 from textual.screen import ModalScreen
 from textual.widgets import ContentSwitcher, Footer, Static
 
-from ..formatters import resolve_tcss_markup
+from ..formatters import literal, resolve_tcss_markup
 from .screens.base import ContentView, classify_error
 from .state import AppState
 
@@ -35,7 +34,6 @@ HELP_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
     (
         "logs",
         [
-            ("/", "search"),
             ("n", "next page"),
             ("p", "previous page"),
             ("enter", "entry details"),
@@ -53,6 +51,8 @@ HELP_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
         [
             ("r", "refresh the current view"),
             ("e", "export entries"),
+            ("/", "search the logs"),
+            ("tab", "move between panels and fields"),
             ("?", "show or close this help"),
             ("esc", "close a dialog"),
             ("q", "quit"),
@@ -77,8 +77,8 @@ class HelpScreen(ModalScreen):
             for title, rows in HELP_SECTIONS:
                 yield Static(title.upper(), classes="section-label help-section")
                 body = "\n".join(
-                    resolve_tcss_markup(f"[$primary]{escape(key):<{key_width}}[/$primary]")
-                    + escape(description)
+                    resolve_tcss_markup(f"[$primary]{literal(key):<{key_width}}[/$primary]")
+                    + literal(description)
                     for key, description in rows
                 )
                 yield Static(body, classes="help-section-body")
@@ -166,7 +166,7 @@ class CJAAuditApp(App):
             f"[$primary]{key}[/$primary] {self.NAV_LABELS[nav_id]}"
         )
 
-    _STATUS_DOT = {"connecting": "$warning", "connected": "$success", "disconnected": "$danger"}
+    _STATUS_DOT = {"connecting": "$warning", "connected": "$success", "disconnected": "$error"}
 
     def _status_row_text(
         self, status: ConnectionStatus = "connecting", detail: str = ""
@@ -178,9 +178,9 @@ class CJAAuditApp(App):
             detail = f"org {org}" if org else ""
         text = f"cja-audit-log-monitor · [{color}]●[/{color}] {status}"
         if detail:
-            text += f" · [$text-muted]{escape(detail)}[/$text-muted]"
+            text += f" · [$text-muted]{literal(detail)}[/$text-muted]"
         if self.state.config_error_summary:
-            warning = escape(self.state.config_error_summary)
+            warning = literal(self.state.config_error_summary)
             text += f" · [$warning]⚠ {warning}[/$warning]"
         return text
 
@@ -196,7 +196,11 @@ class CJAAuditApp(App):
         """
         self._connection_status = status
         first_line = detail.strip().splitlines()[0] if detail.strip() else ""
-        self.query_one("#status-row", Static).update(self._status_row_text(status, first_line))
+        try:
+            row = self.query_one("#status-row", Static)
+        except NoMatches:
+            return  # the screen is gone (app shutting down): nothing left to update
+        row.update(self._status_row_text(status, first_line))
 
     def note_api_error(self, error: Exception) -> None:
         """Mark the header disconnected when a view's API call failed to connect."""
@@ -228,6 +232,8 @@ class CJAAuditApp(App):
             "settings": SettingsScreen,
         }
         self._screens = {name: cls(self.state, id=f"view-{name}") for name, cls in views.items()}
+
+        self.state.apply_settings_defaults()
 
         # Show dashboard by default
         await self._show_screen("dashboard")
@@ -280,6 +286,16 @@ class CJAAuditApp(App):
                 screen_name = candidate_id.replace("nav-", "")
                 await self._show_screen(screen_name)
                 return
+
+    def settings_reloaded(self) -> None:
+        """Tell the views already shown that the settings were re-read.
+
+        Each one takes the new defaults and reloads its data; views not yet shown pick
+        the defaults up when they are first built. The config view redraws itself.
+        """
+        for name in self._mounted_views:
+            if name != "settings":
+                self._screens[name].on_settings_reloaded()
 
     def action_switch_screen(self, screen_name: str) -> None:
         """Switch to a different screen."""

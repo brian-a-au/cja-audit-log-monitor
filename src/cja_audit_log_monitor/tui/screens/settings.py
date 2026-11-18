@@ -5,9 +5,8 @@ from collections.abc import Iterator
 from textual.containers import Container, Horizontal, Vertical
 from textual.widget import Widget
 from textual.widgets import Button, LoadingIndicator, Static
-from textual.worker import get_current_worker
 
-from ...formatters import resolve_tcss_markup
+from ...formatters import literal, resolve_tcss_markup
 from ...utils import display_path
 from .base import ContentView
 
@@ -35,17 +34,17 @@ class SettingsScreen(ContentView):
             Static("API CONFIGURATION", classes="section-label"),
             Horizontal(
                 Static("config file", classes="settings-label"),
-                Static(display_path(self._state.config_path), classes="settings-value"),
+                Static(literal(display_path(self._state.config_path)), classes="settings-value"),
                 classes="settings-row",
             ),
             Horizontal(
                 Static("api base url", classes="settings-label"),
-                Static(settings.api_base_url, classes="settings-value"),
+                Static(literal(str(settings.api_base_url)), classes="settings-value"),
                 classes="settings-row",
             ),
             Horizontal(
                 Static("ims base url", classes="settings-label"),
-                Static(settings.ims_base_url, classes="settings-value"),
+                Static(literal(str(settings.ims_base_url)), classes="settings-value"),
                 classes="settings-row",
             ),
             classes="settings-section",
@@ -58,12 +57,12 @@ class SettingsScreen(ContentView):
             Static("AUTHENTICATION", classes="section-label"),
             Horizontal(
                 Static("organization id", classes="settings-label"),
-                Static(org_display, classes="settings-value"),
+                Static(literal(org_display), classes="settings-value"),
                 classes="settings-row",
             ),
             Horizontal(
                 Static("client id", classes="settings-label"),
-                Static(client_display, classes="settings-value"),
+                Static(literal(client_display), classes="settings-value"),
                 classes="settings-row",
             ),
             Horizontal(
@@ -170,36 +169,33 @@ class SettingsScreen(ContentView):
 
     def refresh_data(self) -> None:
         """Refresh connection status."""
-        self.set_loading(True)
-        self.run_worker(self._check_connection(), exclusive=True, thread=True)
+        self.run_load(
+            self._state.verify_connection,
+            self._update_connection_status,
+            lambda error: self._update_connection_status(
+                {"connected": False, "error": str(error)}
+            ),
+        )
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
+    async def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button presses."""
         if event.button.id == "verify-button":
             self.refresh_data()
         elif event.button.id == "reload-button":
-            self._state.refresh_client()
-            self.app.notify("Settings refreshed", severity="information")
+            await self._reload_settings()
 
-    async def _check_connection(self) -> None:
-        """Verify API connection."""
-        worker = get_current_worker()
-
+    async def _reload_settings(self) -> None:
+        """Re-read the config file, then redraw this view and the header."""
         try:
-            result = self._state.verify_connection()
-
-            if worker.is_cancelled:
-                return
-
-            self.app.call_from_thread(self._update_connection_status, result)
-
-        except Exception as e:
-            self.app.call_from_thread(
-                self._update_connection_status,
-                {"connected": False, "error": str(e)},
-            )
-        finally:
-            self.app.call_from_thread(self.set_loading, False)
+            self._state.reload_settings()
+        except RuntimeError as error:
+            self.app.notify(str(error), severity="warning")
+            return
+        self.app.settings_reloaded()
+        await self.recompose()
+        self.app.set_connection_status("connecting")
+        self.refresh_data()
+        self.app.notify("Settings reloaded", severity="information")
 
     def _update_connection_status(self, result: dict) -> None:
         """Update connection status display."""
@@ -210,8 +206,8 @@ class SettingsScreen(ContentView):
             status.update(
                 resolve_tcss_markup(
                     f"[$success]●[/$success] connected\n"
-                    f"  organization: {result.get('org_id', 'Unknown')}\n"
-                    f"  api url: {result.get('api_url', 'Unknown')}\n"
+                    f"  organization: {literal(str(result.get('org_id', 'Unknown')))}\n"
+                    f"  api url: {literal(str(result.get('api_url', 'Unknown')))}\n"
                     f"  total logs available: {result.get('total_logs_available', 'N/A'):,}"
                 )
             )
@@ -219,6 +215,8 @@ class SettingsScreen(ContentView):
             error = result.get("error", "Unknown error")
             self.app.set_connection_status("disconnected", str(error))
             status.update(
-                resolve_tcss_markup(f"[$danger]●[/$danger] disconnected\n  error: {error}")
+                resolve_tcss_markup(
+                    f"[$danger]●[/$danger] disconnected\n  error: {literal(str(error))}"
+                )
             )
 

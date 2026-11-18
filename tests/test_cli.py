@@ -12,6 +12,11 @@ from cja_audit_log_monitor.cli import main, parse_date
 from cja_audit_log_monitor.models import AuditLogEntry, AuditLogResponse
 
 
+def _settings() -> MagicMock:
+    """Stand-in settings with the real defaults for the values commands read."""
+    return MagicMock(default_days=7, default_page_size=100, monitor_interval=60)
+
+
 @pytest.fixture
 def runner() -> CliRunner:
     """Create CLI test runner."""
@@ -127,7 +132,7 @@ class TestListCommand:
         mock_client.get_all_logs.return_value = []
         mock_client.__enter__ = MagicMock(return_value=mock_client)
         mock_client.__exit__ = MagicMock(return_value=False)
-        mock_get_client.return_value = (mock_client, MagicMock())
+        mock_get_client.return_value = (mock_client, _settings())
 
         result = runner.invoke(main, ["cli", "list"])
         assert result.exit_code == 0
@@ -145,7 +150,7 @@ class TestListCommand:
         mock_client.get_all_logs.return_value = sample_audit_entries
         mock_client.__enter__ = MagicMock(return_value=mock_client)
         mock_client.__exit__ = MagicMock(return_value=False)
-        mock_get_client.return_value = (mock_client, MagicMock())
+        mock_get_client.return_value = (mock_client, _settings())
 
         result = runner.invoke(main, ["cli", "list", "--limit", "5"])
         assert result.exit_code == 0
@@ -162,7 +167,7 @@ class TestListCommand:
         mock_client.get_all_logs.return_value = sample_audit_entries
         mock_client.__enter__ = MagicMock(return_value=mock_client)
         mock_client.__exit__ = MagicMock(return_value=False)
-        mock_get_client.return_value = (mock_client, MagicMock())
+        mock_get_client.return_value = (mock_client, _settings())
 
         result = runner.invoke(main, ["cli", "list", "--output-format", "json"])
         assert result.exit_code == 0
@@ -184,7 +189,7 @@ class TestSearchCommand:
         mock_client.get_all_logs.return_value = []
         mock_client.__enter__ = MagicMock(return_value=mock_client)
         mock_client.__exit__ = MagicMock(return_value=False)
-        mock_get_client.return_value = (mock_client, MagicMock())
+        mock_get_client.return_value = (mock_client, _settings())
 
         result = runner.invoke(main, ["cli", "search", "--action", "DELETE"])
         assert result.exit_code == 0
@@ -209,7 +214,7 @@ class TestUserCommand:
         mock_client.get_all_logs.return_value = []
         mock_client.__enter__ = MagicMock(return_value=mock_client)
         mock_client.__exit__ = MagicMock(return_value=False)
-        mock_get_client.return_value = (mock_client, MagicMock())
+        mock_get_client.return_value = (mock_client, _settings())
 
         result = runner.invoke(main, ["cli", "user", "--user-id", "test@example.com"])
         assert result.exit_code == 0
@@ -230,7 +235,7 @@ class TestComponentCommand:
         mock_client.get_component_logs.return_value = []
         mock_client.__enter__ = MagicMock(return_value=mock_client)
         mock_client.__exit__ = MagicMock(return_value=False)
-        mock_get_client.return_value = (mock_client, MagicMock())
+        mock_get_client.return_value = (mock_client, _settings())
 
         result = runner.invoke(main, ["cli", "component", "--id", "test-component-id"])
         assert result.exit_code == 0
@@ -252,7 +257,7 @@ class TestExportCommand:
         mock_client.get_all_logs.return_value = sample_audit_entries
         mock_client.__enter__ = MagicMock(return_value=mock_client)
         mock_client.__exit__ = MagicMock(return_value=False)
-        mock_get_client.return_value = (mock_client, MagicMock())
+        mock_get_client.return_value = (mock_client, _settings())
 
         with runner.isolated_filesystem():
             result = runner.invoke(
@@ -273,7 +278,7 @@ class TestExportCommand:
         mock_client.__enter__ = MagicMock(return_value=mock_client)
         mock_client.__exit__ = MagicMock(return_value=False)
         mock_client.get_logs_paginated.return_value = iter(sample_audit_entries)
-        mock_get_client.return_value = (mock_client, MagicMock())
+        mock_get_client.return_value = (mock_client, _settings())
 
         with runner.isolated_filesystem():
             result = runner.invoke(
@@ -302,7 +307,7 @@ class TestStatsCommand:
         mock_client.get_all_logs.return_value = sample_audit_entries
         mock_client.__enter__ = MagicMock(return_value=mock_client)
         mock_client.__exit__ = MagicMock(return_value=False)
-        mock_get_client.return_value = (mock_client, MagicMock())
+        mock_get_client.return_value = (mock_client, _settings())
 
         result = runner.invoke(main, ["cli", "stats", "--output-format", "json"])
         assert result.exit_code == 0
@@ -330,7 +335,7 @@ class TestVerifyCommand:
         }
         mock_client.__enter__ = MagicMock(return_value=mock_client)
         mock_client.__exit__ = MagicMock(return_value=False)
-        mock_get_client.return_value = (mock_client, MagicMock())
+        mock_get_client.return_value = (mock_client, _settings())
 
         result = runner.invoke(main, ["cli", "verify"])
         assert result.exit_code == 0
@@ -353,7 +358,7 @@ class TestVerifyCommand:
         }
         mock_client.__enter__ = MagicMock(return_value=mock_client)
         mock_client.__exit__ = MagicMock(return_value=False)
-        mock_get_client.return_value = (mock_client, MagicMock())
+        mock_get_client.return_value = (mock_client, _settings())
 
         result = runner.invoke(main, ["cli", "verify", "--output-format", "json"])
         assert result.exit_code == 0
@@ -376,7 +381,7 @@ class TestExportSafety:
     def test_export_dash_writes_json_to_stdout(
         self, mock_get_client: MagicMock, runner: CliRunner, sample_audit_entries
     ) -> None:
-        mock_get_client.return_value = (self._client(sample_audit_entries), MagicMock())
+        mock_get_client.return_value = (self._client(sample_audit_entries), _settings())
 
         with runner.isolated_filesystem():
             result = runner.invoke(main, ["cli", "export", "-o", "-", "--days", "1"])
@@ -391,7 +396,7 @@ class TestExportSafety:
     def test_export_dash_csv_to_stdout(
         self, mock_get_client: MagicMock, runner: CliRunner, sample_audit_entries
     ) -> None:
-        mock_get_client.return_value = (self._client(sample_audit_entries), MagicMock())
+        mock_get_client.return_value = (self._client(sample_audit_entries), _settings())
 
         result = runner.invoke(main, ["cli", "export", "-f", "csv", "-o", "-", "--days", "1"])
 
@@ -417,7 +422,7 @@ class TestExportSafety:
     def test_force_overwrites(
         self, mock_get_client: MagicMock, runner: CliRunner, sample_audit_entries, tmp_path
     ) -> None:
-        mock_get_client.return_value = (self._client(sample_audit_entries), MagicMock())
+        mock_get_client.return_value = (self._client(sample_audit_entries), _settings())
         target = tmp_path / "out.json"
         target.write_text("old")
 
@@ -430,7 +435,7 @@ class TestExportSafety:
     def test_missing_directory_is_one_line_error(
         self, mock_get_client: MagicMock, runner: CliRunner, sample_audit_entries, tmp_path
     ) -> None:
-        mock_get_client.return_value = (self._client(sample_audit_entries), MagicMock())
+        mock_get_client.return_value = (self._client(sample_audit_entries), _settings())
         target = tmp_path / "missing" / "x.csv"
 
         result = runner.invoke(
@@ -448,7 +453,7 @@ class TestExportSafety:
         self, mock_get_client: MagicMock, runner: CliRunner, sample_audit_entries
     ) -> None:
         entries = sample_audit_entries[:2]
-        mock_get_client.return_value = (self._client(entries), MagicMock())
+        mock_get_client.return_value = (self._client(entries), _settings())
 
         exact = runner.invoke(main, ["cli", "report", "--max-entries", "2"])
         over = runner.invoke(main, ["cli", "report", "--max-entries", "1"])
@@ -486,7 +491,7 @@ class TestReportCommand:
         mock_client.get_all_logs.return_value = sample_audit_entries
         mock_client.__enter__ = MagicMock(return_value=mock_client)
         mock_client.__exit__ = MagicMock(return_value=False)
-        mock_get_client.return_value = (mock_client, MagicMock())
+        mock_get_client.return_value = (mock_client, _settings())
 
         result = runner.invoke(main, ["cli", "report", "--days", "1"])
         assert result.exit_code == 0
@@ -504,7 +509,7 @@ class TestReportCommand:
         mock_client.get_all_logs.return_value = sample_audit_entries
         mock_client.__enter__ = MagicMock(return_value=mock_client)
         mock_client.__exit__ = MagicMock(return_value=False)
-        mock_get_client.return_value = (mock_client, MagicMock())
+        mock_get_client.return_value = (mock_client, _settings())
 
         with runner.isolated_filesystem():
             result = runner.invoke(main, ["cli", "report", "--output", "report.json"])
@@ -523,7 +528,7 @@ class TestReportCommand:
         mock_client.get_all_logs.return_value = sample_audit_entries[:2]
         mock_client.__enter__ = MagicMock(return_value=mock_client)
         mock_client.__exit__ = MagicMock(return_value=False)
-        mock_get_client.return_value = (mock_client, MagicMock())
+        mock_get_client.return_value = (mock_client, _settings())
 
         result = runner.invoke(main, ["cli", "report", "--days", "1", "--max-entries", "1"])
         assert result.exit_code == 0
@@ -546,7 +551,7 @@ class TestQueryCommand:
         mock_client.get_all_logs.return_value = []
         mock_client.__enter__ = MagicMock(return_value=mock_client)
         mock_client.__exit__ = MagicMock(return_value=False)
-        mock_get_client.return_value = (mock_client, MagicMock())
+        mock_get_client.return_value = (mock_client, _settings())
 
         result = runner.invoke(main, ["cli", "query", "--today"])
         assert result.exit_code == 0
@@ -562,7 +567,7 @@ class TestQueryCommand:
         mock_client.get_all_logs.return_value = []
         mock_client.__enter__ = MagicMock(return_value=mock_client)
         mock_client.__exit__ = MagicMock(return_value=False)
-        mock_get_client.return_value = (mock_client, MagicMock())
+        mock_get_client.return_value = (mock_client, _settings())
 
         result = runner.invoke(main, ["cli", "query", "--yesterday"])
         assert result.exit_code == 0
@@ -578,7 +583,7 @@ class TestQueryCommand:
         mock_client.get_all_logs.return_value = []
         mock_client.__enter__ = MagicMock(return_value=mock_client)
         mock_client.__exit__ = MagicMock(return_value=False)
-        mock_get_client.return_value = (mock_client, MagicMock())
+        mock_get_client.return_value = (mock_client, _settings())
 
         result = runner.invoke(main, ["cli", "query", "--last-week"])
         assert result.exit_code == 0
@@ -615,7 +620,7 @@ class TestTimelineCommand:
         mock_client.get_all_logs.return_value = sample_audit_entries
         mock_client.__enter__ = MagicMock(return_value=mock_client)
         mock_client.__exit__ = MagicMock(return_value=False)
-        mock_get_client.return_value = (mock_client, MagicMock())
+        mock_get_client.return_value = (mock_client, _settings())
 
         result = runner.invoke(main, ["cli", "timeline", "--days", "1"])
         assert result.exit_code == 0
@@ -636,7 +641,7 @@ class TestFindActionCommand:
         mock_client.get_all_logs.return_value = []
         mock_client.__enter__ = MagicMock(return_value=mock_client)
         mock_client.__exit__ = MagicMock(return_value=False)
-        mock_get_client.return_value = (mock_client, MagicMock())
+        mock_get_client.return_value = (mock_client, _settings())
 
         result = runner.invoke(main, ["cli", "find-action", "--action", "DELETE"])
         assert result.exit_code == 0
@@ -657,7 +662,7 @@ class TestTopUsersCommand:
         mock_client.get_all_logs.return_value = sample_audit_entries
         mock_client.__enter__ = MagicMock(return_value=mock_client)
         mock_client.__exit__ = MagicMock(return_value=False)
-        mock_get_client.return_value = (mock_client, MagicMock())
+        mock_get_client.return_value = (mock_client, _settings())
 
         result = runner.invoke(main, ["cli", "top-users", "--days", "1"])
         assert result.exit_code == 0
@@ -686,7 +691,7 @@ class TestTailCommand:
             ],
             last=True,
         )
-        mock_get_client.return_value = (mock_client, MagicMock())
+        mock_get_client.return_value = (mock_client, _settings())
 
         def run_single_poll(monitor, *args, **kwargs):
             monitor._get_new_entries()
@@ -1703,7 +1708,7 @@ class TestJsonOutputIsMachineSafe:
         mock_client.__exit__ = MagicMock(return_value=False)
 
         with (
-            patch("cja_audit_log_monitor.cli.get_client", return_value=(mock_client, MagicMock())),
+            patch("cja_audit_log_monitor.cli.get_client", return_value=(mock_client, _settings())),
             patch("cja_audit_log_monitor.cli.load_config") as mock_load,
         ):
             mock_load.return_value.alert_rules = []
@@ -1731,7 +1736,7 @@ class TestDataIsNotMarkup:
         self, mock_get_client: MagicMock, runner: CliRunner, sample_audit_entry
     ) -> None:
         entry = sample_audit_entry.model_copy(update={"component_name": "Q3 [/final] report"})
-        mock_get_client.return_value = (_fake_client([entry]), MagicMock())
+        mock_get_client.return_value = (_fake_client([entry]), _settings())
 
         result = runner.invoke(main, ["cli", "list"], env={"COLUMNS": "200"})
 
@@ -1745,7 +1750,7 @@ class TestDataIsNotMarkup:
         entry = sample_audit_entry.model_copy(
             update={"user_id": "[/]evil", "user_email": None, "user_name": None}
         )
-        mock_get_client.return_value = (_fake_client([entry]), MagicMock())
+        mock_get_client.return_value = (_fake_client([entry]), _settings())
 
         result = runner.invoke(main, ["cli", "stats"], env={"COLUMNS": "200"})
 
@@ -1764,7 +1769,7 @@ class TestHandleCliErrors:
 
         client = _fake_client([])
         client.get_all_logs.side_effect = APIError("boom [/oops]")
-        mock_get_client.return_value = (client, MagicMock())
+        mock_get_client.return_value = (client, _settings())
 
         result = runner.invoke(main, ["cli", "list"])
 
@@ -1795,7 +1800,7 @@ class TestHandleCliErrors:
         self, mock_get_client: MagicMock, runner: CliRunner, tmp_path
     ) -> None:
         client = _fake_client([])
-        mock_get_client.return_value = (client, MagicMock())
+        mock_get_client.return_value = (client, _settings())
         target = tmp_path / "out.json"
         client.get_all_logs.return_value = [MagicMock()]
 
@@ -1817,7 +1822,7 @@ class TestHandleCliErrors:
     ) -> None:
         client = _fake_client([])
         client.get_all_logs.side_effect = KeyboardInterrupt
-        mock_get_client.return_value = (client, MagicMock())
+        mock_get_client.return_value = (client, _settings())
 
         result = runner.invoke(main, ["cli", "list"])
 
@@ -1851,7 +1856,7 @@ class TestExitCodes:
                 "error": "boom",
             }
         )
-        mock_get_client.return_value = (client, MagicMock())
+        mock_get_client.return_value = (client, _settings())
         result = runner.invoke(main, ["cli", "verify", "-F", fmt])
         assert result.exit_code == 1
 
@@ -1861,7 +1866,7 @@ class TestExitCodes:
     ) -> None:
         client = _mock_client()
         client.get_logs_paginated.return_value = iter([])
-        mock_get_client.return_value = (client, MagicMock())
+        mock_get_client.return_value = (client, _settings())
         result = runner.invoke(main, ["cli", "show", "missing-id"])
         assert result.exit_code == 1
         assert "Entry not found: missing-id" in result.stderr
@@ -1956,7 +1961,7 @@ class TestDateRangeValidation:
         self, mock_get_client: MagicMock, runner: CliRunner
     ) -> None:
         client = _mock_client(get_all_logs=[])
-        mock_get_client.return_value = (client, MagicMock())
+        mock_get_client.return_value = (client, _settings())
         result = runner.invoke(main, ["cli", "search", "-s", "2026-01-01", "-e", "2026-01-01"])
         assert result.exit_code == 0
         query = client.get_all_logs.call_args.args[0]
@@ -1968,7 +1973,7 @@ class TestDateRangeValidation:
         self, mock_get_client: MagicMock, runner: CliRunner, tmp_path
     ) -> None:
         client = _mock_client(get_all_logs=[])
-        mock_get_client.return_value = (client, MagicMock())
+        mock_get_client.return_value = (client, _settings())
         out = str(tmp_path / "x.json")
         result = runner.invoke(
             main, ["cli", "export", "-o", out, "-s", "2026-01-01", "-e", "2026-01-01"]
@@ -1999,7 +2004,7 @@ class TestStatsTopFlag:
             for i in range(15)
         ]
         client = _mock_client(get_all_logs=entries)
-        mock_get_client.return_value = (client, MagicMock())
+        mock_get_client.return_value = (client, _settings())
         result = runner.invoke(main, ["cli", "stats", "--top", "15", "-F", "json"])
         assert result.exit_code == 0
         assert len(json.loads(result.stdout)["statistics"]["top_users"]) == 15
@@ -2024,7 +2029,7 @@ class TestEmptyResultsAndStreams:
     def test_empty_result_is_valid_json(
         self, mock_get_client: MagicMock, runner: CliRunner, args: list[str]
     ) -> None:
-        mock_get_client.return_value = (self._empty_client(), MagicMock())
+        mock_get_client.return_value = (self._empty_client(), _settings())
 
         result = runner.invoke(main, ["cli", *args])
 
@@ -2044,7 +2049,7 @@ class TestEmptyResultsAndStreams:
     def test_empty_report_writes_output_file(
         self, mock_get_client: MagicMock, runner: CliRunner, tmp_path
     ) -> None:
-        mock_get_client.return_value = (self._empty_client(), MagicMock())
+        mock_get_client.return_value = (self._empty_client(), _settings())
         out = tmp_path / "r.json"
 
         result = runner.invoke(main, ["cli", "report", "-o", str(out)])
@@ -2167,7 +2172,7 @@ class TestExportRaces:
             return sample_audit_entries
 
         client.get_all_logs.side_effect = fetch_then_appear
-        mock_get_client.return_value = (client, MagicMock())
+        mock_get_client.return_value = (client, _settings())
 
         result = runner.invoke(main, ["cli", "export", "-o", str(target)])
 
@@ -2187,7 +2192,7 @@ class TestExportRaces:
             return sample_audit_entries
 
         client.get_all_logs.side_effect = fetch_then_appear
-        mock_get_client.return_value = (client, MagicMock())
+        mock_get_client.return_value = (client, _settings())
 
         result = runner.invoke(main, ["cli", "report", "-o", str(target)])
 
@@ -2211,7 +2216,7 @@ class TestExportRaces:
     def test_export_tsv_to_stdout(
         self, mock_get_client: MagicMock, runner: CliRunner, sample_audit_entries
     ) -> None:
-        mock_get_client.return_value = (self._client(sample_audit_entries), MagicMock())
+        mock_get_client.return_value = (self._client(sample_audit_entries), _settings())
         result = runner.invoke(main, ["cli", "export", "-f", "tsv", "-o", "-", "--days", "1"])
         assert result.exit_code == 0, result.output
         assert result.stdout.splitlines()[0].startswith("id\ttimestamp")
@@ -2220,9 +2225,70 @@ class TestExportRaces:
     def test_report_dash_goes_to_stdout(
         self, mock_get_client: MagicMock, runner: CliRunner, sample_audit_entries
     ) -> None:
-        mock_get_client.return_value = (self._client(sample_audit_entries), MagicMock())
+        mock_get_client.return_value = (self._client(sample_audit_entries), _settings())
         with runner.isolated_filesystem():
             result = runner.invoke(main, ["cli", "report", "-o", "-", "--days", "1"])
             assert not Path("-").exists()
         assert result.exit_code == 0, result.output
-        assert "statistics" in json.loads(result.stdout) or json.loads(result.stdout)
+        report = json.loads(result.stdout)
+        assert sum(report["action_distribution"].values()) == len(sample_audit_entries)
+
+
+class TestConfiguredDefaults:
+    """Commands fall back to default_days and monitor_interval."""
+
+    @staticmethod
+    def _client() -> MagicMock:
+        client = MagicMock()
+        client.get_all_logs.return_value = []
+        client.__enter__ = MagicMock(return_value=client)
+        client.__exit__ = MagicMock(return_value=False)
+        return client
+
+    @patch("cja_audit_log_monitor.cli.get_client")
+    def test_stats_uses_default_days(self, mock_get_client: MagicMock, runner: CliRunner) -> None:
+        client = self._client()
+        settings = _settings()
+        settings.default_days = 3
+        mock_get_client.return_value = (client, settings)
+        result = runner.invoke(main, ["cli", "stats", "--output-format", "json"])
+        assert result.exit_code == 0
+        query = client.get_all_logs.call_args.args[0]
+        assert (query.end_date - query.start_date).days == 3
+        assert json.loads(result.output)["days"] == 3
+
+    @patch("cja_audit_log_monitor.cli.get_client")
+    def test_explicit_days_beats_the_setting(
+        self, mock_get_client: MagicMock, runner: CliRunner
+    ) -> None:
+        client = self._client()
+        settings = _settings()
+        settings.default_days = 3
+        mock_get_client.return_value = (client, settings)
+        result = runner.invoke(main, ["cli", "stats", "--days", "10"])
+        assert result.exit_code == 0
+        query = client.get_all_logs.call_args.args[0]
+        assert (query.end_date - query.start_date).days == 10
+
+    @patch("cja_audit_log_monitor.cli.AuditLogMonitor")
+    @patch("cja_audit_log_monitor.cli.get_client")
+    def test_monitor_uses_configured_interval(
+        self, mock_get_client: MagicMock, mock_monitor: MagicMock, runner: CliRunner
+    ) -> None:
+        settings = _settings()
+        settings.monitor_interval = 30
+        settings.alert_rules = []
+        mock_get_client.return_value = (self._client(), settings)
+        mock_monitor.return_value.successful_polls = 1
+        result = runner.invoke(main, ["cli", "monitor", "--duration", "1", "--no-alerts"])
+        assert result.exit_code == 0
+        assert mock_monitor.call_args.kwargs["interval"] == 30
+
+    def test_help_says_the_default_comes_from_config(self, runner: CliRunner) -> None:
+        result = runner.invoke(main, ["cli", "stats", "--help"])
+        assert "from config" in " ".join(result.output.split())
+
+    def test_init_template_has_no_output_format(self, runner: CliRunner) -> None:
+        with runner.isolated_filesystem():
+            runner.invoke(main, ["--config", "c.yaml", "cli", "init"])
+            assert "output_format" not in Path("c.yaml").read_text()

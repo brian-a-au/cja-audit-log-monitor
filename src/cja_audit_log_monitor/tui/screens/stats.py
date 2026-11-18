@@ -6,9 +6,8 @@ from datetime import datetime, timedelta
 from textual.containers import Horizontal, Vertical
 from textual.widget import Widget
 from textual.widgets import Button, Input, Label, LoadingIndicator, Static
-from textual.worker import get_current_worker
 
-from ...formatters import TCSS_TOKEN_HEX, render_bar
+from ...formatters import TCSS_TOKEN_HEX, literal, render_bar
 from ...stats import (
     build_date_range_query,
     calculate_stats,
@@ -21,7 +20,6 @@ from ..state import AppState
 from ..widgets import ActionBarChart, FittedStatic, HourlyChart
 from .base import (
     ContentView,
-    error_message,
     no_activity_message,
     sample_note,
     show_sample_note,
@@ -42,7 +40,6 @@ class StatsScreen(ContentView):
             **kwargs: Additional arguments for Screen.
         """
         super().__init__(state, **kwargs)
-        self._days = 7
         self._daily: list[tuple[str, int]] = []
         self._users: list[tuple[str, int]] = []
         self._lists_loaded = False
@@ -52,7 +49,9 @@ class StatsScreen(ContentView):
         yield Static("statistics", id="stats-title", classes="section-label view-title")
         yield Horizontal(
             Label("days"),
-            Input(value="7", id="days-input", type="integer", compact=True),
+            Input(
+                value=str(self._state.stats_days), id="days-input", type="integer", compact=True
+            ),
             Button("update", id="update-button", variant="primary", compact=True),
             id="stats-controls",
             classes="toolbar",
@@ -109,55 +108,56 @@ class StatsScreen(ContentView):
 
     def refresh_data(self) -> None:
         """Refresh statistics data."""
-        self.set_loading(True)
-        self.run_worker(self._load_data(), exclusive=True, thread=True)
+        days = self._state.stats_days
+        self.run_load(lambda: self._fetch(days), lambda load: self._show_load(days, load))
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button presses."""
         if event.button.id == "update-button":
-            try:
-                self._days = int(self.query_one("#days-input", Input).value)
-                if self._days < 1:
-                    self._days = 1
-            except ValueError:
-                self._days = 7
+            self._apply_days()
 
-            self.refresh_data()
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        """Enter in the days box applies it, like the update button."""
+        if event.input.id == "days-input":
+            event.stop()
+            self._apply_days()
 
-    async def _load_data(self) -> None:
-        """Load statistics data."""
-        worker = get_current_worker()
+    def on_settings_reloaded(self) -> None:
+        """Show the reloaded default days and reload the statistics for them."""
+        self.query_one("#days-input", Input).value = str(self._state.stats_days)
+        self.refresh_data()
 
+    def _apply_days(self) -> None:
+        """Read the days box, show the value actually used, and reload."""
+        box = self.query_one("#days-input", Input)
         try:
-            query = build_date_range_query(self._days)
-            entries, total = self._state.client.get_logs_sample(query, max_entries=STATS_SAMPLE)
+            self._state.stats_days = max(1, int(box.value))
+        except ValueError:
+            self._state.stats_days = self._state.settings.default_days
+        box.value = str(self._state.stats_days)
+        self.refresh_data()
 
-            if worker.is_cancelled:
-                return
+    def _fetch(self, days: int) -> tuple | None:
+        """Sample and analyze the last ``days`` days (worker thread); None when empty."""
+        query = build_date_range_query(days)
+        entries, total = self._state.client.get_logs_sample(query, max_entries=STATS_SAMPLE)
+        if not entries:
+            return None
+        return (
+            calculate_stats(entries),
+            get_hourly_distribution(entries, local=True),
+            get_daily_distribution(entries, local=True),
+            get_user_activity(entries),
+            total,
+        )
 
-            if not entries:
-                self.app.call_from_thread(self.app.note_api_ok)
-                self.app.call_from_thread(self.set_empty_state, no_activity_message(self._days))
-                return
-
-            # Calculate all statistics
-            stats = calculate_stats(entries)
-            hourly = get_hourly_distribution(entries, local=True)
-            daily = get_daily_distribution(entries, local=True)
-            users = get_user_activity(entries)
-
-            self.app.call_from_thread(self.app.note_api_ok)
-            self.app.call_from_thread(self._update_display, stats, hourly, daily, users, total)
-
-        except Exception as e:
-            self.app.call_from_thread(self._show_error, e)
-        finally:
-            self.app.call_from_thread(self.set_loading, False)
-
-    def _show_error(self, error: Exception) -> None:
-        """Report a failed API call in the view, and in the header if it was a connection."""
-        self.app.note_api_error(error)
-        self.set_empty_state(error_message(error))
+    def _show_load(self, days: int, load: tuple | None) -> None:
+        """Show a finished load, or the no-activity message for an empty window."""
+        self.app.note_api_ok()
+        if load is None:
+            self.set_empty_state(no_activity_message(days))
+        else:
+            self._update_display(*load)
 
     def _update_display(
         self,
@@ -176,7 +176,7 @@ class StatsScreen(ContentView):
         show_sample_note(self, shown, total)
         self.query_one("#stats-users", Static).update(f"{len(users):,}")
         now = datetime.now().astimezone()
-        start = now - timedelta(days=self._days)
+        start = now - timedelta(days=self._state.stats_days)
         self.query_one("#stats-period", Static).update(f"{start:%Y-%m-%d} → {now:%Y-%m-%d}")
 
         self.query_one("#stats-action-chart", ActionBarChart).update_data(
@@ -203,11 +203,13 @@ class StatsScreen(ContentView):
         primary = TCSS_TOKEN_HEX["$primary"]
         max_daily = max((count for _, count in self._daily), default=0)
         daily_lines = [
-            f"{day[5:]}  [{primary}]{render_bar(count, max_daily, bar_width).ljust(bar_width)}"
+            f"{literal(day[5:])}  "
+            f"[{primary}]{render_bar(count, max_daily, bar_width).ljust(bar_width)}"
             f"[/{primary}] {count:>5,}"
             for day, count in self._daily
         ]
-        daily_widget.update("\n".join(daily_lines) or no_activity_message(self._days))
+        days = self._state.stats_days
+        daily_widget.update("\n".join(daily_lines) or no_activity_message(days))
 
         ranking_widget = self.query_one("#user-ranking", Static)
         # "NN. " (4) + name + " " + 5-digit count (6).
@@ -215,8 +217,8 @@ class StatsScreen(ContentView):
         user_lines = []
         for rank, (user, count) in enumerate(self._users, 1):
             name = user if len(user) <= name_width else user[: name_width - 1] + "…"
-            user_lines.append(f"{rank:>2}. {name:<{name_width}} {count:>5,}")
-        ranking_widget.update("\n".join(user_lines) or no_activity_message(self._days))
+            user_lines.append(f"{rank:>2}. {literal(f'{name:<{name_width}}')} {count:>5,}")
+        ranking_widget.update("\n".join(user_lines) or no_activity_message(days))
 
 
 

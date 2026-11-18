@@ -88,7 +88,6 @@ class AppState:
         self.total_entries: int = 0
         # True once the log browser has loaded a page; until then entries/total are unknown.
         self.page_loaded: bool = False
-        self.selected_entry: AuditLogEntry | None = None
 
         # Filter state
         self.filters = FilterState()
@@ -96,8 +95,8 @@ class AppState:
         # Monitor state
         self.monitor = MonitorState()
 
-        # Alerts
-        self.recent_alerts: list[FiredAlert] = []
+        # Days the statistics view looks back; starts at the configured default_days.
+        self.stats_days: int = 7
 
         # Connection state
         self.is_connected: bool = False
@@ -178,6 +177,44 @@ class AppState:
                 self._client = None
             self._token_manager = None
 
+    def reload_settings(self) -> None:
+        """Re-read the config file and drop everything built from the old settings.
+
+        Clears the cached settings (and any config warning), the alert engine, the
+        notification manager and the client; each is rebuilt lazily from the new
+        settings on next use.
+
+        Raises:
+            RuntimeError: While the monitor runs. Closing the client would break its
+                in-flight request, and a new engine would drop its event history.
+        """
+        if self.monitor.is_running:
+            raise RuntimeError("stop the monitor first")
+        self._settings = None
+        self.config_error = None
+        self.config_error_summary = None
+        self.is_connected = False
+        self.connection_error = None
+        self._alert_engine = None
+        if self._notification_manager:
+            self._notification_manager.close()
+            self._notification_manager = None
+        self.refresh_client()
+        self.apply_settings_defaults()  # loads now, so a bad file sets the config warning
+
+    def apply_settings_defaults(self) -> None:
+        """Start the page size, monitor interval and stats days from the settings.
+
+        Called at startup and after a reload. It resets the log page to the first, since
+        the page size may have changed. Views read these values when they are built or told
+        the settings were reloaded.
+        """
+        settings = self.settings
+        self.filters.page_size = settings.default_page_size
+        self.filters.page = 0
+        self.monitor.interval = settings.monitor_interval
+        self.stats_days = settings.default_days
+
     def verify_connection(self) -> dict:
         """Verify API connection and authentication.
 
@@ -198,32 +235,17 @@ class AppState:
                 "error": str(e),
             }
 
-    def fetch_logs(self, max_entries: int | None = None) -> list[AuditLogEntry]:
-        """Fetch audit logs based on current filters.
-
-        Args:
-            max_entries: Maximum number of entries to fetch.
-
-        Returns:
-            List of audit log entries.
-        """
-        query = self.filters.to_query()
-        self.entries = self.client.get_all_logs(query, max_entries=max_entries)
-        self.last_refresh = datetime.now()
-        return self.entries
-
     def fetch_logs_page(self) -> tuple[list[AuditLogEntry], int]:
-        """Fetch a single page of logs.
+        """Fetch the page the filters select, without storing it.
+
+        Runs in worker threads, so it leaves ``entries`` alone: the log browser
+        stores a page only once it is the newest load.
 
         Returns:
             Tuple of (entries list, total count).
         """
-        query = self.filters.to_query()
-        response = self.client.get_logs(query)
-        self.entries = response.content
-        self.total_entries = response.total_elements
-        self.last_refresh = datetime.now()
-        return self.entries, self.total_entries
+        response = self.client.get_logs(self.filters.to_query())
+        return response.content, response.total_elements
 
     def check_alerts(self, entries: list[AuditLogEntry]) -> list[FiredAlert]:
         """Check entries against alert rules and dispatch to notification channels.
@@ -235,9 +257,6 @@ class AppState:
             List of FiredAlert objects for triggered rules.
         """
         fired = self.alert_engine.check_batch(entries)
-        self.recent_alerts.extend(fired)
-        self.recent_alerts = self.recent_alerts[-50:]
-
         # Best-effort dispatch: never let a notification bug block alert display
         nm = self.notification_manager
         if nm.is_configured():

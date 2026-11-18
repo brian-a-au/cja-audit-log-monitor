@@ -106,16 +106,19 @@ class LogTable(DataTable):
 
     def _build_row(self, entry: AuditLogEntry) -> list:
         row_data = [
-            format_timestamp(entry.timestamp, local=True),
-            self._truncate(get_user_identifier(entry, default="-"), self.COLUMN_WIDTHS["user"]),
+            Text(format_timestamp(entry.timestamp, local=True), no_wrap=True),
+            Text(
+                self._truncate(get_user_identifier(entry, default="-"), self.COLUMN_WIDTHS["user"]),
+                no_wrap=True,
+            ),
             self._format_action_cell(entry.action),
-            entry.component_type or "-",
-            entry.component_name or entry.component_id or "-",
+            Text(entry.component_type or "-", no_wrap=True),
+            Text(entry.component_name or entry.component_id or "-", no_wrap=True),
         ]
         if self._show_details:
             row_data.extend([
-                (entry.description or "-")[:35],
-                entry.ip_address or "-",
+                Text((entry.description or "-")[:35], no_wrap=True),
+                Text(entry.ip_address or "-", no_wrap=True),
             ])
         return row_data
 
