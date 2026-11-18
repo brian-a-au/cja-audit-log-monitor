@@ -69,3 +69,9 @@ The images in `docs/screenshots/` come from the real app, run headless with only
 uv run python scripts/capture_screenshots.py                                 # 140x42, into docs/screenshots
 uv run python scripts/capture_screenshots.py --size 100x30 --out /tmp/shots  # check a narrow terminal
 ```
+
+The slideshow at the top of the README, `docs/showcase.gif`, uses the same synthetic data. The script drives the app through seven views, saves a screenshot of each, and joins them into a GIF. It also saves the first slide as `docs/showcase.png`. You need Google Chrome and FFmpeg:
+
+```bash
+uv run python scripts/make_showcase.py   # writes docs/showcase.gif and docs/showcase.png
+```

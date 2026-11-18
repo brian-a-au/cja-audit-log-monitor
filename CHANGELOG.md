@@ -4,6 +4,15 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- A slideshow of the app at the top of the README. `scripts/make_showcase.py` makes it from synthetic data.
+
+### Fixed
+
+- Quitting the TUI while the monitor runs no longer holds the terminal until the next poll, which took up to 60 seconds with the default interval.
+- Stopping the monitor and starting it again within one interval no longer leaves two loops polling the API.
+
 ## [0.1.0] - Unreleased
 
 This is the first public release.
