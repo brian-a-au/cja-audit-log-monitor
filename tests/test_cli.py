@@ -1,5 +1,6 @@
 """Tests for CLI commands."""
 
+import json
 from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
@@ -1536,3 +1537,67 @@ class TestMonitorFatalAndTailFilter:
         assert captured["filter"] is not None
         assert "mine-comp" in result.output
         assert "other-comp" not in result.output
+
+
+class TestJsonOutputIsMachineSafe:
+    """-F json writes only valid JSON to stdout, whatever the data contains."""
+
+    NAME = "[red]x[/red] [/oops]"
+
+    @pytest.mark.parametrize(
+        ("args", "has_name"),
+        [
+            (["list", "-F", "json"], True),
+            (["search", "-F", "json"], True),
+            (["user", "-u", "someone", "-F", "json"], True),
+            (["component", "-i", "comp-1", "-F", "json"], True),
+            (["query", "--today", "-F", "json"], True),
+            (["verify", "-F", "json"], False),
+            (["stats", "-F", "json"], False),
+            (["alerts", "list", "-F", "json"], False),
+            (["report"], False),
+        ],
+        ids=[
+            "list", "search", "user", "component", "query", "verify", "stats", "alerts-list",
+            "report",
+        ],
+    )
+    def test_stdout_is_valid_json(
+        self, runner: CliRunner, args: list[str], has_name: bool
+    ) -> None:
+        entry = AuditLogEntry(
+            id="entry-1",
+            timestamp=datetime(2024, 1, 15, 10, 30, 0, tzinfo=UTC),
+            user_id="user-1",
+            user_email="user@example.com",
+            action="CREATE",
+            component_type="PROJECT",
+            component_id="comp-1",
+            component_name=self.NAME,
+            description="d" * 200,
+        )
+        mock_client = MagicMock()
+        mock_client.get_all_logs.return_value = [entry]
+        mock_client.get_component_logs.return_value = [entry]
+        mock_client.verify_connection.return_value = {
+            "connected": True,
+            "authenticated": True,
+            "org_id": "org",
+            "api_url": "https://example.invalid",
+            "total_logs_available": 1,
+            "error": None,
+        }
+        mock_client.__enter__ = MagicMock(return_value=mock_client)
+        mock_client.__exit__ = MagicMock(return_value=False)
+
+        with (
+            patch("cja_audit_log_monitor.cli.get_client", return_value=(mock_client, MagicMock())),
+            patch("cja_audit_log_monitor.cli.load_config") as mock_load,
+        ):
+            mock_load.return_value.alert_rules = []
+            result = runner.invoke(main, ["-v", "cli", *args])
+
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.stdout)
+        if has_name:
+            assert data["entries"][0]["component_name"] == self.NAME

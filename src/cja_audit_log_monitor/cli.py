@@ -1,11 +1,13 @@
 """CLI commands for CJA Audit Log Monitor."""
 
+import json
 import logging
 import sys
 import time
 from datetime import UTC, datetime, timedelta
 from itertools import chain, islice
 from pathlib import Path
+from typing import Any
 
 import click
 from rich.console import Console
@@ -37,6 +39,12 @@ from .stats import build_date_range_query, calculate_stats, generate_report
 from .utils import get_user_identifier
 
 console = Console()
+err_console = Console(stderr=True)
+
+
+def emit_json(data: Any) -> None:
+    """Write machine-readable JSON to stdout, bypassing Rich markup and wrapping."""
+    click.echo(json.dumps(data, indent=2, default=str))
 
 
 def setup_logging(verbose: bool) -> None:
@@ -45,7 +53,7 @@ def setup_logging(verbose: bool) -> None:
     logging.basicConfig(
         level=level,
         format="%(message)s",
-        handlers=[RichHandler(console=console, show_time=False, show_path=False)],
+        handlers=[RichHandler(console=err_console, show_time=False, show_path=False)],
     )
 
 
@@ -57,7 +65,7 @@ def get_client(config_path: Path | None = None) -> tuple[AuditLogsClient, CJASet
         client = AuditLogsClient(settings, token_manager)
         return client, settings
     except Exception as e:
-        console.print(f"[red]Error loading configuration:[/red] {e}")
+        err_console.print(f"[red]Error loading configuration:[/red] {e}")
         sys.exit(1)
 
 
@@ -204,28 +212,26 @@ def cli_list(
 
         if not entries:
             if output_format == "json":
-                import json
-                console.print(json.dumps({"entries": [], "count": 0}))
+                emit_json({"entries": [], "count": 0})
             else:
                 console.print("[dim]No audit logs found.[/dim]")
             return
 
         if output_format == "json":
-            import json
 
             from .export import entry_to_dict
             data = {"entries": [entry_to_dict(e) for e in entries], "count": len(entries)}
-            console.print(json.dumps(data, indent=2, default=str))
+            emit_json(data)
         else:
             table = format_logs_table(entries, show_details=details)
             console.print(table)
             console.print(f"\n[dim]Showing {len(entries)} entries[/dim]")
 
     except AuthenticationError as e:
-        console.print(f"[red]Authentication error:[/red] {e}")
+        err_console.print(f"[red]Authentication error:[/red] {e}")
         sys.exit(1)
     except APIError as e:
-        console.print(f"[red]API error:[/red] {e}")
+        err_console.print(f"[red]API error:[/red] {e}")
         sys.exit(1)
 
 
@@ -292,28 +298,26 @@ def search(
 
         if not entries:
             if output_format == "json":
-                import json
-                console.print(json.dumps({"entries": [], "count": 0}))
+                emit_json({"entries": [], "count": 0})
             else:
                 console.print("[dim]No matching audit logs found.[/dim]")
             return
 
         if output_format == "json":
-            import json
 
             from .export import entry_to_dict
             data = {"entries": [entry_to_dict(e) for e in entries], "count": len(entries)}
-            console.print(json.dumps(data, indent=2, default=str))
+            emit_json(data)
         else:
             table = format_logs_table(entries, show_details=details)
             console.print(table)
             console.print(f"\n[dim]Found {len(entries)} matching entries[/dim]")
 
     except AuthenticationError as e:
-        console.print(f"[red]Authentication error:[/red] {e}")
+        err_console.print(f"[red]Authentication error:[/red] {e}")
         sys.exit(1)
     except APIError as e:
-        console.print(f"[red]API error:[/red] {e}")
+        err_console.print(f"[red]API error:[/red] {e}")
         sys.exit(1)
 
 
@@ -342,10 +346,10 @@ def dashboard(ctx: click.Context, dashboard_id: str, limit: int) -> None:
         console.print(f"\n[dim]Found {len(entries)} entries[/dim]")
 
     except AuthenticationError as e:
-        console.print(f"[red]Authentication error:[/red] {e}")
+        err_console.print(f"[red]Authentication error:[/red] {e}")
         sys.exit(1)
     except APIError as e:
-        console.print(f"[red]API error:[/red] {e}")
+        err_console.print(f"[red]API error:[/red] {e}")
         sys.exit(1)
 
 
@@ -376,14 +380,12 @@ def user(ctx: click.Context, user_id: str, days: int, limit: int, output_format:
 
         if not entries:
             if output_format == "json":
-                import json
-                console.print(json.dumps({"user": user_id, "entries": [], "count": 0}))
+                emit_json({"user": user_id, "entries": [], "count": 0})
             else:
                 console.print(f"[dim]No audit logs found for user {user_id}[/dim]")
             return
 
         if output_format == "json":
-            import json
 
             from .export import entry_to_dict
             data = {
@@ -391,7 +393,7 @@ def user(ctx: click.Context, user_id: str, days: int, limit: int, output_format:
                 "entries": [entry_to_dict(e) for e in entries],
                 "count": len(entries),
             }
-            console.print(json.dumps(data, indent=2, default=str))
+            emit_json(data)
         else:
             console.print(f"[bold]Audit history for user:[/bold] {user_id}\n")
             table = format_logs_table(entries, show_details=True)
@@ -399,10 +401,10 @@ def user(ctx: click.Context, user_id: str, days: int, limit: int, output_format:
             console.print(f"\n[dim]Found {len(entries)} entries[/dim]")
 
     except AuthenticationError as e:
-        console.print(f"[red]Authentication error:[/red] {e}")
+        err_console.print(f"[red]Authentication error:[/red] {e}")
         sys.exit(1)
     except APIError as e:
-        console.print(f"[red]API error:[/red] {e}")
+        err_console.print(f"[red]API error:[/red] {e}")
         sys.exit(1)
 
 
@@ -443,19 +445,17 @@ def component(
 
         if not entries:
             if output_format == "json":
-                import json
-                console.print(json.dumps({
+                emit_json({
                     "component_id": component_id,
                     "component_type": component_type,
                     "entries": [],
                     "count": 0,
-                }))
+                })
             else:
                 console.print(f"[dim]No audit logs found for component {component_id}[/dim]")
             return
 
         if output_format == "json":
-            import json
 
             from .export import entry_to_dict
             data = {
@@ -464,7 +464,7 @@ def component(
                 "entries": [entry_to_dict(e) for e in entries],
                 "count": len(entries),
             }
-            console.print(json.dumps(data, indent=2, default=str))
+            emit_json(data)
         else:
             type_str = f" ({component_type})" if component_type else ""
             console.print(f"[bold]Audit history for component:[/bold] {component_id}{type_str}\n")
@@ -473,10 +473,10 @@ def component(
             console.print(f"\n[dim]Found {len(entries)} entries[/dim]")
 
     except AuthenticationError as e:
-        console.print(f"[red]Authentication error:[/red] {e}")
+        err_console.print(f"[red]Authentication error:[/red] {e}")
         sys.exit(1)
     except APIError as e:
-        console.print(f"[red]API error:[/red] {e}")
+        err_console.print(f"[red]API error:[/red] {e}")
         sys.exit(1)
 
 
@@ -548,7 +548,7 @@ def export(
             query.actions = parse_actions(action)
             query.components = parse_components(component)
 
-        console.print("[dim]Fetching audit logs...[/dim]")
+        err_console.print("[dim]Fetching audit logs...[/dim]")
 
         with client:
             if format in {"csv", "tsv"}:
@@ -578,10 +578,10 @@ def export(
         console.print(f"[green]Exported {count} entries to {output}[/green]")
 
     except AuthenticationError as e:
-        console.print(f"[red]Authentication error:[/red] {e}")
+        err_console.print(f"[red]Authentication error:[/red] {e}")
         sys.exit(1)
     except APIError as e:
-        console.print(f"[red]API error:[/red] {e}")
+        err_console.print(f"[red]API error:[/red] {e}")
         sys.exit(1)
 
 
@@ -605,15 +605,14 @@ def stats(ctx: click.Context, days: int, top: int, output_format: str) -> None:
 
         query = build_date_range_query(days)
         if output_format != "json":
-            console.print(f"[dim]Analyzing last {days} days of audit logs...[/dim]\n")
+            err_console.print(f"[dim]Analyzing last {days} days of audit logs...[/dim]\n")
 
         with client:
             entries = client.get_all_logs(query)
 
         if not entries:
             if output_format == "json":
-                import json
-                console.print(json.dumps({"statistics": {}, "anomalies": []}))
+                emit_json({"statistics": {}, "anomalies": []})
             else:
                 console.print("[dim]No audit logs found for the specified period.[/dim]")
             return
@@ -622,13 +621,12 @@ def stats(ctx: click.Context, days: int, top: int, output_format: str) -> None:
         anomalies = analyze_for_anomalies(entries)
 
         if output_format == "json":
-            import json
             data = {
                 "days": days,
                 "statistics": stats_data,
                 "anomalies": anomalies,
             }
-            console.print(json.dumps(data, indent=2, default=str))
+            emit_json(data)
         else:
             # Show summary panel
             panel = format_stats_panel(stats_data, title=f"Audit Log Statistics (Last {days} Days)")
@@ -653,10 +651,10 @@ def stats(ctx: click.Context, days: int, top: int, output_format: str) -> None:
                     console.print(f"  [yellow]•[/yellow] {anomaly['description']}")
 
     except AuthenticationError as e:
-        console.print(f"[red]Authentication error:[/red] {e}")
+        err_console.print(f"[red]Authentication error:[/red] {e}")
         sys.exit(1)
     except APIError as e:
-        console.print(f"[red]API error:[/red] {e}")
+        err_console.print(f"[red]API error:[/red] {e}")
         sys.exit(1)
 
 
@@ -681,7 +679,7 @@ def monitor(
         if alerts:
             alert_engine = AlertEngine(settings.alert_rules or None)
             rule_count = len(alert_engine.rules)
-            console.print(f"[dim]Alert detection enabled with {rule_count} rules[/dim]")
+            err_console.print(f"[dim]Alert detection enabled with {rule_count} rules[/dim]")
 
         with NotificationManager(settings.notifications) as nm:
             if nm.is_configured():
@@ -691,7 +689,7 @@ def monitor(
                 enabled_webhooks = settings.notifications.enabled_webhook_count
                 if enabled_webhooks:
                     channel_summary.append(f"{enabled_webhooks} webhook(s)")
-                console.print(
+                err_console.print(
                     f"[dim]Notification channels: {', '.join(channel_summary)}[/dim]"
                 )
 
@@ -705,13 +703,13 @@ def monitor(
             monitor_instance.start(duration=duration)
 
     except AuthenticationError as e:
-        console.print(f"[red]Authentication error:[/red] {e}")
+        err_console.print(f"[red]Authentication error:[/red] {e}")
         sys.exit(1)
     except APIError as e:
-        console.print(f"[red]API error:[/red] {e}")
+        err_console.print(f"[red]API error:[/red] {e}")
         sys.exit(1)
     except KeyboardInterrupt:
-        console.print("\n[yellow]Monitor stopped.[/yellow]")
+        err_console.print("\n[yellow]Monitor stopped.[/yellow]")
 
 
 @cli.command()
@@ -775,19 +773,19 @@ def anomalies(
                         cycle_delay = max(interval, e.retry_after)
                     # In --watch mode, transient upstream errors must not kill
                     # the daemon. Log and continue to the next cycle.
-                    console.print(f"[yellow]API error this cycle:[/yellow] {e}")
+                    err_console.print(f"[yellow]API error this cycle:[/yellow] {e}")
                 if not watch:
                     break
                 time.sleep(cycle_delay)
 
     except AuthenticationError as e:
-        console.print(f"[red]Authentication error:[/red] {e}")
+        err_console.print(f"[red]Authentication error:[/red] {e}")
         sys.exit(1)
     except APIError as e:
-        console.print(f"[red]API error:[/red] {e}")
+        err_console.print(f"[red]API error:[/red] {e}")
         sys.exit(1)
     except KeyboardInterrupt:
-        console.print("\n[yellow]Anomaly scan stopped.[/yellow]")
+        err_console.print("\n[yellow]Anomaly scan stopped.[/yellow]")
 
 
 _RETRYABLE_ANOMALY_STATUSES = frozenset({408, 425, 429, 500, 502, 503, 504})
@@ -906,7 +904,7 @@ def config(ctx: click.Context) -> None:
         console.print(f"Alert rules: {len(settings.alert_rules)}")
 
     except Exception as e:
-        console.print(f"[red]Error loading config:[/red] {e}")
+        err_console.print(f"[red]Error loading config:[/red] {e}")
         sys.exit(1)
 
 
@@ -945,14 +943,13 @@ def verify(ctx: click.Context, output_format: str) -> None:
         client, settings = get_client(config_path)
 
         if output_format != "json":
-            console.print("[dim]Verifying connection...[/dim]\n")
+            err_console.print("[dim]Verifying connection...[/dim]\n")
 
         with client:
             result = client.verify_connection()
 
         if output_format == "json":
-            import json
-            console.print(json.dumps(result, indent=2, default=str))
+            emit_json(result)
         else:
             if result["connected"] and result["authenticated"]:
                 console.print("[green]✓[/green] Connection successful")
@@ -967,15 +964,13 @@ def verify(ctx: click.Context, output_format: str) -> None:
 
     except AuthenticationError as e:
         if output_format == "json":
-            import json
-            console.print(json.dumps({"connected": False, "error": str(e)}))
+            emit_json({"connected": False, "error": str(e)})
         else:
             console.print(f"[red]✗[/red] Authentication failed: {e}")
         sys.exit(1)
     except APIError as e:
         if output_format == "json":
-            import json
-            console.print(json.dumps({"connected": False, "error": str(e)}))
+            emit_json({"connected": False, "error": str(e)})
         else:
             console.print(f"[red]✗[/red] API error: {e}")
         sys.exit(1)
@@ -1011,7 +1006,7 @@ def report(
     try:
         client, settings = get_client(config_path)
 
-        console.print(f"[dim]Generating report for the last {days} days...[/dim]\n")
+        err_console.print(f"[dim]Generating report for the last {days} days...[/dim]\n")
 
         query = build_date_range_query(days)
 
@@ -1019,12 +1014,12 @@ def report(
             entries = client.get_all_logs(query, max_entries=max_entries)
 
         if not entries:
-            console.print("[yellow]No audit logs found for the specified period.[/yellow]")
+            err_console.print("[yellow]No audit logs found for the specified period.[/yellow]")
             return
 
         truncated = len(entries) >= max_entries
         if truncated:
-            console.print(
+            err_console.print(
                 f"[yellow]Reached --max-entries limit ({max_entries}); "
                 "report is based on a subset of logs.[/yellow]"
             )
@@ -1035,21 +1030,20 @@ def report(
         report_data["anomalies"] = analyze_for_anomalies(entries)
         report_data["truncated"] = truncated
 
-        import json
         indent = 2 if pretty else None
         json_output = json.dumps(report_data, indent=indent, default=str)
 
         if output:
             output.write_text(json_output)
-            console.print(f"[green]Report saved to {output}[/green]")
+            err_console.print(f"[green]Report saved to {output}[/green]")
         else:
-            console.print(json_output)
+            click.echo(json_output)
 
     except AuthenticationError as e:
-        console.print(f"[red]Authentication error:[/red] {e}")
+        err_console.print(f"[red]Authentication error:[/red] {e}")
         sys.exit(1)
     except APIError as e:
-        console.print(f"[red]API error:[/red] {e}")
+        err_console.print(f"[red]API error:[/red] {e}")
         sys.exit(1)
 
 
@@ -1117,19 +1111,19 @@ def tail(
 
             filter_str = f" [dim]({', '.join(filters_desc)})[/dim]" if filters_desc else ""
 
-            console.print(f"[green]Tailing audit logs{filter_str}[/green]")
-            console.print(f"[dim]Polling every {interval}s, Ctrl+C to stop[/dim]\n")
+            err_console.print(f"[green]Tailing audit logs{filter_str}[/green]")
+            err_console.print(f"[dim]Polling every {interval}s, Ctrl+C to stop[/dim]\n")
 
             monitor_instance.start()
 
     except AuthenticationError as e:
-        console.print(f"[red]Authentication error:[/red] {e}")
+        err_console.print(f"[red]Authentication error:[/red] {e}")
         sys.exit(1)
     except APIError as e:
-        console.print(f"[red]API error:[/red] {e}")
+        err_console.print(f"[red]API error:[/red] {e}")
         sys.exit(1)
     except KeyboardInterrupt:
-        console.print("\n[yellow]Stopped.[/yellow]")
+        err_console.print("\n[yellow]Stopped.[/yellow]")
 
 
 # Alert rules subcommand group under cli
@@ -1159,8 +1153,7 @@ def alerts_list(ctx: click.Context, output_format: str) -> None:
         rules_status = engine.get_rule_status()
 
         if output_format == "json":
-            import json
-            console.print(json.dumps(rules_status, indent=2))
+            emit_json(rules_status)
         else:
             from rich.table import Table
 
@@ -1193,7 +1186,7 @@ def alerts_list(ctx: click.Context, output_format: str) -> None:
             console.print(table)
 
     except Exception as e:
-        console.print(f"[red]Error:[/red] {e}")
+        err_console.print(f"[red]Error:[/red] {e}")
         sys.exit(1)
 
 
@@ -1208,7 +1201,7 @@ def alerts_test(ctx: click.Context, days: int) -> None:
         client, settings = get_client(config_path)
         engine = AlertEngine(settings.alert_rules or None)
 
-        console.print(f"[dim]Testing alert rules against last {days} day(s) of logs...[/dim]\n")
+        err_console.print(f"[dim]Testing alert rules against last {days} day(s) of logs...[/dim]\n")
 
         query = build_date_range_query(days)
 
@@ -1237,10 +1230,10 @@ def alerts_test(ctx: click.Context, days: int) -> None:
                 console.print(f"  [yellow]•[/yellow] {anomaly['description']}")
 
     except AuthenticationError as e:
-        console.print(f"[red]Authentication error:[/red] {e}")
+        err_console.print(f"[red]Authentication error:[/red] {e}")
         sys.exit(1)
     except APIError as e:
-        console.print(f"[red]API error:[/red] {e}")
+        err_console.print(f"[red]API error:[/red] {e}")
         sys.exit(1)
 
 
@@ -1322,25 +1315,23 @@ def query(
         )
 
         if not quiet and output_format != "json":
-            console.print(f"[dim]Querying {label}...[/dim]")
+            err_console.print(f"[dim]Querying {label}...[/dim]")
 
         with client:
             entries = client.get_all_logs(query_obj, max_entries=limit)
 
         if not entries:
             if output_format == "json":
-                import json
-                console.print(json.dumps({"entries": [], "count": 0}))
+                emit_json({"entries": [], "count": 0})
             elif not quiet:
                 console.print("[dim]No audit logs found.[/dim]")
             return
 
         if output_format == "json":
-            import json
 
             from .export import entry_to_dict
             data = {"entries": [entry_to_dict(e) for e in entries], "count": len(entries)}
-            console.print(json.dumps(data, indent=2, default=str))
+            emit_json(data)
         else:
             table = format_logs_table(entries, show_details=False)
             console.print(table)
@@ -1348,10 +1339,10 @@ def query(
                 console.print(f"\n[dim]Found {len(entries)} entries ({label})[/dim]")
 
     except AuthenticationError as e:
-        console.print(f"[red]Authentication error:[/red] {e}")
+        err_console.print(f"[red]Authentication error:[/red] {e}")
         sys.exit(1)
     except APIError as e:
-        console.print(f"[red]API error:[/red] {e}")
+        err_console.print(f"[red]API error:[/red] {e}")
         sys.exit(1)
 
 
@@ -1389,7 +1380,7 @@ def timeline(
         query.components = parse_components(component)
         query.user_id = user
 
-        console.print(f"[dim]Loading activity for the last {days} days...[/dim]\n")
+        err_console.print(f"[dim]Loading activity for the last {days} days...[/dim]\n")
 
         with client:
             entries = client.get_all_logs(query)
@@ -1423,10 +1414,10 @@ def timeline(
             console.print(f"  {hour:02d}:00 │ {bar} {count}")
 
     except AuthenticationError as e:
-        console.print(f"[red]Authentication error:[/red] {e}")
+        err_console.print(f"[red]Authentication error:[/red] {e}")
         sys.exit(1)
     except APIError as e:
-        console.print(f"[red]API error:[/red] {e}")
+        err_console.print(f"[red]API error:[/red] {e}")
         sys.exit(1)
 
 
@@ -1451,7 +1442,7 @@ def find_action(ctx: click.Context, action: str, days: int, limit: int) -> None:
         query = build_date_range_query(days)
         query.actions = [ActionType(action)]
 
-        console.print(f"[dim]Searching for {action} actions in the last {days} days...[/dim]\n")
+        err_console.print(f"[dim]Searching for {action} actions in the last {days} days...[/dim]\n")
 
         with client:
             entries = client.get_all_logs(query, max_entries=limit)
@@ -1465,10 +1456,10 @@ def find_action(ctx: click.Context, action: str, days: int, limit: int) -> None:
         console.print(f"\n[dim]Found {len(entries)} {action} actions[/dim]")
 
     except AuthenticationError as e:
-        console.print(f"[red]Authentication error:[/red] {e}")
+        err_console.print(f"[red]Authentication error:[/red] {e}")
         sys.exit(1)
     except APIError as e:
-        console.print(f"[red]API error:[/red] {e}")
+        err_console.print(f"[red]API error:[/red] {e}")
         sys.exit(1)
 
 
@@ -1485,7 +1476,7 @@ def top_users(ctx: click.Context, days: int, top: int) -> None:
 
         query = build_date_range_query(days)
 
-        console.print(f"[dim]Analyzing user activity for the last {days} days...[/dim]\n")
+        err_console.print(f"[dim]Analyzing user activity for the last {days} days...[/dim]\n")
 
         with client:
             entries = client.get_all_logs(query)
@@ -1502,10 +1493,10 @@ def top_users(ctx: click.Context, days: int, top: int) -> None:
         console.print(user_table)
 
     except AuthenticationError as e:
-        console.print(f"[red]Authentication error:[/red] {e}")
+        err_console.print(f"[red]Authentication error:[/red] {e}")
         sys.exit(1)
     except APIError as e:
-        console.print(f"[red]API error:[/red] {e}")
+        err_console.print(f"[red]API error:[/red] {e}")
         sys.exit(1)
 
 
@@ -1539,10 +1530,10 @@ def show(ctx: click.Context, entry_id: str) -> None:
         console.print(panel)
 
     except AuthenticationError as e:
-        console.print(f"[red]Authentication error:[/red] {e}")
+        err_console.print(f"[red]Authentication error:[/red] {e}")
         sys.exit(1)
     except APIError as e:
-        console.print(f"[red]API error:[/red] {e}")
+        err_console.print(f"[red]API error:[/red] {e}")
         sys.exit(1)
 
 
