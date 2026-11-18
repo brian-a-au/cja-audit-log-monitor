@@ -5,9 +5,11 @@
 [![Python](https://img.shields.io/pypi/pyversions/cja-audit-log-monitor)](https://pypi.org/project/cja-audit-log-monitor/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/brian-a-au/cja-audit-log-monitor/blob/main/LICENSE)
 
-A terminal app for monitoring and analyzing Adobe Customer Journey Analytics (CJA) audit logs. You can browse and filter the logs, watch new events arrive, see charts of activity, and get alerts about suspicious patterns. A CLI is included for scripts and automation.
+[![Slideshow of the terminal app: the dashboard, the log browser, entry details, the live monitor, statistics, alert rules and the keyboard shortcuts](https://raw.githubusercontent.com/brian-a-au/cja-audit-log-monitor/main/docs/showcase.gif)](https://github.com/brian-a-au/cja-audit-log-monitor/blob/main/docs/showcase.png)
 
-![Dashboard](https://raw.githubusercontent.com/brian-a-au/cja-audit-log-monitor/main/docs/screenshots/dashboard.svg)
+A 28-second loop of the real app, made from synthetic data. Click the animation for a still image.
+
+A terminal app for monitoring and analyzing Adobe Customer Journey Analytics (CJA) audit logs. You can browse and filter the logs, watch new events arrive, see charts of activity, and get alerts about suspicious patterns. A CLI is included for scripts and automation.
 
 > This is an unofficial, community project. It is not affiliated with, endorsed by, or supported by Adobe. Adobe and Customer Journey Analytics are trademarks of Adobe Inc.
 

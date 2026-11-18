@@ -4,6 +4,10 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- A slideshow of the app at the top of the README. `scripts/make_showcase.py` makes it from synthetic data.
+
 ## [0.1.0] - Unreleased
 
 This is the first public release.
