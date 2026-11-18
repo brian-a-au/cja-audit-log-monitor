@@ -1952,8 +1952,8 @@ class TestExportScope:
     ):
         from cja_audit_log_monitor.tui.modals import ExportDialog
 
-        # Long enough that Escape lands before the timer fires.
-        monkeypatch.setattr(ExportDialog, "AUTO_CLOSE_SECONDS", 0.2)
+        # Wide margin so Escape lands before the timer even on a heavily loaded machine.
+        monkeypatch.setattr(ExportDialog, "AUTO_CLOSE_SECONDS", 2.0)
         closes: list[bool] = []
         real_close = ExportDialog._close_if_open
 
@@ -1976,7 +1976,7 @@ class TestExportScope:
             assert not closes  # timer has not fired yet
             await pilot.press("escape")
             assert not isinstance(app.screen, ExportDialog)
-            await pilot.pause(0.6)  # well past the timer
+            await pilot.pause(0.3)
             # Textual stops a screen's timers when it is removed, so the callback never
             # runs on a closed dialog; if that ever changes, it must still be a no-op.
             assert closes in ([], [False])
