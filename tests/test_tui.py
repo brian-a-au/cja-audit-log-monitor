@@ -1808,3 +1808,19 @@ async def test_alert_test_login_failure_updates_header(mock_app_state):
         await app.workers.wait_for_complete()
         await pilot.pause()
         assert "disconnected" in str(app.query_one("#status-row").render())
+
+
+async def test_alert_card_shows_local_time_with_zone(mock_app_state, los_angeles_tz):
+    from datetime import UTC, datetime
+
+    from cja_audit_log_monitor.models import AuditLogEntry
+    from cja_audit_log_monitor.tui.widgets.alert_card import AlertCard
+
+    entry = AuditLogEntry(id="1", timestamp=datetime(2026, 11, 17, 23, 25, 13, tzinfo=UTC))
+    app = _make_app(mock_app_state)
+    async with app.run_test(size=(120, 40)) as pilot:
+        card = AlertCard("rule", "fired", entry)
+        await app.screen.mount(card)
+        await pilot.pause()
+        text = str(card.render())
+        assert "2026-11-17 15:25:13 PST" in text

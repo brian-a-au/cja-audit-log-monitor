@@ -252,3 +252,62 @@ def test_format_timestamp_local(los_angeles_tz):
     ts = datetime(2026, 11, 17, 23, 25, 13, tzinfo=UTC)
     assert format_timestamp(ts) == "2026-11-17 23:25:13"
     assert format_timestamp(ts, local=True) == "2026-11-17 15:25:13"
+
+
+class TestCliTableAt80Columns:
+    @staticmethod
+    def _render(width):
+        from datetime import UTC, datetime
+
+        from rich.console import Console
+
+        from cja_audit_log_monitor.formatters import format_logs_table
+        from cja_audit_log_monitor.models import AuditLogEntry
+
+        entry = AuditLogEntry(
+            id="1",
+            timestamp=datetime(2026, 11, 17, 23, 25, 13, tzinfo=UTC),
+            user_email="someone.with.a.long.address@example.com",
+            action="API_REQUEST",
+            component_type="CALCULATED_METRIC",
+            component_name="Report for dv_67c2101db641e334f220bc0a",
+        )
+        console = Console(width=width, record=True, color_system=None)
+        console.print(format_logs_table([entry]))
+        return console.export_text()
+
+    def test_header_names_utc(self):
+        assert "Time (UTC)" in self._render(120)
+
+    def test_action_and_time_are_whole_at_80(self):
+        text = self._render(80)
+        assert "API_REQUEST" in text
+        assert "2026-11-17 23:25:13" in text
+
+
+def test_entry_detail_time_names_utc():
+    from datetime import UTC, datetime
+
+    from rich.console import Console
+
+    from cja_audit_log_monitor.formatters import format_single_entry
+    from cja_audit_log_monitor.models import AuditLogEntry
+
+    entry = AuditLogEntry(id="1", timestamp=datetime(2026, 11, 17, 23, 25, 13, tzinfo=UTC))
+    console = Console(width=100, record=True, color_system=None)
+    console.print(format_single_entry(entry))
+    assert "2026-11-17 23:25:13 UTC" in console.export_text()
+
+
+def test_alert_time_names_utc():
+    from datetime import UTC, datetime
+
+    from rich.console import Console
+
+    from cja_audit_log_monitor.formatters import format_alert
+    from cja_audit_log_monitor.models import AuditLogEntry
+
+    entry = AuditLogEntry(id="1", timestamp=datetime(2026, 11, 17, 23, 25, 13, tzinfo=UTC))
+    console = Console(width=100, record=True, color_system=None)
+    console.print(format_alert(entry, "rule", "fired"))
+    assert "2026-11-17 23:25:13 UTC" in console.export_text()

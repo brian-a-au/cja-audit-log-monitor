@@ -5,7 +5,7 @@ from textual.widgets import Static
 
 from ...formatters import format_timestamp, resolve_tcss_markup
 from ...models import AuditLogEntry
-from ...utils import get_user_identifier
+from ...utils import get_user_identifier, local_tz_name
 
 
 class AlertCard(Static):
@@ -29,7 +29,7 @@ class AlertCard(Static):
         content = resolve_tcss_markup(f"[$danger]⚠ {alert_name}[/$danger]\n{message}")
         if entry:
             content += (
-                f"\nTime: {format_timestamp(entry.timestamp)}"
+                f"\nTime: {format_timestamp(entry.timestamp, local=True)} {local_tz_name()}"
                 f"\nUser: {get_user_identifier(entry, default='-')}"
                 f"\nAction: {entry.action}"
                 f"\nComponent: {entry.component_type} - "
