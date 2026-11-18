@@ -3,6 +3,7 @@
 import functools
 import json
 import logging
+import os
 import re
 import sys
 import time
@@ -71,6 +72,11 @@ def handle_cli_errors(func: Callable[P, R]) -> Callable[P, R]:
     def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
         try:
             return func(*args, **kwargs)
+        except BrokenPipeError:
+            # Reader closed the pipe (e.g. `| head`). Point stdout at devnull so the
+            # interpreter's exit flush does not raise again, and leave quietly.
+            os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+            sys.exit(1)
         except ConfigError as e:
             label = "Configuration error"
             error: Exception = e
@@ -287,7 +293,6 @@ def cli_list(
         console.print(f"\n[dim]Showing {len(entries)} entries[/dim]")
 
 
-
 @cli.command()
 @click.option("--user", "-u", help="Filter by user ID or email")
 @click.option(
@@ -368,7 +373,6 @@ def search(
         console.print(f"\n[dim]Found {len(entries)} matching entries[/dim]")
 
 
-
 @cli.command()
 @click.option("--dashboard-id", "-i", required=True, help="Dashboard/Project ID")
 @click.option("--limit", "-l", type=POSITIVE_INT, default=100, help="Maximum entries to return")
@@ -392,7 +396,6 @@ def dashboard(ctx: click.Context, dashboard_id: str, limit: int) -> None:
     table = format_logs_table(entries, show_details=True)
     console.print(table)
     console.print(f"\n[dim]Found {len(entries)} entries[/dim]")
-
 
 
 @cli.command()
@@ -441,7 +444,6 @@ def user(ctx: click.Context, user_id: str, days: int, limit: int, output_format:
         table = format_logs_table(entries, show_details=True)
         console.print(table)
         console.print(f"\n[dim]Found {len(entries)} entries[/dim]")
-
 
 
 @cli.command()
@@ -508,7 +510,6 @@ def component(
         table = format_logs_table(entries, show_details=True)
         console.print(table)
         console.print(f"\n[dim]Found {len(entries)} entries[/dim]")
-
 
 
 @cli.command()
@@ -594,7 +595,7 @@ def export(
 
             first_entry = next(entries_iter, None)
             if first_entry is None:
-                console.print("[yellow]No audit logs found to export.[/yellow]")
+                err_console.print("[yellow]No audit logs found to export.[/yellow]")
                 return
 
             count = export_entries(
@@ -606,12 +607,11 @@ def export(
         else:
             entries = client.get_all_logs(query, max_entries=max_entries)
             if not entries:
-                console.print("[yellow]No audit logs found to export.[/yellow]")
+                err_console.print("[yellow]No audit logs found to export.[/yellow]")
                 return
             count = export_entries(entries, output, output_format=format, pretty=pretty)
 
-    console.print(f"[green]Exported {count} entries to {escape(str(output))}[/green]")
-
+    err_console.print(f"[green]Exported {count} entries to {escape(str(output))}[/green]")
 
 
 @cli.command()
@@ -641,7 +641,7 @@ def stats(ctx: click.Context, days: int, top: int, output_format: str) -> None:
 
     if not entries:
         if output_format == "json":
-            emit_json({"statistics": {}, "anomalies": []})
+            emit_json({"days": days, "statistics": calculate_stats([]), "anomalies": []})
         else:
             console.print("[dim]No audit logs found for the specified period.[/dim]")
         return
@@ -678,7 +678,6 @@ def stats(ctx: click.Context, days: int, top: int, output_format: str) -> None:
             console.print("\n[yellow bold]Potential Anomalies Detected:[/yellow bold]")
             for anomaly in anomalies:
                 console.print(f"  [yellow]•[/yellow] {escape(str(anomaly['description']))}")
-
 
 
 @cli.command()
@@ -747,9 +746,9 @@ def monitor(
 @click.option("--watch", is_flag=True, help="Run continuously")
 @click.option(
     "--interval",
-    type=POSITIVE_INT,
+    type=INTERVAL_SECONDS,
     default=300,
-    help="Poll interval in seconds (--watch only, default 300)",
+    help="Poll interval in seconds (--watch only, minimum 5, default 300)",
 )
 @click.option(
     "--lookback",
@@ -926,10 +925,9 @@ def config(ctx: click.Context) -> None:
     console.print(f"OAuth configured: {settings.is_oauth_configured()}")
     org_display = f"{settings.org_id[:8]}..." if settings.org_id else "(not set)"
     client_display = f"{settings.client_id[:8]}..." if settings.client_id else "(not set)"
-    console.print(f"Org ID: {org_display}")
-    console.print(f"Client ID: {client_display}")
+    console.print(f"Org ID: {escape(org_display)}")
+    console.print(f"Client ID: {escape(client_display)}")
     console.print(f"Alert rules: {len(settings.alert_rules)}")
-
 
 
 @cli.command()
@@ -1043,7 +1041,6 @@ def report(
 
     if not entries:
         err_console.print("[yellow]No audit logs found for the specified period.[/yellow]")
-        return
 
     truncated = len(entries) >= max_entries
     if truncated:
@@ -1066,7 +1063,6 @@ def report(
         err_console.print(f"[green]Report saved to {escape(str(output))}[/green]")
     else:
         click.echo(json_output)
-
 
 
 @cli.command()
@@ -1147,6 +1143,10 @@ def tail(
 
             monitor_instance.start()
 
+        if monitor_instance.successful_polls == 0:
+            err_console.print("[red]No poll succeeded; see the errors above.[/red]")
+            sys.exit(1)
+
     except KeyboardInterrupt:
         err_console.print("\n[yellow]Stopped.[/yellow]")
 
@@ -1211,7 +1211,6 @@ def alerts_list(ctx: click.Context, output_format: str) -> None:
         console.print(table)
 
 
-
 @alerts.command("test")
 @click.option("--days", "-d", type=POSITIVE_INT, default=1, help="Number of days to analyze")
 @click.pass_context
@@ -1250,7 +1249,6 @@ def alerts_test(ctx: click.Context, days: int) -> None:
         console.print(f"\n[yellow bold]Detected {len(anomalies)} anomalies:[/yellow bold]")
         for anomaly in anomalies:
             console.print(f"  [yellow]•[/yellow] {escape(str(anomaly['description']))}")
-
 
 
 @cli.command()
@@ -1355,7 +1353,6 @@ def query(
             console.print(f"\n[dim]Found {len(entries)} entries ({label})[/dim]")
 
 
-
 @cli.command()
 @click.option("--days", "-d", type=POSITIVE_INT, default=7, help="Number of days to analyze")
 @click.option(
@@ -1424,7 +1421,6 @@ def timeline(
         console.print(f"  {hour:02d}:00 │ {bar} {count}")
 
 
-
 @cli.command()
 @click.option(
     "--action",
@@ -1460,7 +1456,6 @@ def find_action(ctx: click.Context, action: str, days: int, limit: int) -> None:
     console.print(f"\n[dim]Found {len(entries)} {action} actions[/dim]")
 
 
-
 @cli.command()
 @click.option("--days", "-d", type=POSITIVE_INT, default=7, help="Number of days to analyze")
 @click.option("--top", "-t", type=POSITIVE_INT, default=10, help="Number of top items to show")
@@ -1491,7 +1486,6 @@ def top_users(ctx: click.Context, days: int, top: int) -> None:
     console.print(user_table)
 
 
-
 @cli.command()
 @click.argument("entry_id")
 @click.pass_context
@@ -1520,7 +1514,6 @@ def show(ctx: click.Context, entry_id: str) -> None:
 
     panel = format_single_entry(found_entry)
     console.print(panel)
-
 
 
 # Convenience command to launch TUI explicitly

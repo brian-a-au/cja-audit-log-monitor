@@ -1075,7 +1075,7 @@ class TestAnomaliesCommand:
         # Allow exactly two cycles, then simulate Ctrl-C during the second wait.
         with patch("cja_audit_log_monitor.cli.time.sleep", side_effect=[None, KeyboardInterrupt]):
             result = runner.invoke(
-                main, ["cli", "anomalies", "--watch", "--interval", "1"]
+                main, ["cli", "anomalies", "--watch", "--interval", "5"]
             )
 
         assert result.exit_code == 0
@@ -1120,7 +1120,7 @@ class TestAnomaliesCommand:
 
         with patch("cja_audit_log_monitor.cli.time.sleep", side_effect=KeyboardInterrupt):
             result = runner.invoke(
-                main, ["cli", "anomalies", "--watch", "--interval", "1"]
+                main, ["cli", "anomalies", "--watch", "--interval", "5"]
             )
 
         assert result.exit_code == 0
@@ -1272,7 +1272,7 @@ class TestAnomaliesCommand:
 
         with patch("cja_audit_log_monitor.cli.time.sleep", side_effect=[None, KeyboardInterrupt]):
             result = runner.invoke(
-                main, ["cli", "anomalies", "--watch", "--interval", "1"]
+                main, ["cli", "anomalies", "--watch", "--interval", "5"]
             )
 
         assert result.exit_code == 0
@@ -1315,7 +1315,7 @@ class TestAnomaliesCommand:
 
         with patch("cja_audit_log_monitor.cli.time.sleep", side_effect=KeyboardInterrupt) as sleep:
             result = runner.invoke(
-                main, ["cli", "anomalies", "--watch", "--interval", "1"]
+                main, ["cli", "anomalies", "--watch", "--interval", "5"]
             )
 
         assert result.exit_code == 0
@@ -1358,7 +1358,7 @@ class TestAnomaliesCommand:
         mock_cycle.side_effect = APIError("terminal", status_code=status_code)
 
         result = runner.invoke(
-            main, ["cli", "anomalies", "--watch", "--interval", "1"]
+            main, ["cli", "anomalies", "--watch", "--interval", "5"]
         )
 
         assert result.exit_code == 1
@@ -1891,3 +1891,118 @@ class TestStatsTopFlag:
         result = runner.invoke(main, ["cli", "stats", "--top", "15", "-F", "json"])
         assert result.exit_code == 0
         assert len(json.loads(result.stdout)["statistics"]["top_users"]) == 15
+
+
+class TestEmptyResultsAndStreams:
+    """Empty results still emit one JSON document; pipes and tail exit codes behave."""
+
+    @staticmethod
+    def _empty_client() -> MagicMock:
+        client = _fake_client([])
+        client.get_logs_paginated.return_value = iter([])
+        client.get_logs.return_value = AuditLogResponse(content=[], last=True)
+        return client
+
+    @pytest.mark.parametrize(
+        "args",
+        [["list", "-F", "json"], ["stats", "-F", "json"], ["report"]],
+        ids=["list", "stats", "report"],
+    )
+    @patch("cja_audit_log_monitor.cli.get_client")
+    def test_empty_result_is_valid_json(
+        self, mock_get_client: MagicMock, runner: CliRunner, args: list[str]
+    ) -> None:
+        mock_get_client.return_value = (self._empty_client(), MagicMock())
+
+        result = runner.invoke(main, ["cli", *args])
+
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.stdout)
+        if args[0] == "report":
+            assert data["anomalies"] == []
+            assert data["truncated"] is False
+            assert data["days_analyzed"] == 7
+            assert "generated_at" in data
+        if args[0] == "stats":
+            assert data["days"] == 7
+            assert data["anomalies"] == []
+            assert data["statistics"]["total_entries"] == 0
+
+    @patch("cja_audit_log_monitor.cli.get_client")
+    def test_empty_report_writes_output_file(
+        self, mock_get_client: MagicMock, runner: CliRunner, tmp_path
+    ) -> None:
+        mock_get_client.return_value = (self._empty_client(), MagicMock())
+        out = tmp_path / "r.json"
+
+        result = runner.invoke(main, ["cli", "report", "-o", str(out)])
+
+        assert result.exit_code == 0, result.output
+        assert json.loads(out.read_text())["anomalies"] == []
+
+    @patch("cja_audit_log_monitor.cli.get_client")
+    def test_broken_pipe_is_quiet(
+        self, mock_get_client: MagicMock, runner: CliRunner
+    ) -> None:
+        mock_get_client.side_effect = BrokenPipeError(32, "Broken pipe")
+
+        result = runner.invoke(main, ["cli", "list", "-F", "json"])
+
+        assert result.exit_code == 1
+        assert "Broken pipe" not in result.output
+        assert "File error" not in result.output
+
+    @pytest.mark.parametrize(
+        ("succeeds", "code"), [(False, 1), (True, 0)], ids=["all-failed", "one-ok"]
+    )
+    @patch("cja_audit_log_monitor.cli.NotificationManager")
+    @patch("cja_audit_log_monitor.cli.get_client")
+    def test_tail_exit_code_follows_successful_polls(
+        self,
+        mock_get_client: MagicMock,
+        mock_nm: MagicMock,
+        runner: CliRunner,
+        succeeds: bool,
+        code: int,
+    ) -> None:
+        from cja_audit_log_monitor.client import APIError
+
+        client = MagicMock()
+        if succeeds:
+            client.get_logs.return_value = AuditLogResponse(content=[], last=True)
+        else:
+            client.get_logs.side_effect = APIError("upstream down", status_code=503)
+        settings = MagicMock()
+        settings.alert_rules = []
+        mock_get_client.return_value = (client, settings)
+        mock_nm.return_value.__enter__.return_value.is_configured.return_value = False
+
+        def one_poll(monitor, *args, **kwargs):
+            monitor._get_new_entries()
+
+        with patch(
+            "cja_audit_log_monitor.cli.AuditLogMonitor.start", autospec=True, side_effect=one_poll
+        ):
+            result = runner.invoke(main, ["cli", "tail", "--no-alerts"])
+        assert result.exit_code == code
+
+    def test_anomalies_interval_has_five_second_floor(self, runner: CliRunner) -> None:
+        result = runner.invoke(main, ["cli", "anomalies", "--interval", "4"])
+        assert result.exit_code == 2
+        assert "Invalid value" in result.output
+
+    @patch("cja_audit_log_monitor.cli.load_config")
+    def test_config_escapes_credential_display(
+        self, mock_load: MagicMock, runner: CliRunner
+    ) -> None:
+        settings = MagicMock()
+        settings.org_id = "[/red]boom@AdobeOrg"
+        settings.client_id = "[bold]cid-1234567"
+        settings.alert_rules = []
+        mock_load.return_value = settings
+
+        result = runner.invoke(main, ["cli", "config"])
+
+        assert result.exit_code == 0, result.output
+        assert "[/red]bo..." in result.output
+        assert "[bold]ci..." in result.output
