@@ -2,6 +2,7 @@
 
 import logging
 import re
+import threading
 from datetime import UTC, datetime, timedelta
 
 import httpx
@@ -25,28 +26,32 @@ class TokenManager:
         self.settings = settings
         self._token: TokenInfo | None = None
         self._token_expiry: datetime | None = None
+        # Plain Lock: nothing under it calls back into get_token/invalidate_token,
+        # and the client calls invalidate_token only after get_token has returned.
+        self._lock = threading.Lock()
 
     def get_token(self) -> str:
         """Get a valid access token, refreshing if necessary."""
-        if self._is_token_valid():
-            return self._token.access_token.get_secret_value()  # type: ignore
+        with self._lock:
+            if self._is_token_valid():
+                return self._token.access_token.get_secret_value()  # type: ignore
 
-        if not self.settings.is_oauth_configured():
-            raise AuthenticationError(
-                "OAuth not configured. Set ORG_ID, CLIENT_ID, SECRET, and SCOPES "
-                "environment variables. See .env.example for details."
-            )
+            if not self.settings.is_oauth_configured():
+                raise AuthenticationError(
+                    "OAuth not configured. Set ORG_ID, CLIENT_ID, SECRET, and SCOPES "
+                    "environment variables. See .env.example for details."
+                )
 
-        self._token = self._get_oauth_token()
+            token = self._get_oauth_token()
 
-        # Set expiry with 5 minute buffer
-        self._token_expiry = datetime.now(UTC) + timedelta(
-            seconds=self._token.expires_in - 300
-        )
-        self._token.expires_at = self._token_expiry
+            # Set expiry with 5 minute buffer
+            expiry = datetime.now(UTC) + timedelta(seconds=token.expires_in - 300)
+            token.expires_at = expiry
+            self._token = token
+            self._token_expiry = expiry
 
-        logger.debug("Token refreshed, expires at %s", self._token_expiry)
-        return self._token.access_token.get_secret_value()
+            logger.debug("Token refreshed, expires at %s", expiry)
+            return token.access_token.get_secret_value()
 
     def _is_token_valid(self) -> bool:
         """Check if current token is still valid."""
@@ -71,7 +76,10 @@ class TokenManager:
             with httpx.Client(timeout=30.0) as client:
                 response = client.post(token_url, data=data)
                 response.raise_for_status()
-                token_data = response.json()
+                try:
+                    token_data = response.json()
+                except ValueError:
+                    raise AuthenticationError("IMS returned a non-JSON response") from None
 
                 try:
                     return TokenInfo(
@@ -140,6 +148,7 @@ class TokenManager:
 
     def invalidate_token(self) -> None:
         """Invalidate the current token, forcing refresh on next request."""
-        self._token = None
-        self._token_expiry = None
+        with self._lock:
+            self._token = None
+            self._token_expiry = None
         logger.debug("Token invalidated")

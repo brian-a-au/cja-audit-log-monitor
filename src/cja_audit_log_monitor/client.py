@@ -1,8 +1,11 @@
 """API client for CJA audit logs endpoint."""
 
 import logging
+import threading
 import time
 from collections.abc import Iterator
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 import httpx
@@ -15,6 +18,31 @@ logger = logging.getLogger(__name__)
 
 # Largest pageSize the CJA Audit Logs API accepts (it rejects 2000 with a 400).
 MAX_PAGE_SIZE = 1000
+
+# Longest we will ever wait between retries, whatever the server asks for.
+MAX_RETRY_WAIT = 60.0
+
+# Server-side failures that are worth retrying.
+RETRYABLE_STATUS = frozenset({500, 502, 503, 504})
+
+
+def _retry_delay(header: str | None, attempt: int) -> float:
+    """Seconds to wait before a retry, from a Retry-After header or exponential backoff."""
+    delay: float | None = None
+    if header is not None:
+        try:
+            delay = float(header)
+        except ValueError:
+            try:
+                when = parsedate_to_datetime(header)
+                if when.tzinfo is None:
+                    when = when.replace(tzinfo=UTC)
+                delay = (when - datetime.now(UTC)).total_seconds()
+            except (TypeError, ValueError):
+                delay = None
+    if delay is None or delay != delay:  # missing, unparseable or NaN
+        delay = float(2**attempt)
+    return min(max(delay, 0.0), MAX_RETRY_WAIT)
 
 
 def _is_final_page(page: int, response: AuditLogResponse) -> bool:
@@ -34,16 +62,15 @@ class APIError(Exception):
 class RateLimitError(APIError):
     """Raised when rate limited by API."""
 
-    def __init__(self, retry_after: int | None = None) -> None:
+    def __init__(self, retry_after: float | None = None) -> None:
         super().__init__("Rate limited by API", status_code=429)
-        self.retry_after = retry_after or 30
+        self.retry_after = 30 if retry_after is None else retry_after
 
 
 class AuditLogsClient:
     """Client for querying CJA audit logs API."""
 
     AUDIT_LOGS_PATH = "/auditlogs/api/v1/auditlogs"
-    SEARCH_PATH = "/auditlogs/api/v1/auditlogs/search"
 
     def __init__(
         self,
@@ -53,22 +80,25 @@ class AuditLogsClient:
         self.settings = settings
         self.token_manager = token_manager or TokenManager(settings)
         self._client: httpx.Client | None = None
+        self._client_lock = threading.Lock()
 
     @property
     def client(self) -> httpx.Client:
         """Get or create HTTP client."""
-        if self._client is None:
-            self._client = httpx.Client(
-                base_url=self.settings.api_base_url,
-                timeout=60.0,
-            )
-        return self._client
+        with self._client_lock:
+            if self._client is None:
+                self._client = httpx.Client(
+                    base_url=self.settings.api_base_url,
+                    timeout=60.0,
+                )
+            return self._client
 
     def close(self) -> None:
         """Close the HTTP client."""
-        if self._client:
-            self._client.close()
-            self._client = None
+        with self._client_lock:
+            if self._client:
+                self._client.close()
+                self._client = None
 
     def __enter__(self) -> "AuditLogsClient":
         return self
@@ -98,10 +128,10 @@ class AuditLogsClient:
                 )
 
                 if response.status_code == 429:
-                    retry_after = int(response.headers.get("Retry-After", 30))
+                    retry_after = _retry_delay(response.headers.get("Retry-After"), attempt)
                     if attempt < retry_count - 1:
                         logger.warning(
-                            "Rate limited, waiting %d seconds (attempt %d/%d)",
+                            "Rate limited, waiting %g seconds (attempt %d/%d)",
                             retry_after,
                             attempt + 1,
                             retry_count,
@@ -109,6 +139,18 @@ class AuditLogsClient:
                         time.sleep(retry_after)
                         continue
                     raise RateLimitError(retry_after=retry_after)
+
+                if response.status_code in RETRYABLE_STATUS and attempt < retry_count - 1:
+                    delay = _retry_delay(None, attempt)
+                    logger.warning(
+                        "Server error %d, retrying in %g seconds (attempt %d/%d)",
+                        response.status_code,
+                        delay,
+                        attempt + 1,
+                        retry_count,
+                    )
+                    time.sleep(delay)
+                    continue
 
                 if response.status_code == 401:
                     # Token might be expired, invalidate and retry
@@ -120,7 +162,14 @@ class AuditLogsClient:
                     raise APIError("Authentication failed", status_code=401)
 
                 response.raise_for_status()
-                return response.json()
+                try:
+                    return response.json()
+                except ValueError as e:
+                    raise APIError(
+                        "API returned a non-JSON response "
+                        f"(HTTP {response.status_code}, {len(response.content)} bytes)",
+                        status_code=response.status_code,
+                    ) from e
 
             except httpx.HTTPStatusError as e:
                 error_detail = ""
@@ -143,7 +192,7 @@ class AuditLogsClient:
                         retry_count,
                         e,
                     )
-                    time.sleep(2**attempt)  # Exponential backoff
+                    time.sleep(_retry_delay(None, attempt))  # Exponential backoff
                     continue
                 raise APIError(f"Request failed: {e}") from e
 
@@ -162,6 +211,11 @@ class AuditLogsClient:
 
         logger.debug("Fetching audit logs with params: %s", params)
         data = self._request("GET", self.AUDIT_LOGS_PATH, params=params)
+        if not isinstance(data, dict):
+            raise APIError(
+                f"API returned an unexpected response (expected a JSON object, "
+                f"got {type(data).__name__})"
+            )
 
         return AuditLogResponse.model_validate(data)
 
@@ -174,13 +228,18 @@ class AuditLogsClient:
 
         Args:
             query: Base query parameters.
-            max_pages: Maximum number of pages to fetch (None for all).
+            max_pages: Maximum number of pages to fetch (None for all, else at least 1).
 
         Yields:
             Individual AuditLogEntry objects.
+
+        Raises:
+            ValueError: If ``max_pages`` is less than 1.
         """
-        if query is None:
-            query = AuditLogQuery()
+        if max_pages is not None and max_pages < 1:
+            raise ValueError("max_pages must be None or at least 1")
+        # Page on a copy so the caller's query keeps its own page number.
+        query = query.model_copy() if query else AuditLogQuery()
 
         page = 0
         pages_fetched = 0
@@ -207,7 +266,7 @@ class AuditLogsClient:
                 response.last
                 or not new_entries
                 or _is_final_page(page, response)
-                or (max_pages and pages_fetched >= max_pages)
+                or (max_pages is not None and pages_fetched >= max_pages)
             ):
                 break
 
@@ -280,24 +339,6 @@ class AuditLogsClient:
             page += 1
         return entries[:max_entries], total
 
-    def search_logs(self, filters: list[dict[str, Any]]) -> AuditLogResponse:
-        """Search audit logs using POST with complex filters.
-
-        This endpoint supports OR logic between filters.
-
-        Args:
-            filters: List of filter conditions.
-
-        Returns:
-            AuditLogResponse containing matching logs.
-        """
-        payload = {"filters": filters}
-
-        logger.debug("Searching audit logs with filters: %s", filters)
-        data = self._request("POST", self.SEARCH_PATH, json=payload)
-
-        return AuditLogResponse.model_validate(data)
-
     def get_component_logs(
         self,
         component_id: str,
@@ -320,26 +361,6 @@ class AuditLogsClient:
                 query.components = [ComponentType(component_type)]
             except ValueError:
                 logger.warning("Unknown component type: %s", component_type)
-
-        return self.get_all_logs(query)
-
-    def get_user_logs(
-        self,
-        user_id: str,
-        query: AuditLogQuery | None = None,
-    ) -> list[AuditLogEntry]:
-        """Get all audit logs for a specific user.
-
-        Args:
-            user_id: The user ID to filter by.
-            query: Optional additional query parameters.
-
-        Returns:
-            List of audit log entries for the user.
-        """
-        if query is None:
-            query = AuditLogQuery()
-        query.user_id = user_id
 
         return self.get_all_logs(query)
 

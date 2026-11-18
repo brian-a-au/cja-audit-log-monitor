@@ -1,10 +1,10 @@
 """Pydantic models and enums for CJA audit logs."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field, SecretStr, model_validator
+from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 
 
 class ActionType(str, Enum):
@@ -82,6 +82,14 @@ class AuditLogEntry(BaseModel):
 
     model_config = {"populate_by_name": True}
 
+    @field_validator("timestamp")
+    @classmethod
+    def _assume_utc(cls, value: datetime | None) -> datetime | None:
+        """Read a timestamp with no timezone as UTC."""
+        if value is not None and value.tzinfo is None:
+            return value.replace(tzinfo=UTC)
+        return value
+
     @model_validator(mode="before")
     @classmethod
     def _flatten_live_api_shape(cls, data: Any) -> Any:
@@ -131,7 +139,7 @@ class AuditLogResponse(BaseModel):
     total_pages: int = Field(0, alias="totalPages")
     number_of_elements: int = Field(0, alias="numberOfElements")
     first: bool = True
-    last: bool = True
+    last: bool = False  # a missing flag must not end paging early
     number: int = 0
     size: int = 100
 

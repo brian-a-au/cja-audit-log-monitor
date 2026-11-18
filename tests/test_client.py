@@ -1,10 +1,16 @@
 """Tests for API client."""
 
+import threading
+import time
+from datetime import UTC, datetime, timedelta
+from email.utils import format_datetime
+
+import httpx
 import pytest
 from pytest_httpx import HTTPXMock
 
 from cja_audit_log_monitor.auth import TokenManager
-from cja_audit_log_monitor.client import APIError, AuditLogsClient
+from cja_audit_log_monitor.client import APIError, AuditLogsClient, RateLimitError, _retry_delay
 from cja_audit_log_monitor.config import CJASettings
 from cja_audit_log_monitor.models import AuditLogQuery
 
@@ -407,3 +413,165 @@ class TestGetAllLogsPageSize:
         with client:
             client.get_all_logs(query)
         assert query.page_size == 50
+
+
+@pytest.mark.parametrize(
+    "header,attempt,expected",
+    [
+        ("5", 0, 5.0),
+        ("1.5", 0, 1.5),
+        ("3600", 0, 60.0),
+        ("-3", 0, 0.0),
+        (None, 2, 4.0),
+        ("garbage", 1, 2.0),
+    ],
+)
+def test_retry_delay(header, attempt, expected) -> None:
+    assert _retry_delay(header, attempt) == expected
+
+
+def test_retry_delay_http_date() -> None:
+    when = format_datetime(datetime.now(UTC) + timedelta(seconds=10), usegmt=True)
+    assert 0 < _retry_delay(when, 0) <= 10
+
+
+class TestResilience:
+    URL = "https://cja.adobe.io/auditlogs/api/v1/auditlogs"
+
+    @staticmethod
+    def _api_requests(httpx_mock):
+        return [r for r in httpx_mock.get_requests() if "auditlogs" in str(r.url)]
+
+    def test_retries_503_then_succeeds(
+        self, client, sample_api_response, httpx_mock, monkeypatch
+    ) -> None:
+        sleeps: list[float] = []
+        monkeypatch.setattr("cja_audit_log_monitor.client.time.sleep", sleeps.append)
+        httpx_mock.add_response(url=self.URL, status_code=503)
+        httpx_mock.add_response(url=self.URL, json=sample_api_response)
+        with client:
+            assert client.get_logs() is not None
+        assert len(self._api_requests(httpx_mock)) == 2
+        assert sleeps == [1.0]
+
+    def test_persistent_503_raises_api_error(self, client, httpx_mock, monkeypatch) -> None:
+        monkeypatch.setattr("cja_audit_log_monitor.client.time.sleep", lambda s: None)
+        httpx_mock.add_response(url=self.URL, status_code=503)
+        with client, pytest.raises(APIError) as info:
+            client.get_logs()
+        assert info.value.status_code == 503
+        assert len(self._api_requests(httpx_mock)) == 3
+
+    def test_non_json_body_raises_api_error(self, client, httpx_mock, monkeypatch) -> None:
+        monkeypatch.setattr("cja_audit_log_monitor.client.time.sleep", lambda s: None)
+        httpx_mock.add_response(url=self.URL, text="<html>gateway</html>")
+        with client, pytest.raises(APIError) as info:
+            client.get_logs()
+        assert str(info.value).startswith("API returned a non-JSON response")
+
+    def test_non_dict_json_raises_api_error(self, client, httpx_mock, monkeypatch) -> None:
+        monkeypatch.setattr("cja_audit_log_monitor.client.time.sleep", lambda s: None)
+        httpx_mock.add_response(url=self.URL, json=[])
+        with client, pytest.raises(APIError) as info:
+            client.get_logs()
+        assert str(info.value).startswith("API returned an unexpected response")
+
+    def test_null_json_raises_api_error(self, client, httpx_mock, monkeypatch) -> None:
+        monkeypatch.setattr("cja_audit_log_monitor.client.time.sleep", lambda s: None)
+        httpx_mock.add_response(url=self.URL, text="null")
+        with client, pytest.raises(APIError) as info:
+            client.get_logs()
+        assert str(info.value).startswith("API returned an unexpected response")
+
+    def test_final_429_reports_clamped_retry_after(self, client, httpx_mock, monkeypatch) -> None:
+        sleeps: list[float] = []
+        monkeypatch.setattr("cja_audit_log_monitor.client.time.sleep", sleeps.append)
+        httpx_mock.add_response(url=self.URL, status_code=429, headers={"Retry-After": "3600"})
+        with client, pytest.raises(RateLimitError) as info:
+            client.get_logs()
+        assert sleeps == [60.0, 60.0]
+        assert info.value.retry_after == 60
+
+    def test_final_429_with_zero_retry_after_stays_zero(
+        self, client, httpx_mock, monkeypatch
+    ) -> None:
+        monkeypatch.setattr("cja_audit_log_monitor.client.time.sleep", lambda s: None)
+        httpx_mock.add_response(url=self.URL, status_code=429, headers={"Retry-After": "0"})
+        with client, pytest.raises(RateLimitError) as info:
+            client.get_logs()
+        assert info.value.retry_after == 0
+
+
+class TestThreadSafety:
+    """The lazy HTTP client is created once even when threads race for it."""
+
+    def test_concurrent_client_access_creates_one_client(
+        self, sample_settings: CJASettings, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A slow constructor widens the check-then-create window so threads overlap.
+        real_client = httpx.Client
+
+        class SlowClient(real_client):  # type: ignore[misc, valid-type]
+            def __init__(self, *args, **kwargs) -> None:
+                time.sleep(0.05)
+                super().__init__(*args, **kwargs)
+
+        monkeypatch.setattr("cja_audit_log_monitor.client.httpx.Client", SlowClient)
+        api = AuditLogsClient(sample_settings, TokenManager(sample_settings))
+        barrier = threading.Barrier(8)
+        results: list[httpx.Client] = []
+
+        def worker() -> None:
+            barrier.wait()
+            results.append(api.client)
+
+        threads = [threading.Thread(target=worker) for _ in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert len(results) == 8
+        assert len({id(c) for c in results}) == 1
+        api.close()
+
+
+class TestPagedQueryIsCopied:
+    """Paging works on a copy of the caller's query and validates max_pages."""
+
+    URL = r"https://cja\.adobe\.io/auditlogs/api/v1/auditlogs.*"
+
+    def test_paginated_leaves_callers_query_alone(self, client, httpx_mock) -> None:
+        import re
+
+        url = re.compile(self.URL)
+        for entry_id in ("a", "b"):
+            httpx_mock.add_response(
+                url=url,
+                json={
+                    "content": [{"id": entry_id}],
+                    "totalElements": 2,
+                    "totalPages": 2,
+                    "last": False,
+                },
+            )
+        query = AuditLogQuery(page_size=50)
+        with client:
+            assert len(list(client.get_logs_paginated(query))) == 2
+        assert query.page == 0
+
+    @pytest.mark.parametrize("bad", [0, -1])
+    def test_max_pages_below_one_is_rejected(self, sample_settings, bad) -> None:
+        client = AuditLogsClient(sample_settings, TokenManager(sample_settings))
+        with client, pytest.raises(ValueError, match="max_pages"):
+            list(client.get_logs_paginated(AuditLogQuery(), max_pages=bad))
+
+    def test_stops_on_empty_page_without_last_key(self, client, httpx_mock) -> None:
+        import re
+
+        url = re.compile(self.URL)
+        for content in ([{"id": "a"}], [{"id": "b"}], []):
+            httpx_mock.add_response(url=url, json={"content": content, "totalPages": 5})
+        with client:
+            entries = list(client.get_logs_paginated())
+        assert [e.id for e in entries] == ["a", "b"]

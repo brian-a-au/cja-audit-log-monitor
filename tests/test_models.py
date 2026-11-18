@@ -1,6 +1,6 @@
 """Tests for Pydantic models."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -267,3 +267,22 @@ class TestValuesSeenInLiveOrgs:
     @pytest.mark.parametrize("value", ["FAVORITE", "UNFAVORITE", "PIN", "LABEL"])
     def test_actions(self, value):
         assert ActionType(value).value == value
+
+
+class TestTimestampTimezone:
+    """Naive timestamps are read as UTC."""
+
+    def test_naive_timestamp_gets_utc(self) -> None:
+        entry = AuditLogEntry.model_validate({"id": "a", "timestamp": "2026-11-18T10:00:00"})
+        assert entry.timestamp is not None
+        assert entry.timestamp.tzinfo == UTC
+
+    def test_aware_timestamp_is_kept(self) -> None:
+        raw = {"id": "a", "dateCreated": "2026-11-18T10:00:00+02:00"}
+        entry = AuditLogEntry.model_validate(raw)
+        assert entry.timestamp is not None
+        assert entry.timestamp.utcoffset() == timedelta(hours=2)
+
+
+def test_response_last_defaults_to_false() -> None:
+    assert AuditLogResponse.model_validate({"content": []}).last is False
