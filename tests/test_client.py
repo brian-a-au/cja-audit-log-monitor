@@ -362,3 +362,44 @@ class TestPagingDedup:
         with client:
             entries = list(client.get_logs_paginated())
         assert [e.id for e in entries] == ["a", "b", "c"]
+
+
+class TestGetAllLogsPageSize:
+    """get_all_logs asks for the largest page the API allows."""
+
+    @staticmethod
+    def _mock(httpx_mock):
+        import re
+
+        httpx_mock.add_response(
+            url=re.compile(r"https://cja\.adobe\.io/auditlogs/api/v1/auditlogs.*"),
+            json={"content": [{"id": "a"}], "totalElements": 1, "totalPages": 1, "last": True},
+        )
+
+    def _page_sizes(self, httpx_mock):
+        return [
+            str(r.url).split("pageSize=")[1].split("&")[0]
+            for r in httpx_mock.get_requests()
+            if "auditlogs" in str(r.url)
+        ]
+
+    def test_no_limit_uses_1000(self, client, httpx_mock) -> None:
+        self._mock(httpx_mock)
+        with client:
+            client.get_all_logs()
+        assert self._page_sizes(httpx_mock) == ["1000"]
+
+    def test_small_limit_uses_the_limit(self, client, httpx_mock) -> None:
+        self._mock(httpx_mock)
+        with client:
+            client.get_all_logs(max_entries=20)
+        assert self._page_sizes(httpx_mock) == ["20"]
+
+    def test_does_not_change_callers_query(self, client, httpx_mock) -> None:
+        from cja_audit_log_monitor.models import AuditLogQuery
+
+        self._mock(httpx_mock)
+        query = AuditLogQuery(page_size=50)
+        with client:
+            client.get_all_logs(query)
+        assert query.page_size == 50

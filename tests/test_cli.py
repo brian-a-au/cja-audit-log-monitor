@@ -281,6 +281,8 @@ class TestExportCommand:
             assert result.exit_code == 0
 
         mock_client.get_logs_paginated.assert_called_once()
+        query = mock_client.get_logs_paginated.call_args.args[0]
+        assert query.page_size == 1000  # the API's largest page size
 
 
 class TestStatsCommand:
