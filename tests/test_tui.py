@@ -1650,6 +1650,79 @@ class TestSettingsScreen:
             btn = app.query_one("#verify-button", Button)
             assert btn is not None
 
+    async def test_reload_settings_rereads_the_config_file(self, mock_app_state, tmp_path):
+        from unittest.mock import MagicMock
+
+        config = tmp_path / "config.yaml"
+        config.write_text("monitor_interval: 30\n")
+        mock_app_state.verify_connection = MagicMock(
+            return_value={"connected": False, "error": "offline"}
+        )
+        app = _make_app(mock_app_state)
+
+        def shown_values():
+            return [str(s.render()) for s in app.query(".settings-value")]
+
+        async with app.run_test() as pilot:
+            await pilot.press("c")
+            await pilot.pause()
+            app.query_one("#reload-button", Button).press()
+            assert await _wait_for(lambda: "30 seconds" in shown_values(), pilot)
+            config.write_text("monitor_interval: 45\n")
+            app.query_one("#reload-button", Button).press()
+            assert await _wait_for(lambda: "45 seconds" in shown_values(), pilot)
+            assert "30 seconds" not in shown_values()
+
+    async def test_reload_settings_is_refused_while_monitoring(self, mock_app_state):
+        client = mock_app_state.client
+        mock_app_state.monitor.is_running = True
+        app = _make_app(mock_app_state)
+        async with app.run_test() as pilot:
+            await pilot.press("c")
+            await pilot.pause()
+            app.query_one("#reload-button", Button).press()
+            assert await _wait_for(
+                lambda: any("stop the monitor first" in n.message for n in app._notifications),
+                pilot,
+            )
+            client.close.assert_not_called()
+            assert mock_app_state._client is client
+
+    def test_reload_settings_resets_cached_state(self, tmp_path):
+        from unittest.mock import MagicMock
+
+        from cja_audit_log_monitor.tui.state import AppState
+
+        config = tmp_path / "config.yaml"
+        config.write_text("monitor_interval: 30\n")
+        config.chmod(0o600)
+        state = AppState()
+        assert state.settings.monitor_interval == 30
+        old_engine = state.alert_engine
+        client = state._client = MagicMock()
+        config.write_text("monitor_interval: 45\n")
+        state.reload_settings()
+        assert state.settings.monitor_interval == 45
+        assert state.alert_engine is not old_engine
+        assert state._client is None
+        client.close.assert_called_once()
+
+    def test_reload_settings_picks_up_a_bad_file_as_a_warning(self, tmp_path):
+        from cja_audit_log_monitor.tui.state import AppState
+
+        config = tmp_path / "config.yaml"
+        config.write_text("monitor_interval: 30\n")
+        config.chmod(0o600)
+        state = AppState()
+        state.settings
+        assert state.config_error_summary is None
+        config.write_text("monitor_interval: [unclosed\n")
+        state.reload_settings()
+        assert state.config_error_summary
+        config.write_text("monitor_interval: 45\n")
+        state.reload_settings()
+        assert state.config_error_summary is None
+
     def test_settings_screen_renders_notifications_section(self):
         """Settings screen includes a Notifications section showing channel presence."""
         from unittest.mock import MagicMock

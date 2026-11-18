@@ -177,13 +177,24 @@ class SettingsScreen(ContentView):
             ),
         )
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
+    async def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button presses."""
         if event.button.id == "verify-button":
             self.refresh_data()
         elif event.button.id == "reload-button":
-            self._state.refresh_client()
-            self.app.notify("Settings refreshed", severity="information")
+            await self._reload_settings()
+
+    async def _reload_settings(self) -> None:
+        """Re-read the config file, then redraw this view and the header."""
+        try:
+            self._state.reload_settings()
+        except RuntimeError as error:
+            self.app.notify(str(error), severity="warning")
+            return
+        await self.recompose()
+        self.app.set_connection_status("connecting")
+        self.refresh_data()
+        self.app.notify("Settings reloaded", severity="information")
 
     def _update_connection_status(self, result: dict) -> None:
         """Update connection status display."""

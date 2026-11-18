@@ -178,6 +178,31 @@ class AppState:
                 self._client = None
             self._token_manager = None
 
+    def reload_settings(self) -> None:
+        """Re-read the config file and drop everything built from the old settings.
+
+        Clears the cached settings (and any config warning), the alert engine, the
+        notification manager and the client; each is rebuilt lazily from the new
+        settings on next use.
+
+        Raises:
+            RuntimeError: While the monitor runs. Closing the client would break its
+                in-flight request, and a new engine would drop its event history.
+        """
+        if self.monitor.is_running:
+            raise RuntimeError("stop the monitor first")
+        self._settings = None
+        self.config_error = None
+        self.config_error_summary = None
+        self.is_connected = False
+        self.connection_error = None
+        self._alert_engine = None
+        if self._notification_manager:
+            self._notification_manager.close()
+            self._notification_manager = None
+        self.refresh_client()
+        self.settings  # noqa: B018 - load now so a bad file sets the config warning
+
     def verify_connection(self) -> dict:
         """Verify API connection and authentication.
 
