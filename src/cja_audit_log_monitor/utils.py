@@ -3,6 +3,7 @@
 from collections import OrderedDict, defaultdict
 from datetime import UTC, datetime
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from .models import AuditLogEntry
 
@@ -37,6 +38,24 @@ def entry_key(entry: AuditLogEntry) -> str:
         or f"{entry.timestamp}-{entry.action}-{entry.component_type}-{entry.component_id}-"
         f"{entry.user_id}-{entry.user_email}"
     )
+
+
+def redact_url(url: str) -> str:
+    """Return ``<scheme>://<host>/\u2026``: enough to tell channels apart, no secrets.
+
+    Webhook URLs carry secrets in the path, query string or user info, so only the
+    scheme and host (and port) are ever shown or logged.
+    """
+    try:
+        parts = urlsplit(url)
+        host = parts.hostname
+        port = parts.port
+    except ValueError:
+        return "<invalid url>"
+    if not parts.scheme or not host:
+        return "<invalid url>"
+    netloc = f"{host}:{port}" if port else host
+    return f"{parts.scheme}://{netloc}/\u2026"
 
 
 def display_path(path: Path | str) -> str:

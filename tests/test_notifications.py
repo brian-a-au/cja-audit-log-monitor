@@ -1,12 +1,14 @@
 """Tests for notifications module."""
 
-from datetime import UTC, datetime
+import json
+import logging
+from datetime import UTC, datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from cja_audit_log_monitor.models import AuditLogEntry, NotificationConfig, WebhookConfig
-from cja_audit_log_monitor.notifications import NotificationManager
+from cja_audit_log_monitor.notifications import NotificationManager, slack_escape
 
 
 @pytest.fixture
@@ -415,3 +417,90 @@ class TestAnomalyDedupFilter:
         monkeypatch.setattr(nm_mod, "_today_iso", lambda: date(2026, 5, 5).isoformat())
         out = f.suppress_seen([a])
         assert len(out) == 1
+
+
+class TestNoSecretLeaks:
+    """Failures never expose the secret parts of a webhook URL."""
+
+    def test_slack_failure_hides_secret(self, httpx_mock, caplog):
+        url = "https://hooks.slack.com/services/T0/B0/SECRET"
+        manager = NotificationManager(NotificationConfig(slack_webhook_url=url))
+        httpx_mock.add_response(url=url, status_code=404)
+
+        with caplog.at_level(logging.DEBUG):
+            manager.send_slack("rule", "msg")
+        assert "SECRET" not in caplog.text
+        warning = manager.pop_first_failure()
+        assert warning is not None and "SECRET" not in warning
+
+    def test_webhook_failure_hides_secret(self, httpx_mock, caplog):
+        url = "https://hook.example.com/h?token=SECRET"
+        webhook = WebhookConfig(url=url)
+        manager = NotificationManager(NotificationConfig(webhooks=[webhook]))
+        httpx_mock.add_response(url=url, status_code=404)
+
+        with caplog.at_level(logging.DEBUG):
+            manager.send_webhook(webhook, {"x": 1})
+        assert "SECRET" not in caplog.text
+        warning = manager.pop_first_failure()
+        assert warning is not None and "SECRET" not in warning
+        assert "hook.example.com" in warning
+
+    def test_webhook_connection_error_hides_secret(self, httpx_mock, caplog):
+        import httpx
+
+        url = "https://hook.example.com/h?token=SECRET"
+        webhook = WebhookConfig(url=url)
+        manager = NotificationManager(NotificationConfig(webhooks=[webhook]))
+        httpx_mock.add_exception(httpx.ConnectError("boom " + url), url=url)
+
+        with caplog.at_level(logging.DEBUG):
+            assert manager.send_webhook(webhook, {"x": 1}) is False
+        assert "SECRET" not in caplog.text
+        assert "SECRET" not in (manager.pop_first_failure() or "")
+
+
+class TestSlackEscaping:
+    """Slack text cannot inject mentions or links; other webhooks are untouched."""
+
+    def test_slack_escape(self):
+        assert slack_escape("a & <b>") == "a &amp; &lt;b&gt;"
+
+    def test_user_name_escaped_in_slack_payload(self, httpx_mock):
+        url = "https://hooks.slack.com/x"
+        manager = NotificationManager(NotificationConfig(slack_webhook_url=url))
+        entry = AuditLogEntry(
+            id="1", action="DELETE", user_name="<!channel> <https://evil|x>",
+            timestamp=datetime.now(UTC),
+        )
+        httpx_mock.add_response(url=url, status_code=200)
+
+        manager.send_slack("rule <!here>", "msg <@U1>", entry)
+        body = json.loads(httpx_mock.get_requests()[0].content)
+        text = json.dumps(body)
+        assert "&lt;!channel&gt; &lt;https://evil|x&gt;" in text
+        assert "<!channel>" not in text and "<!here>" not in text and "<@U1>" not in text
+
+    def test_anomaly_description_escaped(self, httpx_mock):
+        url = "https://hooks.slack.com/x"
+        manager = NotificationManager(
+            NotificationConfig(slack_webhook_url=url, notify_on_anomalies=True)
+        )
+        httpx_mock.add_response(url=url, status_code=200)
+
+        assert manager.notify_anomaly({"type": "t", "description": "<!channel> & co"}) == 1
+        text = json.dumps(json.loads(httpx_mock.get_requests()[0].content))
+        assert "&lt;!channel&gt; &amp; co" in text
+
+    def test_generic_webhook_payload_not_escaped(self, sample_entry):
+        manager = NotificationManager()
+        payload = manager._build_alert_payload("r", "a <b> & c", sample_entry)
+        assert payload["message"] == "a <b> & c"
+
+    def test_slack_timestamp_is_utc(self):
+        entry = AuditLogEntry(
+            id="1", action="DELETE",
+            timestamp=datetime(2026, 1, 1, 12, 0, tzinfo=timezone(timedelta(hours=5))),
+        )
+        payload = NotificationManager()._build_slack_payload("r", "m", entry)
+        assert "2026-01-01 07:00:00 UTC" in json.dumps(payload)
