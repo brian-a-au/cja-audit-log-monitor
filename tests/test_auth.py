@@ -1,5 +1,7 @@
 """Tests for authentication module."""
 
+import re
+
 import pytest
 from pytest_httpx import HTTPXMock
 
@@ -146,3 +148,27 @@ class TestTokenManager:
         """Test _is_token_valid returns False when no token."""
         token_manager = TokenManager(sample_settings)
         assert token_manager._is_token_valid() is False
+
+
+def test_token_response_without_access_token(httpx_mock: HTTPXMock, sample_settings) -> None:
+    httpx_mock.add_response(url=re.compile(".*/ims/token/v3"), json={"error": "weird"})
+    with pytest.raises(AuthenticationError, match="access_token"):
+        TokenManager(sample_settings).get_token()
+
+
+def test_oauth_error_body_redacted(httpx_mock: HTTPXMock, sample_settings) -> None:
+    httpx_mock.add_response(
+        url=re.compile(".*/ims/token/v3"),
+        status_code=400,
+        text="bad request client_secret=TOPSECRET&x=1",
+    )
+    with pytest.raises(AuthenticationError) as info:
+        TokenManager(sample_settings).get_token()
+    assert "TOPSECRET" not in str(info.value)
+
+
+def test_token_info_repr_hides_token() -> None:
+    from cja_audit_log_monitor.models import TokenInfo
+
+    info = TokenInfo(access_token="TOKSENTINEL", expires_in=10)
+    assert "TOKSENTINEL" not in repr(info)

@@ -172,13 +172,16 @@ class CJAAuditApp(App):
         self, status: ConnectionStatus = "connecting", detail: str = ""
     ) -> str:
         """Build the top status row content."""
+        org = self.state.settings.org_id  # loads config; may set config_error
         color = self._STATUS_DOT[status]
-        if not detail:
-            org = self.state.settings.org_id
+        if not detail and not self.state.config_error_summary:
             detail = f"org {org}" if org else ""
         text = f"cja-audit-log-monitor · [{color}]●[/{color}] {status}"
         if detail:
             text += f" · [$text-muted]{escape(detail)}[/$text-muted]"
+        if self.state.config_error_summary:
+            warning = escape(self.state.config_error_summary)
+            text += f" · [$warning]⚠ {warning}[/$warning]"
         return text
 
     _connection_status: ConnectionStatus = "connecting"

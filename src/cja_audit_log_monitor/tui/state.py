@@ -8,7 +8,7 @@ from pathlib import Path
 from ..alerts import AlertEngine, FiredAlert
 from ..auth import TokenManager
 from ..client import AuditLogsClient
-from ..config import CJASettings, get_config_path, load_config
+from ..config import CJASettings, ConfigError, get_config_path, load_config
 from ..models import ActionType, AuditLogEntry, AuditLogQuery, ComponentType
 from ..notifications import NotificationManager
 
@@ -96,13 +96,28 @@ class AppState:
         # Connection state
         self.is_connected: bool = False
         self.connection_error: str | None = None
+        self.config_error: str | None = None
+        self.config_error_summary: str | None = None
         self.last_refresh: datetime | None = None
 
     @property
     def settings(self) -> CJASettings:
         """Get settings, loading if necessary."""
         if self._settings is None:
-            self._settings = load_config(self.config_path)
+            try:
+                self._settings = load_config(self.config_path)
+            except ConfigError as e:
+                # Keep the app usable: fall back to env-only settings and
+                # let the header show what is wrong with the file.
+                self.config_error = str(e)
+                self.config_error_summary = e.summary
+                try:
+                    self._settings = load_config(use_file=False)
+                except ConfigError as env_error:
+                    # Env/.env values are invalid too: start on plain defaults.
+                    self._settings = CJASettings.model_construct()
+                    self.config_error = f"{self.config_error}\n{env_error}"
+                    self.config_error_summary = f"{e.summary}; {env_error.summary}"
         return self._settings
 
     @property

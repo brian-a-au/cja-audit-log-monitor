@@ -1,15 +1,20 @@
 """Tests for configuration module."""
 
+import logging
+import stat
+import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+import pytest
 import yaml
+from pydantic import ValidationError
 
 from cja_audit_log_monitor.config import (
     CJASettings,
+    ConfigError,
     create_default_config,
     load_config,
-    save_config,
 )
 
 
@@ -104,48 +109,107 @@ class TestLoadConfig:
             assert settings.default_page_size == 100  # Default value
 
 
-class TestSaveConfig:
-    """Tests for save_config function."""
+class TestBadConfigFile:
+    """A bad config file raises ConfigError naming the file."""
 
-    def test_save_config(self) -> None:
-        """Test saving config to YAML file."""
-        with TemporaryDirectory() as tmpdir:
-            config_path = Path(tmpdir) / "config.yaml"
-            settings = CJASettings(default_page_size=75)
+    @pytest.mark.parametrize(
+        "text", ["- a\n- b\n", "hello\n", "monitor_interval: [1, \n", "monitor_interval: abc\n"]
+    )
+    def test_invalid_file_raises_config_error(self, tmp_path: Path, text: str) -> None:
+        path = tmp_path / "config.yaml"
+        path.write_text(text)
+        with pytest.raises(ConfigError, match=str(path)):
+            load_config(path)
 
-            save_config(settings, config_path)
+    def test_use_file_false_ignores_the_file(self, tmp_path: Path) -> None:
+        path = tmp_path / "config.yaml"
+        path.write_text("monitor_interval: [1, \n")
+        assert load_config(path, use_file=False).monitor_interval == 60
 
-            with open(config_path) as f:
-                saved = yaml.safe_load(f)
+    def test_unknown_key_warns(self, tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+        path = tmp_path / "config.yaml"
+        path.write_text("monitor_intervall: 5\n")
+        with caplog.at_level("WARNING"):
+            load_config(path)
+        assert "monitor_intervall" in caplog.text
 
-            assert saved["default_page_size"] == 75
 
-    def test_save_excludes_secrets(self) -> None:
-        """Test that secrets are not saved to file."""
-        with TemporaryDirectory() as tmpdir:
-            config_path = Path(tmpdir) / "config.yaml"
-            settings = CJASettings(
-                client_id="secret_id",
-                secret="super_secret",
-            )
+class TestConfigPriority:
+    """Env vars and .env beat the config file; init kwargs beat everything."""
 
-            save_config(settings, config_path)
+    def test_env_beats_config_file(self, tmp_path, monkeypatch) -> None:
+        path = tmp_path / "c.yaml"
+        path.write_text("client_id: from_yaml\nmonitor_interval: 10\n")
+        monkeypatch.setenv("CLIENT_ID", "from_env")
+        settings = load_config(path)
+        assert settings.client_id == "from_env"
+        assert settings.monitor_interval == 10
 
-            with open(config_path) as f:
-                saved = yaml.safe_load(f)
+    def test_dotenv_beats_config_file(self, tmp_path) -> None:
+        (tmp_path / ".env").write_text("MONITOR_INTERVAL=77\n")
+        path = tmp_path / "c.yaml"
+        path.write_text("monitor_interval: 10\n")
+        assert load_config(path).monitor_interval == 77
 
-            assert "client_id" not in saved
-            assert "secret" not in saved
+    def test_init_kwargs_beat_env(self, monkeypatch) -> None:
+        monkeypatch.setenv("CLIENT_ID", "from_env")
+        assert CJASettings(client_id="explicit").client_id == "explicit"
 
-    def test_save_creates_directory(self) -> None:
-        """Test save creates parent directory if needed."""
-        with TemporaryDirectory() as tmpdir:
-            config_path = Path(tmpdir) / "subdir" / "config.yaml"
-            settings = CJASettings(default_page_size=25)
+    def test_config_file_does_not_leak_between_calls(self, tmp_path) -> None:
+        path = tmp_path / "c.yaml"
+        path.write_text("monitor_interval: 10\n")
+        assert load_config(path).monitor_interval == 10
+        assert CJASettings().monitor_interval == 60
 
-            save_config(settings, config_path)
 
-            assert config_path.exists()
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX file modes")
+class TestPrivateConfigFiles:
+    def test_default_config_is_private(self, tmp_path: Path) -> None:
+        folder = tmp_path / "d"
+        path = create_default_config(folder / "config.yaml")
+        assert stat.S_IMODE(folder.stat().st_mode) == 0o700
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+    def test_overwrite_keeps_file_private(self, tmp_path: Path) -> None:
+        path = tmp_path / "config.yaml"
+        path.write_text("x: 1\n")
+        path.chmod(0o644)
+        create_default_config(path)
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+    def test_load_warns_when_file_is_readable_by_others(self, tmp_path: Path, caplog) -> None:
+        path = tmp_path / "config.yaml"
+        path.write_text("monitor_interval: 10\n")
+        path.chmod(0o644)
+        with caplog.at_level(logging.WARNING):
+            load_config(path)
+        assert "chmod 600" in caplog.text
+
+    def test_load_is_quiet_for_private_file(self, tmp_path: Path, caplog) -> None:
+        path = tmp_path / "config.yaml"
+        path.write_text("monitor_interval: 10\n")
+        path.chmod(0o600)
+        with caplog.at_level(logging.WARNING):
+            load_config(path)
+        assert "chmod 600" not in caplog.text
+
+
+class TestEndpointUrls:
+    @pytest.mark.parametrize("field", ["ims_base_url", "api_base_url"])
+    def test_plain_http_to_remote_host_rejected(self, field: str) -> None:
+        with pytest.raises(ValidationError):
+            CJASettings(**{field: "http://evil.example"})
+
+    @pytest.mark.parametrize("field", ["ims_base_url", "api_base_url"])
+    @pytest.mark.parametrize(
+        "url", ["http://localhost:8080", "http://127.0.0.1:9", "https://example.com"]
+    )
+    def test_allowed_urls(self, field: str, url: str) -> None:
+        assert getattr(CJASettings(**{field: url}), field) == url
+
+    def test_other_schemes_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            CJASettings(api_base_url="ftp://example.com")
 
 
 class TestCreateDefaultConfig:
@@ -206,3 +270,59 @@ def test_settings_no_top_level_slack_field() -> None:
     assert not hasattr(s, "slack_webhook_url"), (
         "Top-level slack_webhook_url is dead — use settings.notifications.slack_webhook_url"
     )
+
+
+def test_secret_hidden_everywhere() -> None:
+    s = CJASettings(org_id="X@AdobeOrg", client_id="c", secret="SENTINEL")
+    for text in (repr(s), str(s), s.model_dump_json()):
+        assert "SENTINEL" not in text
+    assert s.secret.get_secret_value() == "SENTINEL"
+
+
+def test_webhook_urls_hidden_from_repr() -> None:
+    from cja_audit_log_monitor.models import NotificationConfig, WebhookConfig
+
+    hook = WebhookConfig(url="https://h/x?token=T", headers={"Authorization": "HDRSECRET"})
+    assert "token=T" not in repr(hook)
+    assert "HDRSECRET" not in repr(hook)
+    notif = NotificationConfig(slack_webhook_url="https://hooks.slack.com/SLACKSECRET")
+    assert "SLACKSECRET" not in repr(notif)
+
+
+class TestConfigErrorHidesInput:
+    """Config errors must not echo input values (webhook headers, URLs, secrets)."""
+
+    def test_webhook_typo_does_not_leak_header_or_url(self, tmp_path: Path) -> None:
+        path = tmp_path / "config.yaml"
+        path.write_text(
+            "notifications:\n"
+            "  webhooks:\n"
+            "    - urll: https://hooks.example.com/SECRETPATH\n"
+            "      headers:\n"
+            "        Authorization: Bearer HDRTOK\n"
+        )
+        with pytest.raises(ConfigError) as excinfo:
+            load_config(path)
+        text = str(excinfo.value)
+        assert "HDRTOK" not in text
+        assert "SECRETPATH" not in text
+        assert "input_value" not in text
+        assert "urll" not in text or "input_value" not in text
+
+    def test_summary_is_one_line_with_location_and_message(self, tmp_path: Path) -> None:
+        path = tmp_path / "config.yaml"
+        path.write_text("monitor_interval: abc\n")
+        with pytest.raises(ConfigError) as excinfo:
+            load_config(path)
+        summary = excinfo.value.summary
+        assert "\n" not in summary
+        assert summary.startswith("config.yaml: monitor_interval: ")
+        assert "valid integer" in summary
+
+    def test_summary_for_yaml_error_is_one_line(self, tmp_path: Path) -> None:
+        path = tmp_path / "config.yaml"
+        path.write_text("monitor_interval: [1, \n")
+        with pytest.raises(ConfigError) as excinfo:
+            load_config(path)
+        assert "\n" not in excinfo.value.summary
+        assert excinfo.value.summary.startswith("config.yaml: ")

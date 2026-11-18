@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, SecretStr, model_validator
 
 
 class ActionType(str, Enum):
@@ -192,7 +192,7 @@ class AuditLogQuery(BaseModel):
 class TokenInfo(BaseModel):
     """OAuth token information."""
 
-    access_token: str
+    access_token: SecretStr
     token_type: str = "bearer"
     expires_in: int
     expires_at: datetime | None = None
@@ -214,10 +214,10 @@ class AlertRule(BaseModel):
 class WebhookConfig(BaseModel):
     """Configuration for webhook notifications."""
 
-    url: str
+    url: str = Field(repr=False)
     enabled: bool = True
     method: str = "POST"
-    headers: dict[str, str] | None = None
+    headers: dict[str, str] | None = Field(default=None, repr=False)
     timeout: int = 30
     include_entry_details: bool = True
 
@@ -226,7 +226,7 @@ class NotificationConfig(BaseModel):
     """Configuration for alert notifications."""
 
     webhooks: list[WebhookConfig] = Field(default_factory=list)
-    slack_webhook_url: str | None = None
+    slack_webhook_url: str | None = Field(default=None, repr=False)
     notify_on_anomalies: bool = False
     notify_on_alerts: bool = True
 

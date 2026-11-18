@@ -2082,3 +2082,47 @@ async def test_lists_stay_blank_until_data_loads(mock_app_state, key, widget_id)
         await pilot.pause()
         view = app._screens[app._current_screen]
         assert "no audit activity" not in _plain(view.query_one(widget_id, Static))
+
+
+def test_state_survives_bad_config_file(tmp_path) -> None:
+    """A bad config file is reported, not raised, when the TUI reads settings."""
+    from cja_audit_log_monitor.tui.state import AppState
+
+    path = tmp_path / "config.yaml"
+    path.write_text("monitor_interval: [1, \n")
+    state = AppState(path)
+    assert state.settings.monitor_interval == 60
+    assert str(path) in (state.config_error or "")
+
+
+def test_state_survives_bad_config_file_and_bad_env(tmp_path, monkeypatch) -> None:
+    """Bad YAML plus an invalid env value still yields settings and the file error."""
+    from cja_audit_log_monitor.tui.state import AppState
+
+    path = tmp_path / "config.yaml"
+    path.write_text("monitor_interval: [1, \n")
+    monkeypatch.setenv("MONITOR_INTERVAL", "abc")
+    state = AppState(path)
+    assert state.settings.monitor_interval == 60
+    assert str(path) in (state.config_error or "")
+    summary = state.config_error_summary or ""
+    assert summary.startswith("config.yaml: ")
+    assert "environment: monitor_interval" in summary
+
+
+async def test_header_keeps_connection_status_with_bad_config(mock_app_state, tmp_path) -> None:
+    """A config problem shows as a short warning beside the real connection status."""
+    mock_app_state.config_error = "full multi-line\npydantic text"
+    mock_app_state.config_error_summary = (
+        "config.yaml: monitor_interval: Input should be a valid integer"
+    )
+    app = _make_app(mock_app_state)
+    async with app.run_test(size=(100, 30)) as pilot:
+        app.set_connection_status("connected", "org TEST@AdobeOrg")
+        await pilot.pause()
+        header = _status_text(app)
+        assert "● connected" in header
+        assert "disconnected" not in header
+        assert "config.yaml: monitor_interval: Input should be a valid integer" in header
+        assert "\n" not in header
+        assert "pydantic text" not in header
