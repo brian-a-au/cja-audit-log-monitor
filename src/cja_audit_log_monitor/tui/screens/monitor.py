@@ -1,5 +1,6 @@
 """Real-time monitoring screen."""
 
+import logging
 import threading
 from collections.abc import Iterator
 from datetime import UTC, datetime
@@ -14,17 +15,20 @@ from textual.worker import Worker
 from ...alerts import FiredAlert
 from ...formatters import resolve_tcss_markup
 from ...models import AuditLogEntry
-from ...monitor import SEEN_IDS_MAX, build_poll_query
+from ...monitor import SEEN_IDS_MAX, build_poll_query, fetch_unseen
 from ...utils import RecentIds, entry_key, to_local
 from ..state import AppState
 from ..widgets import AlertSummary, LogTable
 from .base import ContentView
 
+logger = logging.getLogger(__name__)
+
 # Rows kept in the live stream; older rows are dropped so long sessions stay fast.
 MONITOR_MAX_ROWS = 1000
-# Entries per page, and the most pages one poll reads during a burst.
+# Entries per page. The most pages one poll reads is shared with the CLI (fetch_unseen).
 _POLL_PAGE_SIZE = 100
-_MAX_POLL_PAGES = 20
+# Rows the first poll of a session shows as context. They are not alerted on or counted.
+_CONTEXT_ROWS = 100
 # Allowed polling interval, in seconds.
 _MIN_INTERVAL = 5
 _MAX_INTERVAL = 3600
@@ -257,8 +261,7 @@ class MonitorScreen(ContentView):
         The wait is ``stop.wait``, not a sleep, so a stop ends the loop at once.
         """
         while not stop.is_set():
-            with self._poll_lock:
-                self._poll_for_new_entries(stop)
+            self._guarded_poll(stop)
             stop.wait(self._state.monitor.interval)
 
     async def _poll_once(self, stop: threading.Event | None = None) -> None:
@@ -266,16 +269,34 @@ class MonitorScreen(ContentView):
         stop = stop or self._stop_event
         if stop is None or stop.is_set() or not self._state.monitor.is_running:
             return
-        with self._poll_lock:
-            self._poll_for_new_entries(stop)
+        self._guarded_poll(stop)
+
+    def _guarded_poll(self, stop: threading.Event) -> None:
+        """Run one poll. Any error is logged and shown, never raised.
+
+        The worker exits on error and takes the app with it, so one bad poll must not
+        escape. Once ``stop`` is set, errors are dropped quietly (e.g. during shutdown).
+        """
+        try:
+            with self._poll_lock:
+                self._poll_for_new_entries(stop)
+        except Exception as e:
+            if stop.is_set():
+                return
+            logger.exception("Monitor poll failed")
+            try:
+                self.app.call_from_thread(self._apply_poll_error, stop, e, False)
+            except Exception:
+                logger.exception("Could not show the monitor poll failure")
 
     def _poll_for_new_entries(self, stop: threading.Event) -> None:
         """Fetch entries not seen yet and hand them to the UI in one call.
 
         Runs on a worker thread. Each poll reads from just before the last good poll up to
-        now and drops entries already seen. The first poll reads one page; later polls page
-        until a page is empty, has nothing new, or is the last, or the page limit is hit.
-        Nothing is written once ``stop`` is set, so a poll from a stopped session is dropped.
+        now and drops entries already seen (see ``fetch_unseen``). The first poll of a session
+        reads the whole window to seed the seen keys; its rows are context, not new events,
+        so they are neither alerted on nor counted. Nothing is written once ``stop`` is set,
+        so a poll from a stopped session is dropped.
         """
         if stop.is_set():
             return
@@ -284,43 +305,37 @@ class MonitorScreen(ContentView):
         query = build_poll_query(self._last_poll_time, now, _POLL_PAGE_SIZE)
         warnings: list[str] = []
         try:
-            fresh: dict[str, AuditLogEntry] = {}
-            for page in range(1 if first_poll else _MAX_POLL_PAGES):
+            new_entries, hit_cap = fetch_unseen(
+                self._state.client.get_logs, query, self._seen, stop=stop
+            )
+        except Exception as e:
+            if not stop.is_set():
+                self.app.call_from_thread(self._apply_poll_error, stop, e)
+            return
+        if hit_cap:
+            warnings.append("High event volume detected; only the most recent pages were fetched.")
+
+        fired: list[FiredAlert] = []
+        try:
+            if new_entries and not first_poll:
+                # Checked right before alerting, so a stop sends no more notifications.
                 if stop.is_set():
                     return
-                query.page = page
-                response = self._state.client.get_logs(query)
-                batch = response.content
-                found_new = False
-                for entry in batch:
-                    key = entry_key(entry)
-                    if key not in self._seen and key not in fresh:
-                        fresh[key] = entry
-                        found_new = True
-                if not batch or response.last or not found_new:
-                    break
-            else:
-                if not first_poll:
-                    warnings.append(
-                        "High event volume detected; only the most recent pages were fetched."
-                    )
-            # The API returns newest first; keep them oldest first.
-            new_entries = list(reversed(fresh.values()))
-            if stop.is_set():
-                return
-            fired = self._state.check_alerts(new_entries) if new_entries else []
+                fired = self._state.check_alerts(new_entries)
             # A delivery-failure warning is drained after every poll, as the CLI does.
             warning = self._state.notification_manager.pop_first_failure()
             if warning:
                 warnings.append(warning)
         except Exception as e:
-            if not stop.is_set():
-                self.app.call_from_thread(self._apply_poll_error, stop, e)
-            return
+            # A bug in local alert code is not an API failure: the poll itself worked.
+            logger.exception("Monitor alert check failed")
+            warnings.append(f"Alert check failed: {e}")
 
         if stop.is_set():
             return
-        self.app.call_from_thread(self._apply_poll, stop, now, new_entries, fired, warnings)
+        self.app.call_from_thread(
+            self._apply_poll, stop, now, new_entries, fired, warnings, first_poll
+        )
 
     def _apply_poll(
         self,
@@ -329,8 +344,13 @@ class MonitorScreen(ContentView):
         new_entries: list[AuditLogEntry],
         fired: list[FiredAlert],
         warnings: list[str],
+        context_only: bool = False,
     ) -> None:
-        """Show one good poll's results. Runs on the UI thread."""
+        """Show one good poll's results. Runs on the UI thread.
+
+        With ``context_only`` (a session's first poll), the entries are remembered and the
+        newest are shown, but they are not counted as new.
+        """
         if stop.is_set():
             return  # the session this poll belongs to has ended
         # Remember entries only once the whole poll worked, so a failed page is re-read.
@@ -340,7 +360,10 @@ class MonitorScreen(ContentView):
 
         monitor = self._state.monitor
         monitor.last_check = polled_at
-        monitor.entries_since_start += len(new_entries)
+        if context_only:
+            new_entries = new_entries[-_CONTEXT_ROWS:]
+        else:
+            monitor.entries_since_start += len(new_entries)
         monitor.alerts_triggered += len(fired)
         if monitor.last_error is not None:
             monitor.last_error = None
@@ -357,14 +380,20 @@ class MonitorScreen(ContentView):
             self._show_warning(warning)
         self._update_stats_display()
 
-    def _apply_poll_error(self, stop: threading.Event, error: Exception) -> None:
-        """Show a failed poll. Runs on the UI thread; only the first failure in a row toasts."""
+    def _apply_poll_error(
+        self, stop: threading.Event, error: Exception, from_api: bool = True
+    ) -> None:
+        """Show a failed poll. Runs on the UI thread; only the first failure in a row toasts.
+
+        ``from_api`` is False for a local bug, which must not mark the header disconnected.
+        """
         if stop.is_set():
             return
         monitor = self._state.monitor
         first_failure = monitor.last_error is None
         monitor.last_error = str(error)
-        self.app.note_api_error(error)
+        if from_api:
+            self.app.note_api_error(error)
         self._set_status("error")
         if first_failure:
             self._show_error(str(error))

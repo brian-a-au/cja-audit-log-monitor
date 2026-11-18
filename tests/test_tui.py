@@ -1154,7 +1154,8 @@ class TestMonitorStream:
             assert MONITOR_MAX_ROWS == 1000
             assert table.row_count == 1000
             assert len(table._entries) == 1000
-            assert mock_app_state.monitor.entries_since_start == 1200
+            # The first poll is context only, so it is not counted as new.
+            assert mock_app_state.monitor.entries_since_start == 1100
             # The oldest rows were the ones dropped.
             assert table.ordered_rows[0].key.value == "m-200"
             assert table.ordered_rows[-1].key.value == "m-1199"
@@ -1182,7 +1183,7 @@ class TestMonitorStream:
             keys = [row.key.value for row in table.ordered_rows]
             assert keys == [f"m-{i}" for i in range(8)]
             assert table.cursor_row == table.row_count - 1
-            assert mock_app_state.monitor.entries_since_start == 8
+            assert mock_app_state.monitor.entries_since_start == 3
             screen._stop_monitoring()
 
     async def test_restart_during_poll_discards_old_results(self, mock_app_state):
@@ -1344,6 +1345,157 @@ class TestMonitorStream:
             await pilot.press("space")
             await pilot.pause()
             assert mock_app_state.monitor.is_running
+            screen._stop_monitoring()
+
+
+class TestMonitorPolling:
+    """The TUI pages like the CLI, treats the first poll as context, and survives errors."""
+
+    async def test_late_entry_behind_a_seen_page_is_shown(self, mock_app_state, monkeypatch):
+        from cja_audit_log_monitor.tui.widgets import LogTable
+
+        window = _monitor_entries(0, 100)
+        late = _monitor_entries(500, 1)
+        mock_app_state.client.get_logs.side_effect = [
+            _logs_response(window, last=True),
+            _logs_response(window),
+            _logs_response(late, last=True),
+        ]
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            screen = await _start_monitor_without_loop(app, pilot, monkeypatch)
+            await _drive_poll(screen, pilot)
+            await _drive_poll(screen, pilot)
+            table = screen.query_one("#monitor-log", LogTable)
+            assert table.ordered_rows[-1].key.value == "m-500"
+            assert mock_app_state.monitor.entries_since_start == 1
+            screen._stop_monitoring()
+
+    async def test_full_window_seeded_then_one_new(self, mock_app_state, monkeypatch):
+        window = _monitor_entries(0, 250)
+        new_window = _monitor_entries(250, 1) + window
+        mock_app_state.client.get_logs.side_effect = [
+            _logs_response(window[:100]),
+            _logs_response(window[100:200]),
+            _logs_response(window[200:], last=True),
+            _logs_response(new_window[:100]),
+            _logs_response(new_window[100:200]),
+            _logs_response(new_window[200:], last=True),
+        ]
+        engine = mock_app_state.alert_engine
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            screen = await _start_monitor_without_loop(app, pilot, monkeypatch)
+            await _drive_poll(screen, pilot)
+            await _drive_poll(screen, pilot)
+            assert mock_app_state.monitor.entries_since_start == 1
+            engine.check_batch.assert_called_once()
+            assert [e.id for e in engine.check_batch.call_args.args[0]] == ["m-250"]
+            screen._stop_monitoring()
+
+    async def test_first_poll_is_context_only(self, mock_app_state, monkeypatch):
+        """Each start shows recent rows but neither alerts nor counts them."""
+        from cja_audit_log_monitor.tui.widgets import LogTable
+
+        mock_app_state.client.get_logs.side_effect = _page_zero_batches(
+            [_monitor_entries(0, 5), _monitor_entries(0, 5)]
+        )
+        engine = mock_app_state.alert_engine
+        engine.check_batch.return_value = [FiredAlert("bulk_delete", "old", None, None)]
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            screen = await _start_monitor_without_loop(app, pilot, monkeypatch)
+            await _drive_poll(screen, pilot)
+            assert screen.query_one("#monitor-log", LogTable).row_count == 5
+            engine.check_batch.assert_not_called()
+            assert mock_app_state.monitor.entries_since_start == 0
+            assert mock_app_state.monitor.alerts_triggered == 0
+            # A stop and start begins a new session, whose first poll is context again.
+            screen._stop_monitoring()
+            screen._start_monitoring()
+            await pilot.pause()
+            await _drive_poll(screen, pilot)
+            engine.check_batch.assert_not_called()
+            assert mock_app_state.monitor.entries_since_start == 0
+            screen._stop_monitoring()
+
+    async def test_stop_during_fetch_sends_no_alerts(self, mock_app_state, monkeypatch):
+        calls: list[int] = []
+
+        def get_logs(query):
+            calls.append(query.page)
+            if len(calls) == 2:  # the second poll: the user stops while it fetches
+                screen._stop_event.set()
+            return _logs_response(_monitor_entries(len(calls) * 10, 3), last=True)
+
+        mock_app_state.client.get_logs.side_effect = get_logs
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            screen = await _start_monitor_without_loop(app, pilot, monkeypatch)
+            await _drive_poll(screen, pilot)
+            await _drive_poll(screen, pilot)
+            mock_app_state.alert_engine.check_batch.assert_not_called()
+            screen._stop_monitoring()
+
+    async def test_ui_error_in_a_poll_does_not_crash_the_app(self, mock_app_state, monkeypatch):
+        """A bug while showing one poll leaves the app and the monitor loop running."""
+        from textual.worker import WorkerState
+
+        from cja_audit_log_monitor.tui.screens.monitor import MonitorScreen
+        from cja_audit_log_monitor.tui.widgets import LogTable
+
+        original = MonitorScreen._apply_poll
+        raised: list[bool] = []
+
+        def flaky(self, *args, **kwargs):
+            if not raised:
+                raised.append(True)
+                raise RuntimeError("ui bug")
+            return original(self, *args, **kwargs)
+
+        monkeypatch.setattr(MonitorScreen, "_apply_poll", flaky)
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.press("m")
+            await pilot.pause()
+            screen = app._screens["monitor"]
+            app.notify = MagicMock()
+            screen._start_monitoring()  # the real loop; it then waits the 60 s interval
+            assert await _wait_for(lambda: raised and app.notify.called, pilot)
+            await pilot.pause()
+            assert app.is_running
+            assert screen._monitor_worker.state == WorkerState.RUNNING
+            assert mock_app_state.monitor.is_running
+            assert "ui bug" in app.notify.call_args.args[0]
+            # The next poll works.
+            assert screen.refresh_data() is True
+            assert await _wait_for(
+                lambda: screen.query_one("#monitor-log", LogTable).row_count > 0, pilot
+            )
+            screen._stop_monitoring()
+
+    async def test_alert_error_is_local_not_disconnect(self, mock_app_state, monkeypatch):
+        """A bug in alert code is shown as a local error; the poll itself still counts."""
+        from cja_audit_log_monitor.tui.widgets import LogTable
+
+        mock_app_state.client.get_logs.side_effect = _page_zero_batches(
+            [_monitor_entries(0, 3), _monitor_entries(0, 5)]
+        )
+        mock_app_state.alert_engine.check_batch.side_effect = RuntimeError("rule bug")
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            screen = await _start_monitor_without_loop(app, pilot, monkeypatch)
+            await _drive_poll(screen, pilot)
+            app.note_api_error = MagicMock()
+            app.notify = MagicMock()
+            await _drive_poll(screen, pilot)
+            app.note_api_error.assert_not_called()
+            assert "error" not in _status_indicator(screen)
+            assert mock_app_state.monitor.last_error is None
+            assert screen.query_one("#monitor-log", LogTable).row_count == 5
+            assert mock_app_state.monitor.entries_since_start == 2
+            toasts = [c.args[0] for c in app.notify.call_args_list]
+            assert any("rule bug" in t for t in toasts)
             screen._stop_monitoring()
 
 
