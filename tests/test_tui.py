@@ -609,11 +609,19 @@ class TestTableFit:
             await pilot.press("enter")
             await pilot.pause()
             await pilot.pause()
-            assert app.query_one("#entry-detail-panel", EntryDetailPanel).is_visible()
+            panel = app.query_one("#entry-detail-panel", EntryDetailPanel)
+            assert panel.is_visible()
+            assert panel.region.contains_region(table.region)
             assert table.virtual_size.width <= table.scrollable_content_region.width
             users = [str(table.get_row_at(i)[1]) for i in range(table.row_count)]
             assert all(u.endswith("…") for u in users)
             assert all(len(u) <= table.columns["user"].width for u in users)
+            await pilot.press("tab")
+            await pilot.pause()
+            await pilot.press("escape")
+            assert await _wait_for(lambda: not panel.is_visible(), pilot)
+            assert await _wait_for(lambda: app.focused is table, pilot)
+            assert table.region.width > 0 and table.display
 
     def test_fit_columns_hides_component_name_then_type(self):
         from cja_audit_log_monitor.tui.widgets import LogTable
@@ -4018,7 +4026,7 @@ class TestConfigHelpDashboardFit:
     async def test_config_path_on_one_line_at_100_columns(self, mock_app_state):
         from pathlib import Path
 
-        mock_app_state._config_path = Path.home() / ".cja-audit-log-monitor" / "config.yaml"
+        mock_app_state._config_path = Path("/Users/someone/.cja-audit-log-monitor/config.yaml")
         app = _make_app(mock_app_state)
         async with app.run_test(size=(100, 30)) as pilot:
             await pilot.press("c")
@@ -4064,3 +4072,69 @@ class TestConfigHelpDashboardFit:
                 await pilot.pause()
                 colors[state] = row.styles.border_left[1]
             assert len({str(c) for c in colors.values()}) == 3, colors
+
+
+class TestWideDashboardFill:
+    """Wide dashboards fill their columns; short ones keep the chart axis."""
+
+    async def test_hourly_chart_fills_its_column_at_200x60(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(200, 60)) as pilot:
+            view = await _show_and_load(app, pilot, "d")
+            chart = view.query_one("#hourly-chart")
+            column = view.query_one("#dash-left")
+            assert await _wait_for(lambda: chart.region.width > 0, pilot)
+            widest = max(len(line.rstrip()) for line in _plain(chart).splitlines())
+            assert widest >= 0.7 * column.content_region.width, (
+                widest,
+                column.content_region.width,
+            )
+
+    @pytest.mark.parametrize("size", [(80, 24), (100, 30), (140, 42)])
+    async def test_hourly_chart_cells_unchanged_below_wide(self, mock_app_state, size):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=size) as pilot:
+            view = await _show_and_load(app, pilot, "d")
+            chart = view.query_one("#hourly-chart")
+            widest = max(len(line.rstrip()) for line in _plain(chart).splitlines())
+            assert widest <= 49, widest
+
+    async def test_hourly_chart_keeps_axis_at_160x24(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(160, 24)) as pilot:
+            view = await _show_and_load(app, pilot, "d")
+            chart = view.query_one("#hourly-chart")
+            assert chart.region.height >= 7, chart.region.height
+
+    async def test_anomalies_label_is_one_line_at_80x24(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(80, 24)) as pilot:
+            view = await _show_and_load(app, pilot, "d")
+            card = view.query_one("#stat-alerts").parent
+            labels = [w for w in card.query(".stat-label")]
+            assert labels and all(w.region.height == 1 for w in labels)
+
+    async def test_cjk_user_names_do_not_scroll_sideways_at_80x24(
+        self, mock_app_state, sample_audit_entry
+    ):
+        from rich.cells import cell_len
+
+        from cja_audit_log_monitor.tui.widgets import LogTable
+
+        entries = [
+            sample_audit_entry.model_copy(
+                update={"id": f"e{i}", "user_email": "山田太郎山田太郎" * 4}
+            )
+            for i in range(3)
+        ]
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.press("l")
+            await pilot.pause()
+            app._screens["logs"]._update_table(entries, 3)
+            await pilot.pause()
+            table = app.query_one("#log-table", LogTable)
+            assert table.virtual_size.width <= table.scrollable_content_region.width
+            users = [str(table.get_row_at(i)[1]) for i in range(table.row_count)]
+            assert all(u.endswith("…") for u in users), users
+            assert all(cell_len(u) <= table.columns["user"].width for u in users), users

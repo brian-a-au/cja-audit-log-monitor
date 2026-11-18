@@ -108,6 +108,10 @@ class HourlyChart(Static):
             return
         available = self.content_region.width
         cell = 1 if 0 < available < 48 else 2
+        if self.screen.has_class("-wide"):
+            # Scale bars with the column's allotted width (never with the content, which would
+            # feed back into the layout).
+            cell = max(cell, (available - 1) // 24)
         # A widget sized in fractions (1fr) fills its height with bar rows, minus the axis row.
         # An auto-height one keeps ROWS: its height follows its content, so reading it back
         # would feed on itself.
@@ -120,7 +124,7 @@ class HourlyChart(Static):
     def build_markup(cls, data: dict[int, int], cell: int = 2, rows: int | None = None) -> str:
         """Build the chart as Rich markup: ``ROWS`` bar rows plus an axis row.
 
-        Each hour takes ``cell`` columns: 2 (bar plus gap) or 1 (bar only).
+        Each hour takes ``cell`` columns: 1 (bar only), or ``cell - 1`` bar columns plus a gap.
         ``rows`` defaults to ``ROWS``.
         """
         rows = rows or cls.ROWS
@@ -139,8 +143,11 @@ class HourlyChart(Static):
                     eighths = 1  # keep nonzero hours visible
                 color = primary if counts[hour] == peak else _MUTED
                 glyph = cls._LEVELS[eighths]
-                gap = " " * (cell - 1)
-                cells.append(f"[{color}]{glyph}[/{color}]{gap}" if eighths else " " * cell)
+                bar_width = max(1, cell - 1)
+                gap = " " * (cell - bar_width)
+                cells.append(
+                    f"[{color}]{glyph * bar_width}[/{color}]{gap}" if eighths else " " * cell
+                )
             lines.append("".join(cells).rstrip())
         axis = [" "] * (24 * cell + 1)
         for hour in (0, 6, 12, 18, 23):

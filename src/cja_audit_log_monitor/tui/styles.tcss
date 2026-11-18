@@ -508,7 +508,6 @@ HelpScreen {
     padding: 1 2;
     background: $background;
     border-left: heavy $primary;
-    overflow-y: auto;
 }
 
 #help-title {
@@ -623,15 +622,23 @@ ContentView LoadingIndicator {
 /* From 160 columns the dashboard fills the terminal: the hourly chart takes the spare rows. */
 Screen.-wide #dash-columns {
     height: 1fr;
-    min-height: 12;
+    min-height: 20;
 }
 
+/* The left column takes what the fixed-width right column leaves. */
 Screen.-wide #dash-left {
+    width: 1fr;
     height: 1fr;
 }
 
+Screen.-wide #dash-right {
+    width: 56;
+}
+
+/* 7 lines: six bar rows would not fit a shorter chart without clipping the hour axis. */
 Screen.-wide #hourly-chart {
     height: 1fr;
+    min-height: 7;
 }
 
 /* ---- Status indicators (used in dashboard/connection text) ---- */

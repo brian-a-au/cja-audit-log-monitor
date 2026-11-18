@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime
 
+from rich.cells import cell_len, set_cell_size
 from rich.text import Text
 from textual.widgets import DataTable
 from textual.widgets.data_table import RowKey
@@ -126,13 +127,16 @@ class LogTable(DataTable):
 
     @staticmethod
     def _truncate(text: str, width: int) -> str:
-        """Shorten ``text`` to ``width`` cells, ending with an ellipsis when cut.
+        """Shorten ``text`` to ``width`` cells (not characters), ending with an ellipsis if cut.
 
         Works on the plain string, so square brackets in the text are never markup.
         """
         if width < 1:
             return ""
-        return text if len(text) <= width else text[: width - 1] + "…"
+        if cell_len(text) <= width:
+            return text
+        # Cut by cells, not characters: a wide (CJK) glyph takes two cells.
+        return set_cell_size(text, width - 1).rstrip() + "…"
 
     def _width_of(self, key: str) -> int:
         """Current width of column ``key``, or its preferred width before the table is laid out."""
