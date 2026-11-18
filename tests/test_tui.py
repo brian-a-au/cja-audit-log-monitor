@@ -1576,6 +1576,47 @@ class TestAlertsViewRealEngine:
             assert state.alert_engine.rules[0].enabled is True
             assert app.query_one("#rule-0", Checkbox).value is True
 
+    async def test_reload_settings_rebuilds_rule_cards(self, mock_app_state, tmp_path):
+        from unittest.mock import MagicMock
+
+        def write_rules(*names):
+            config = tmp_path / "config.yaml"
+            config.write_text(
+                "alert_rules:\n" + "".join(f"  - name: {n}\n    enabled: true\n" for n in names)
+            )
+            config.chmod(0o600)
+
+        write_rules("rule_a", "rule_b")
+        mock_app_state._settings = None
+        mock_app_state._alert_engine = None
+        mock_app_state.verify_connection = MagicMock(
+            return_value={"connected": False, "error": "offline"}
+        )
+        app = _make_app(mock_app_state)
+
+        def labels():
+            return [str(c.label) for c in app.query("#rules-list Checkbox")]
+
+        async with app.run_test() as pilot:
+            await pilot.press("a")
+            assert await _wait_for(lambda: labels() == ["rule_a", "rule_b"], pilot), labels()
+            write_rules("rule_c", "rule_d", "rule_e")
+            await pilot.press("c")
+            await pilot.pause()
+            app.query_one("#reload-button", Button).press()
+            assert await _wait_for(
+                lambda: any("Settings reloaded" in n.message for n in app._notifications), pilot
+            )
+            await pilot.press("a")
+            assert await _wait_for(lambda: labels() == ["rule_c", "rule_d", "rule_e"], pilot)
+            app.query_one("#rule-0", Checkbox).toggle()
+            assert await _wait_for(
+                lambda: mock_app_state.alert_engine.rules[0].enabled is False, pilot
+            )
+            rules = mock_app_state.alert_engine.rules
+            assert [r.name for r in rules] == ["rule_c", "rule_d", "rule_e"]
+            assert [r.enabled for r in rules] == [False, True, True]
+
     async def test_test_rules_does_not_touch_live_history(self, mock_app_state):
         state = self._state(mock_app_state, [AlertRule(name="any")])
         app = _make_app(state)

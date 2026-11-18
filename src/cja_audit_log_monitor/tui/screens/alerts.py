@@ -67,6 +67,10 @@ class AlertsScreen(ContentView):
             exclusive=True,
         )
 
+    def on_settings_reloaded(self) -> None:
+        """Show the rules of the new engine, so toggles reach the rule on the card."""
+        self.refresh_data()
+
     async def _refresh_rules_list(self) -> None:
         """Rebuild the alert rules list safely."""
         rules_list = self.query_one("#rules-list", Vertical)
