@@ -1,5 +1,6 @@
 """Filter bar widget for log filtering."""
 
+from textual import events
 from textual.app import ComposeResult
 from textual.containers import Horizontal
 from textual.message import Message
@@ -52,6 +53,19 @@ class FilterBar(Static):
                 id="filter-component",
             )
             yield Button("reset", id="filter-reset", compact=True)
+
+    def on_key(self, event: events.Key) -> None:
+        """Escape leaves a filter input for the view's main widget, keeping what was typed."""
+        if event.key != "escape":
+            return
+        event.stop()  # not also the view's "close details"
+        event.prevent_default()
+        for ancestor in self.ancestors:
+            default_focus = getattr(ancestor, "default_focus", None)
+            if callable(default_focus):
+                self.screen.set_focus(default_focus())
+                return
+        self.screen.set_focus(None)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle filter button presses."""

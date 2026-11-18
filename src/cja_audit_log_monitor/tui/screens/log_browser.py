@@ -229,4 +229,6 @@ class LogBrowserScreen(ContentView):
             return
         if panel.is_visible():
             panel.hide()
+            if panel.has_focus:
+                self.screen.set_focus(self.default_focus())
             self.refresh_bindings()

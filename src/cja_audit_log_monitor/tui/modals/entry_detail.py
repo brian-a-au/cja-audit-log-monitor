@@ -6,7 +6,7 @@ from rich.console import Group, RenderableType
 from rich.table import Table
 from rich.text import Text
 from textual.app import ComposeResult
-from textual.containers import Container
+from textual.containers import VerticalScroll
 from textual.widgets import Static
 
 from ...formatters import (
@@ -55,10 +55,11 @@ def build_detail_table(entry: AuditLogEntry) -> Table:
     return table
 
 
-class EntryDetailPanel(Container):
+class EntryDetailPanel(VerticalScroll):
     """Side panel that displays a single audit log entry's details.
 
-    Hidden by default. Toggle visibility via the `hidden` class.
+    Focusable, so the keyboard can scroll a long entry. Hidden by default.
+    Toggle visibility via the `hidden` class.
     Mount inside a horizontal container next to the log table.
     """
 

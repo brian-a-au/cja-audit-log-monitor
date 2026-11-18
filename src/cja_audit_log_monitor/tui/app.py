@@ -34,7 +34,6 @@ HELP_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
     (
         "logs",
         [
-            ("/", "search"),
             ("n", "next page"),
             ("p", "previous page"),
             ("enter", "entry details"),
@@ -52,6 +51,8 @@ HELP_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
         [
             ("r", "refresh the current view"),
             ("e", "export entries"),
+            ("/", "search the logs"),
+            ("tab", "move between panels and fields"),
             ("?", "show or close this help"),
             ("esc", "close a dialog"),
             ("q", "quit"),

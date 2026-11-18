@@ -3240,3 +3240,123 @@ def test_literal_survives_markup_parsing(text):
     markup = f"[$danger]{literal(text)}[/$danger]\n[b]x[/b]"
     content = Content.from_markup(resolve_tcss_markup(markup))
     assert content.plain.split("\n")[0].rstrip("​") == text
+
+
+class TestFocusAndKeys:
+    """Escape leaves inputs, details scroll by keyboard, Enter applies stats days (F25, F32)."""
+
+    async def test_escape_leaves_search_without_navigating_or_clearing(self, mock_app_state):
+        from textual.widgets import Input
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await _show_and_load(app, pilot, "l")
+            await pilot.press("slash", "a", "b", "c")
+            await pilot.pause()
+            search = app.query_one("#filter-search", Input)
+            assert app.focused is search
+            await pilot.press("escape")
+            await pilot.pause()
+            assert app.focused is not search
+            await pilot.press("d")
+            await pilot.pause()
+            assert app._current_screen == "dashboard"
+            assert search.value == "abc"
+
+    async def test_escape_in_search_keeps_open_details(self, mock_app_state):
+        from cja_audit_log_monitor.tui.modals.entry_detail import EntryDetailPanel
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await _show_and_load(app, pilot, "l")
+            await pilot.press("enter")
+            await pilot.pause()
+            await pilot.press("slash")
+            await pilot.pause()
+            await pilot.press("escape")
+            await pilot.pause()
+            assert app.query_one(EntryDetailPanel).is_visible()
+
+    async def test_detail_panel_scrolls_with_keyboard(self, mock_app_state, sample_audit_entry):
+        from cja_audit_log_monitor.tui.modals.entry_detail import EntryDetailPanel
+
+        entry = sample_audit_entry.model_copy(
+            update={"changes": {f"field{i}": f"value {i}" for i in range(60)}}
+        )
+        mock_app_state.client.get_logs.return_value.content[0] = entry
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 30)) as pilot:
+            await _show_and_load(app, pilot, "l")
+            await pilot.press("enter")
+            await pilot.pause()
+            panel = app.query_one(EntryDetailPanel)
+            await pilot.press("tab")
+            await pilot.pause()
+            assert app.focused is panel
+            assert panel.scroll_y == 0
+            await pilot.press("pagedown")
+            await pilot.pause()
+            assert panel.scroll_y > 0
+
+    async def test_escape_in_detail_panel_closes_it_and_returns_to_table(self, mock_app_state):
+        from cja_audit_log_monitor.tui.modals.entry_detail import EntryDetailPanel
+        from cja_audit_log_monitor.tui.widgets import LogTable
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await _show_and_load(app, pilot, "l")
+            await pilot.press("enter", "tab")
+            await pilot.pause()
+            assert app.focused is app.query_one(EntryDetailPanel)
+            await pilot.press("escape")
+            await pilot.pause()
+            assert not app.query_one(EntryDetailPanel).is_visible()
+            assert app.focused is app.query_one(LogTable)
+
+    async def test_enter_in_stats_days_reloads(self, mock_app_state):
+        from textual.widgets import Input
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await _show_and_load(app, pilot, "s")
+            mock_app_state.client.get_logs_sample.reset_mock()
+            box = app.query_one("#days-input", Input)
+            box.focus()
+            box.value = ""
+            await pilot.press("3", "0", "enter")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            query = mock_app_state.client.get_logs_sample.call_args.args[0]
+            assert (query.end_date - query.start_date).days in (29, 30)
+            assert box.value == "30"
+
+    async def test_stats_days_box_shows_the_clamped_value(self, mock_app_state):
+        from textual.widgets import Input
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await _show_and_load(app, pilot, "s")
+            box = app.query_one("#days-input", Input)
+            box.focus()
+            box.value = "-5"
+            await pilot.press("enter")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert box.value == "1"
+
+    async def test_help_lists_search_and_tab(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            await pilot.press("question_mark")
+            await pilot.pause()
+            sections = {
+                str(s.render()): b
+                for s, b in zip(
+                    app.screen.query(".help-section"), app.screen.query(".help-section-body")
+                )
+            }
+            everywhere = next(str(b.render()) for t, b in sections.items() if "EVERYWHERE" in t)
+            lines = everywhere.splitlines()
+            assert any(ln.strip().startswith("/") for ln in lines)
+            assert any(ln.strip().startswith("tab") for ln in lines)

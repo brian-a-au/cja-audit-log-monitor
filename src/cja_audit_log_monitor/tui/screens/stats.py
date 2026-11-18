@@ -113,14 +113,23 @@ class StatsScreen(ContentView):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button presses."""
         if event.button.id == "update-button":
-            try:
-                self._days = int(self.query_one("#days-input", Input).value)
-                if self._days < 1:
-                    self._days = 1
-            except ValueError:
-                self._days = 7
+            self._apply_days()
 
-            self.refresh_data()
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        """Enter in the days box applies it, like the update button."""
+        if event.input.id == "days-input":
+            event.stop()
+            self._apply_days()
+
+    def _apply_days(self) -> None:
+        """Read the days box, show the value actually used, and reload."""
+        box = self.query_one("#days-input", Input)
+        try:
+            self._days = max(1, int(box.value))
+        except ValueError:
+            self._days = 7
+        box.value = str(self._days)
+        self.refresh_data()
 
     def _fetch(self, days: int) -> tuple | None:
         """Sample and analyze the last ``days`` days (worker thread); None when empty."""
