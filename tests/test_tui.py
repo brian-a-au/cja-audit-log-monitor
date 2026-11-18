@@ -634,7 +634,7 @@ class TestViewFocusAndScroll:
     async def test_space_starts_monitor_right_after_m(self, mock_app_state):
         from cja_audit_log_monitor.tui.screens.monitor import MonitorScreen
 
-        async def _no_loop(self):
+        async def _no_loop(self, stop):
             return None
 
         app = _make_app(mock_app_state)
@@ -809,8 +809,96 @@ class TestLogBrowserScreen:
             assert loading is not None
 
 
+def _track_monitor_loops(monkeypatch):
+    """Wrap MonitorScreen._monitoring_loop to record when each loop starts and ends.
+
+    Returns (started, ended): lists that get a threading.Event per loop. The default
+    interval of 60 seconds stays in place, so a loop that only notices a stop after its
+    sleep takes far longer to end than these tests allow.
+    """
+    import threading
+
+    from cja_audit_log_monitor.tui.screens.monitor import MonitorScreen
+
+    original = MonitorScreen._monitoring_loop
+    started: list[threading.Event] = []
+    ended: list[threading.Event] = []
+
+    async def tracked(self, *args, **kwargs):
+        done = threading.Event()
+        ended.append(done)
+        started.append(threading.Event())
+        started[-1].set()
+        try:
+            await original(self, *args, **kwargs)
+        finally:
+            done.set()
+
+    monkeypatch.setattr(MonitorScreen, "_monitoring_loop", tracked)
+    return started, ended
+
+
+async def _wait_for(condition, pilot, timeout: float = 3.0) -> bool:
+    """Pause the app until ``condition()`` is true, or ``timeout`` seconds pass."""
+    import time
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if condition():
+            return True
+        await pilot.pause(0.05)
+    return condition()
+
+
 class TestMonitorScreen:
     """Test the Monitor screen."""
+
+    async def test_stop_ends_the_loop_without_waiting_for_the_interval(
+        self, mock_app_state, monkeypatch
+    ):
+        _started, ended = _track_monitor_loops(monkeypatch)
+        app = _make_app(mock_app_state)
+        async with app.run_test() as pilot:
+            await pilot.press("m")
+            await pilot.pause()
+            screen = app._screens["monitor"]
+            screen._start_monitoring()
+            assert await _wait_for(lambda: mock_app_state.client.get_logs.called, pilot)
+            screen._stop_monitoring()
+            assert await _wait_for(lambda: ended[0].is_set(), pilot), (
+                "the monitor loop kept sleeping after stop"
+            )
+
+    async def test_quitting_ends_the_loop(self, mock_app_state, monkeypatch):
+        _started, ended = _track_monitor_loops(monkeypatch)
+        app = _make_app(mock_app_state)
+        async with app.run_test() as pilot:
+            await pilot.press("m")
+            await pilot.pause()
+            app._screens["monitor"]._start_monitoring()
+            assert await _wait_for(lambda: mock_app_state.client.get_logs.called, pilot)
+            await pilot.press("q")
+        # Python waits for the worker thread before the program can exit.
+        assert ended[0].wait(3), "the monitor loop kept running after the app quit"
+
+    async def test_stop_then_start_leaves_one_loop(self, mock_app_state, monkeypatch):
+        _started, ended = _track_monitor_loops(monkeypatch)
+        app = _make_app(mock_app_state)
+        async with app.run_test() as pilot:
+            await pilot.press("m")
+            await pilot.pause()
+            screen = app._screens["monitor"]
+            screen._start_monitoring()
+            assert await _wait_for(lambda: mock_app_state.client.get_logs.called, pilot)
+            screen._stop_monitoring()
+            screen._start_monitoring()
+            assert await _wait_for(lambda: len(ended) == 2, pilot)
+            assert await _wait_for(lambda: ended[0].is_set(), pilot), (
+                "the first loop resumed after the second start"
+            )
+            assert not ended[1].is_set()
+            screen._stop_monitoring()
+            assert await _wait_for(lambda: ended[1].is_set(), pilot)
 
     async def test_refresh_does_not_start_parallel_poll(self, mock_app_state):
         app = _make_app(mock_app_state)

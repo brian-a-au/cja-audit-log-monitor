@@ -99,12 +99,8 @@ async def capture_slides(work: Path) -> list[Path]:
                 await pilot.press(key)
                 await pilot.pause(delay=0.3)
             if "m" in keys:
-                # Start a live session so the stream shows entries. The monitor thread sleeps
-                # for the whole interval before it sees the stop, so a short interval lets
-                # the app exit quickly at the end.
-                monitor = app._screens["monitor"]
-                monitor.query_one("#interval-input").value = "5"
-                monitor._start_monitoring()
+                # Start a live session so the stream shows entries.
+                app._screens["monitor"]._start_monitoring()
             await pilot.pause(delay=1.2)
             svg = work / f"slide{i}.svg"
             app.save_screenshot(str(svg))

@@ -46,6 +46,9 @@ class MonitorScreen(ContentView):
         self._seen_ids: set[str] = set()
         # Guard shared poll state against concurrent refresh/background workers.
         self._poll_lock = threading.Lock()
+        # Set to end the running monitor loop. Each start makes a new event, so a loop
+        # from an earlier start cannot resume when monitoring starts again.
+        self._stop_event: threading.Event | None = None
 
     def compose_content(self) -> Iterator[Widget]:
         """Yield widgets for embedding in main content area.
@@ -150,8 +153,9 @@ class MonitorScreen(ContentView):
         self.query_one("#monitor-log", LogTable).clear()
 
         # Start monitoring worker
+        self._stop_event = threading.Event()
         self._monitor_worker = self.run_worker(
-            self._monitoring_loop(),
+            self._monitoring_loop(self._stop_event),
             exclusive=True,
             thread=True,
         )
@@ -159,6 +163,9 @@ class MonitorScreen(ContentView):
     def _stop_monitoring(self) -> None:
         """Stop the monitoring loop."""
         self._state.monitor.is_running = False
+        if self._stop_event:
+            self._stop_event.set()
+            self._stop_event = None
 
         if self._monitor_worker:
             self._monitor_worker.cancel()
@@ -179,23 +186,35 @@ class MonitorScreen(ContentView):
             resolve_tcss_markup("[$danger]● stopped[/$danger]")
         )
 
-    async def _monitoring_loop(self) -> None:
-        """Main monitoring loop."""
-        import asyncio
+    def on_unmount(self) -> None:
+        """End the monitor loop when the view goes away, e.g., when the app quits.
 
-        while self._state.monitor.is_running:
+        Python waits for the loop's thread before the program exits, so a loop left
+        running would hold the terminal until its next poll.
+        """
+        self._state.monitor.is_running = False
+        if self._stop_event:
+            self._stop_event.set()
+
+    async def _monitoring_loop(self, stop: threading.Event) -> None:
+        """Poll until ``stop`` is set, waiting the interval between polls.
+
+        The wait is ``stop.wait``, not a sleep, so a stop ends the loop at once.
+        """
+        while not stop.is_set():
             try:
                 with self._poll_lock:
                     await self._poll_for_new_entries()
                     self._state.monitor.last_check = datetime.now(UTC)
-                if self._state.monitor.is_running:
+                if not stop.is_set():
                     self.app.call_from_thread(self._update_stats_display)
             except Exception as e:
+                if stop.is_set():
+                    break
                 self.app.call_from_thread(self.app.note_api_error, e)
                 self.app.call_from_thread(self._show_error, str(e))
 
-            # Wait for interval
-            await asyncio.sleep(self._state.monitor.interval)
+            stop.wait(self._state.monitor.interval)
 
     async def _poll_once(self) -> None:
         """Poll once for new entries (used by manual refresh)."""
