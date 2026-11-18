@@ -99,7 +99,3 @@ class FilterBar(Static):
         self.query_one("#filter-action", Select).value = Select.BLANK
         self.query_one("#filter-component", Select).value = Select.BLANK
         self.post_message(self.FilterReset())
-
-    def focus_search(self) -> None:
-        """Focus the search input."""
-        self.query_one("#filter-search", Input).focus()

@@ -88,7 +88,6 @@ class AppState:
         self.total_entries: int = 0
         # True once the log browser has loaded a page; until then entries/total are unknown.
         self.page_loaded: bool = False
-        self.selected_entry: AuditLogEntry | None = None
 
         # Filter state
         self.filters = FilterState()
@@ -98,9 +97,6 @@ class AppState:
 
         # Days the statistics view looks back; starts at the configured default_days.
         self.stats_days: int = 7
-
-        # Alerts
-        self.recent_alerts: list[FiredAlert] = []
 
         # Connection state
         self.is_connected: bool = False
@@ -239,20 +235,6 @@ class AppState:
                 "error": str(e),
             }
 
-    def fetch_logs(self, max_entries: int | None = None) -> list[AuditLogEntry]:
-        """Fetch audit logs based on current filters.
-
-        Args:
-            max_entries: Maximum number of entries to fetch.
-
-        Returns:
-            List of audit log entries.
-        """
-        query = self.filters.to_query()
-        self.entries = self.client.get_all_logs(query, max_entries=max_entries)
-        self.last_refresh = datetime.now()
-        return self.entries
-
     def fetch_logs_page(self) -> tuple[list[AuditLogEntry], int]:
         """Fetch the page the filters select, without storing it.
 
@@ -275,9 +257,6 @@ class AppState:
             List of FiredAlert objects for triggered rules.
         """
         fired = self.alert_engine.check_batch(entries)
-        self.recent_alerts.extend(fired)
-        self.recent_alerts = self.recent_alerts[-50:]
-
         # Best-effort dispatch: never let a notification bug block alert display
         nm = self.notification_manager
         if nm.is_configured():

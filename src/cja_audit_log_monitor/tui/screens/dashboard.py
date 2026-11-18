@@ -49,7 +49,6 @@ class DashboardScreen(ContentView):
             **kwargs: Additional arguments for the view.
         """
         super().__init__(state, **kwargs)
-        self._stats: dict = {}
         self._top_users: list[tuple[str, int]] | None = None  # None until data loads
 
     def compose_header(self) -> Iterator[Widget]:
@@ -161,7 +160,6 @@ class DashboardScreen(ContentView):
         self, stats: dict, anomalies: list, hourly: dict[int, int], total: int | None = None
     ) -> None:
         """Update statistics display."""
-        self._stats = stats
         self.set_empty_state(None)
 
         shown = stats.get("total_entries", 0)

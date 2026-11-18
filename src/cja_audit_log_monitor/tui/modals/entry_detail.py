@@ -63,11 +63,9 @@ class EntryDetailPanel(VerticalScroll):
     Mount inside a horizontal container next to the log table.
     """
 
-    DEFAULT_ID = "entry-detail-panel"
-
     def __init__(self, **kwargs) -> None:
         """Initialize EntryDetailPanel."""
-        kwargs.setdefault("id", self.DEFAULT_ID)
+        kwargs.setdefault("id", "entry-detail-panel")
         super().__init__(**kwargs)
         self._entry: AuditLogEntry | None = None
         self.add_class("hidden")

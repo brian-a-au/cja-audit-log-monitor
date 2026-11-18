@@ -5,6 +5,7 @@ import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from textual.color import Color
 from textual.widgets import Button, Checkbox, Static
 
 from cja_audit_log_monitor.alerts import FiredAlert
@@ -1629,7 +1630,6 @@ class TestAlertsViewRealEngine:
                 await pilot.pause()
                 assert len(state.alert_engine._event_history) == 0
                 assert state._client.get_all_logs.called
-                assert state.recent_alerts == []
                 assert not notify.called
 
     async def test_failed_test_rules_shows_error_in_results(self, mock_app_state):
@@ -3054,22 +3054,6 @@ async def test_alert_test_login_failure_updates_header(mock_app_state):
         assert "disconnected" in str(app.query_one("#status-row").render())
 
 
-async def test_alert_card_shows_local_time_with_zone(mock_app_state, los_angeles_tz):
-    from datetime import UTC, datetime
-
-    from cja_audit_log_monitor.models import AuditLogEntry
-    from cja_audit_log_monitor.tui.widgets.alert_card import AlertCard
-
-    entry = AuditLogEntry(id="1", timestamp=datetime(2026, 11, 17, 23, 25, 13, tzinfo=UTC))
-    app = _make_app(mock_app_state)
-    async with app.run_test(size=(120, 40)) as pilot:
-        card = AlertCard("rule", "fired", entry)
-        await app.screen.mount(card)
-        await pilot.pause()
-        text = str(card.render())
-        assert "2026-11-17 15:25:13 PST" in text
-
-
 class TestLaterRoundPolish:
     async def test_no_repeated_ids_across_views(self, mock_app_state):
         from collections import Counter
@@ -3594,3 +3578,111 @@ class TestConfiguredDefaults:
             await pilot.pause()
             app.query_one("#reload-button", Button).press()
             assert await _wait_for(lambda: "last 3 days" in labels(), pilot)
+
+
+def _dot_color(app):
+    """Hex color the status row paints its dot with."""
+    from textual.color import Color
+
+    strip = app.query_one("#status-row", Static).render_line(0)
+    segment = next(seg for seg in strip if "●" in seg.text)
+    return Color.from_rich_color(segment.style.color).hex
+
+
+class TestStatusDotColor:
+    """The dot is painted from the theme, so disconnected is the theme's error color."""
+
+    async def test_disconnected_dot_uses_theme_error_color(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test() as pilot:
+            app.set_connection_status("disconnected", "boom")
+            await pilot.pause()
+            assert _dot_color(app) == Color.parse(app.theme_variables["error"]).hex
+
+
+class TestChartLoadingState:
+    """Charts say "loading…" while their view's load runs, then show the data."""
+
+    @pytest.mark.parametrize(
+        ("key", "chart_ids"),
+        [
+            ("d", ["#action-chart", "#hourly-chart"]),
+            ("s", ["#stats-action-chart", "#stats-hourly-chart"]),
+        ],
+    )
+    async def test_charts_show_loading_until_the_load_ends(
+        self, mock_app_state, sample_audit_entries, key, chart_ids
+    ):
+        import threading
+
+        started, release = threading.Event(), threading.Event()
+
+        def slow_sample(query, max_entries=None):
+            started.set()
+            release.wait(5)
+            return sample_audit_entries, len(sample_audit_entries)
+
+        mock_app_state.client.get_logs_sample.side_effect = slow_sample
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 42)) as pilot:
+            await pilot.press(key)
+            await pilot.pause()
+            view = app._screens[app._current_screen]
+            view.refresh_data()
+            assert await _wait_for(started.is_set, pilot)
+            charts = [view.query_one(chart_id, Static) for chart_id in chart_ids]
+            assert all("loading…" in str(c.render()) for c in charts)
+            release.set()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert all("loading…" not in str(c.render()) for c in charts)
+            assert "no data" not in str(charts[0].render())
+
+    async def test_a_failed_load_does_not_leave_loading_text(self, mock_app_state):
+        mock_app_state.client.get_logs_sample.side_effect = RuntimeError("boom")
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 42)) as pilot:
+            view = await _show_and_load(app, pilot, "s")
+            for chart_id in ("#stats-action-chart", "#stats-hourly-chart"):
+                assert "loading…" not in str(view.query_one(chart_id, Static).render())
+
+
+class TestPaginationButtons:
+    """prev and next are disabled whenever they cannot be used."""
+
+    async def test_disabled_before_the_first_load(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 42)) as pilot:
+            await pilot.press("l")
+            await pilot.pause()
+            view = app._screens["logs"]
+            assert view.query_one("#prev-page", Button).disabled
+            assert view.query_one("#next-page", Button).disabled
+
+    async def test_disabled_after_an_error(self, mock_app_state, sample_audit_entry):
+        from cja_audit_log_monitor.models import AuditLogResponse
+
+        page = AuditLogResponse(
+            content=[sample_audit_entry.model_copy(update={"id": f"e{i}"}) for i in range(3)],
+            total_elements=250,  # three pages at the default page size of 100
+            total_pages=3,
+            number_of_elements=3,
+            first=False,
+            last=False,
+            number=1,
+            size=50,
+        )
+        mock_app_state.client.get_logs.return_value = page
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 42)) as pilot:
+            await pilot.pause()
+            mock_app_state.filters.page = 1  # after startup, which resets to the first page
+            view = await _show_and_load(app, pilot, "l")
+            assert not view.query_one("#prev-page", Button).disabled
+            assert not view.query_one("#next-page", Button).disabled
+            mock_app_state.client.get_logs.side_effect = RuntimeError("boom")
+            view.refresh_data()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert view.query_one("#prev-page", Button).disabled
+            assert view.query_one("#next-page", Button).disabled

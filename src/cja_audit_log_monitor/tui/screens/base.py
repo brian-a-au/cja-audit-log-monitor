@@ -12,6 +12,7 @@ from ...auth import AuthenticationError
 from ...client import APIError
 from ...formatters import literal, resolve_tcss_markup
 from ..state import AppState
+from ..widgets.stats_panel import ActionBarChart, HourlyChart
 
 T = TypeVar("T")
 
@@ -172,9 +173,13 @@ class ContentView(Vertical):
             body.display = False
 
     def set_loading(self, loading: bool) -> None:
-        """Show or hide the view's loading indicator, if it has one."""
+        """Show or hide the view's loading indicator, and put its charts in "loading…"."""
         for indicator in self.query(LoadingIndicator):
             indicator.display = loading
+        for chart in self.query(ActionBarChart):
+            chart.set_loading(loading)
+        for chart in self.query(HourlyChart):
+            chart.set_loading(loading)
 
     def run_load(
         self,

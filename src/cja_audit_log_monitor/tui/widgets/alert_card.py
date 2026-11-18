@@ -1,42 +1,8 @@
-"""Alert card widget for displaying alert notifications."""
+"""Alert summary widget for the monitor view."""
 
 from textual.widgets import Static
 
-from ...formatters import format_timestamp, literal, resolve_tcss_markup
-from ...models import AuditLogEntry
-from ...utils import get_user_identifier, local_tz_name
-
-
-class AlertCard(Static):
-    """Widget for displaying a single alert notification."""
-
-    def __init__(
-        self,
-        alert_name: str,
-        message: str,
-        entry: AuditLogEntry | None = None,
-        **kwargs,
-    ) -> None:
-        """Initialize AlertCard.
-
-        Args:
-            alert_name: Name of the triggered alert rule.
-            message: Alert message.
-            entry: Optional related audit log entry.
-            **kwargs: Additional arguments for Static.
-        """
-        content = resolve_tcss_markup(
-            f"[$danger]⚠ {literal(alert_name)}[/$danger]\n{literal(message)}"
-        )
-        if entry:
-            content += literal(
-                f"\nTime: {format_timestamp(entry.timestamp, local=True)} {local_tz_name()}"
-                f"\nUser: {get_user_identifier(entry, default='-')}"
-                f"\nAction: {entry.action}"
-                f"\nComponent: {entry.component_type} - "
-                f"{entry.component_name or entry.component_id}"
-            )
-        super().__init__(content, **kwargs)
+from ...formatters import literal, resolve_tcss_markup
 
 
 class AlertSummary(Static):
@@ -61,11 +27,6 @@ class AlertSummary(Static):
         self._alerts.append((name, message))
         # Keep only last 10
         self._alerts = self._alerts[-10:]
-        self._refresh_display()
-
-    def clear_alerts(self) -> None:
-        """Clear all alerts."""
-        self._alerts.clear()
         self._refresh_display()
 
     def _refresh_display(self) -> None:

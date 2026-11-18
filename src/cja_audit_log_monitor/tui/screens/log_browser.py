@@ -31,9 +31,9 @@ class LogBrowserScreen(ContentView):
     def compose_content(self) -> Iterator[Widget]:
         """Yield widgets for embedding in main content area."""
         pagination = Horizontal(
-            Button("◀ prev", id="prev-page", compact=True),
+            Button("◀ prev", id="prev-page", compact=True, disabled=True),
             Label("page 1 of 1", id="page-info"),
-            Button("next ▶", id="next-page", compact=True),
+            Button("next ▶", id="next-page", compact=True, disabled=True),
             Static("", id="entry-count"),
             id="pagination",
         )
@@ -121,6 +121,9 @@ class LogBrowserScreen(ContentView):
         self._state.entries = []
         self._state.total_entries = 0
         self._state.page_loaded = False
+        self._total_pages = 1
+        self.query_one("#prev-page", Button).disabled = True
+        self.query_one("#next-page", Button).disabled = True
         self._set_table_message(error_message(error))
 
     def _set_table_message(self, message: str | None) -> None:

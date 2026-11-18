@@ -117,7 +117,6 @@ FooterKey:hover {
 .stat-card,
 .settings-section,
 .rule-card,
-AlertCard,
 #monitor-status {
     height: auto;
     padding: 1 2;
@@ -125,7 +124,7 @@ AlertCard,
     border-left: heavy $primary;
 }
 
-.card.-danger, .stat-card.severity-danger, AlertCard { border-left: heavy $danger; }
+.card.-danger, .stat-card.severity-danger { border-left: heavy $danger; }
 .card.-warning, .stat-card.severity-warning { border-left: heavy $warning; }
 .card.-success, .stat-card.severity-success { border-left: heavy $success; }
 .card.-muted { border-left: heavy #6e7480; }
@@ -230,21 +229,6 @@ FilterBar Button {
     margin: 1 0;
 }
 
-/* ---- Alert card ---- */
-AlertCard {
-    margin: 1 0;
-    border-left: heavy $danger;
-}
-
-AlertCard .alert-title {
-    color: $danger;
-    text-style: bold;
-}
-
-AlertCard .alert-message {
-    color: $text;
-}
-
 AlertSummary {
     height: auto;
     padding: 0 2;
@@ -311,26 +295,6 @@ AlertSummary {
     color: $text-strong;
     text-style: bold;
     margin: 0 0 1 0;
-}
-
-#entry-detail-panel .detail-row {
-    height: auto;
-    margin: 0 0 1 0;
-}
-
-#entry-detail-panel .detail-label {
-    width: 15;
-    color: $text-muted;
-}
-
-#entry-detail-panel .detail-value {
-    width: 1fr;
-    color: $text;
-}
-
-#entry-detail-panel .detail-changes {
-    color: $text;
-    margin: 1 0;
 }
 
 /* ---- Log browser layout (table + side panel) ---- */

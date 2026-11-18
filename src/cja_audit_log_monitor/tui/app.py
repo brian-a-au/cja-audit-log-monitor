@@ -166,7 +166,7 @@ class CJAAuditApp(App):
             f"[$primary]{key}[/$primary] {self.NAV_LABELS[nav_id]}"
         )
 
-    _STATUS_DOT = {"connecting": "$warning", "connected": "$success", "disconnected": "$danger"}
+    _STATUS_DOT = {"connecting": "$warning", "connected": "$success", "disconnected": "$error"}
 
     def _status_row_text(
         self, status: ConnectionStatus = "connecting", detail: str = ""
