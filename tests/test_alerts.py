@@ -292,3 +292,21 @@ class TestAnalyzeForAnomalies:
         anomalies = analyze_for_anomalies(entries)
         off_hours = [a for a in anomalies if a["type"] == "off_hours_activity"]
         assert len(off_hours) >= 1
+
+
+def test_rule_can_name_image_component():
+    from cja_audit_log_monitor.alerts import AlertEngine
+
+    rule = AlertRule(
+        name="image_deletes",
+        description="deleted images",
+        actions=[ActionType.DELETE],
+        components=[ComponentType("IMAGE")],
+        threshold_count=1,
+        threshold_window_minutes=60,
+    )
+    engine = AlertEngine(rules=[rule])
+    entry = AuditLogEntry(
+        id="1", timestamp=datetime.now(UTC), action="DELETE", component_type="IMAGE"
+    )
+    assert engine._matches_rule(entry, rule)

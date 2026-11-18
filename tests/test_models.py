@@ -2,6 +2,8 @@
 
 from datetime import UTC, datetime
 
+import pytest
+
 from cja_audit_log_monitor.models import (
     ActionType,
     AuditLogEntry,
@@ -24,11 +26,15 @@ class TestActionType:
             "EDIT",
             "EMBARGO",
             "EXPORT",
+            "FAVORITE",
+            "LABEL",
             "ORG_CHANGE",
+            "PIN",
             "REFRESH",
             "SHARE",
             "TRANSFER",
             "UNAPPROVE",
+            "UNFAVORITE",
             "UNSHARE",
         ]
         actual = [a.value for a in ActionType]
@@ -50,12 +56,15 @@ class TestComponentType:
             "AUDIENCE",
             "CALCULATED_METRIC",
             "CONNECTION",
+            "CONTAINER",
             "DATA_GROUP",
             "DATA_VIEW",
             "DATASET_STITCHING",
             "DATE_RANGE",
             "FEATURE_ACCESS",
             "FILTER",
+            "FULL_TABLE_EXPORT",
+            "IMAGE",
             "IMS_ORG",
             "MOBILE",
             "PROJECT",
@@ -246,3 +255,15 @@ class TestQueryParamsMatchLiveApi:
             params = AuditLogQuery(user_id=value).to_query_params()
             assert params["userId"] == value, value
             assert "userEmail" not in params
+
+
+class TestValuesSeenInLiveOrgs:
+    """Component types and actions seen in a live org's audit logs."""
+
+    @pytest.mark.parametrize("value", ["IMAGE", "CONTAINER", "FULL_TABLE_EXPORT"])
+    def test_component_types(self, value):
+        assert ComponentType(value).value == value
+
+    @pytest.mark.parametrize("value", ["FAVORITE", "UNFAVORITE", "PIN", "LABEL"])
+    def test_actions(self, value):
+        assert ActionType(value).value == value

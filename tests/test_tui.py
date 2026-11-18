@@ -1629,3 +1629,15 @@ class TestActionColumn:
             table = view.query_one(LogTable)
             cell = table.get_row_at(0)[2]
             assert table.columns["action"].width >= len(str(cell).rstrip())
+
+
+async def test_component_filter_offers_image(mock_app_state):
+    from textual.widgets import Select
+
+    app = _make_app(mock_app_state)
+    async with app.run_test(size=(140, 40)) as pilot:
+        await pilot.press("l")
+        await pilot.pause()
+        select = app.query_one("#filter-component", Select)
+        values = [value for _, value in select._options]
+        assert "IMAGE" in values
