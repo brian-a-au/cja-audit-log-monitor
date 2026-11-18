@@ -44,7 +44,7 @@ class ConfigError(Exception):
 
 def _validation_summary(source: str, error: ValidationError) -> str:
     """One line naming the first invalid field and why (never the input value)."""
-    errors = error.errors(include_input=False, include_url=False)
+    errors = error.errors()
     first = errors[0]
     location = ".".join(str(part) for part in first["loc"])
     text = f"{source}: {location}: {first['msg']}" if location else f"{source}: {first['msg']}"
