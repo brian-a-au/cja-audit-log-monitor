@@ -14,6 +14,8 @@ from .utils import get_user_identifier, group_by_user, local_tz_name, to_local, 
 
 logger = logging.getLogger(__name__)
 
+_EPOCH = datetime.min.replace(tzinfo=UTC)
+
 
 @dataclass
 class FiredAlert:
@@ -82,7 +84,9 @@ class AlertEngine:
             self.rules = list(rules)
         else:
             self.rules = [AlertRule(**rule.model_dump()) for rule in DEFAULT_ALERT_RULES]
-        self._event_history: dict[str, list[tuple[datetime, AuditLogEntry]]] = defaultdict(list)
+        self._event_history: dict[tuple[str, str], list[tuple[datetime, AuditLogEntry]]] = (
+            defaultdict(list)
+        )
 
     def add_rule(self, rule: AlertRule) -> None:
         """Add an alert rule.
@@ -137,15 +141,18 @@ class AlertEngine:
                 return True
         return False
 
-    def _clean_old_events(self, rule: AlertRule) -> None:
-        """Remove events outside the rule's time window.
+    def _clean_old_events(self, key: tuple[str, str], window: timedelta, now: datetime) -> None:
+        """Remove events older than the window, measured back from ``now``.
+
+        ``now`` is the newest event time seen for the key, not the wall clock,
+        so replayed or late-indexed events are judged by when they happened.
 
         Args:
-            rule: Rule to clean events for.
+            key: History key, ``(rule_name, user_key)``.
+            window: Length of the rule's time window.
+            now: Reference time; events at or before ``now - window`` are dropped.
         """
-        cutoff = datetime.now(UTC) - timedelta(minutes=rule.threshold_window_minutes)
-        key = rule.name
-
+        cutoff = now - window
         self._event_history[key] = [
             (ts, entry) for ts, entry in self._event_history[key] if ts > cutoff
         ]
@@ -209,14 +216,19 @@ class AlertEngine:
             if not self._matches_rule(entry, rule):
                 continue
 
-            # Add to event history
-            self._event_history[rule.name].append((timestamp, entry))
+            key = (rule.name, "")
 
-            # Clean old events
-            self._clean_old_events(rule)
+            # Add to event history
+            self._event_history[key].append((timestamp, entry))
+
+            # Clean old events, measured from the newest event time for this key
+            newest = max(ts for ts, _ in self._event_history[key])
+            self._clean_old_events(
+                key, timedelta(minutes=rule.threshold_window_minutes), newest
+            )
 
             # Check threshold
-            event_count = len(self._event_history[rule.name])
+            event_count = len(self._event_history[key])
             if event_count >= rule.threshold_count:
                 message = (
                     f"{rule.description or rule.name}: "
@@ -239,12 +251,14 @@ class AlertEngine:
                 )
 
                 # Clear history to avoid repeated alerts
-                self._event_history[rule.name] = []
+                self._event_history[key] = []
 
         return fired
 
     def check_batch(self, entries: list[AuditLogEntry]) -> list[FiredAlert]:
         """Check a batch of entries against all rules.
+
+        Entries are processed oldest first, whatever order they arrive in.
 
         Args:
             entries: List of audit log entries.
@@ -252,8 +266,11 @@ class AlertEngine:
         Returns:
             List of FiredAlert objects for triggered rules.
         """
+        # Oldest first so windows slide forward in event time; entries without
+        # a timestamp are treated as happening now and go last.
+        ordered = sorted(entries, key=lambda e: (e.timestamp is None, e.timestamp or _EPOCH))
         all_fired: list[FiredAlert] = []
-        for entry in entries:
+        for entry in ordered:
             all_fired.extend(self.check_entry(entry))
         return all_fired
 
@@ -272,7 +289,7 @@ class AlertEngine:
                 "components": [c.value for c in rule.components] if rule.components else None,
                 "threshold_count": rule.threshold_count,
                 "threshold_window_minutes": rule.threshold_window_minutes,
-                "pending_events": len(self._event_history[rule.name]),
+                "pending_events": len(self._event_history[(rule.name, "")]),
             }
             for rule in self.rules
         ]

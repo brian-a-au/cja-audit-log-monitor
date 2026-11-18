@@ -1,6 +1,7 @@
 """Tests for alerts module."""
 
-from datetime import UTC, datetime
+import random
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from rich.panel import Panel
@@ -387,3 +388,51 @@ class TestAccountMatching:
         high = [a for a in analyze_for_anomalies(entries) if a["type"] == "high_activity_user"]
         # 14 actions over 6 accounts: average 2.3, so no account has 3x the average.
         assert high == []
+
+
+class TestEventTimeWindows:
+    """Rule windows follow event time, never the wall clock."""
+
+    BASE = datetime(2026, 3, 1, 12, 0, tzinfo=UTC)
+
+    def _deletes(self, count, start, step_minutes=1, component_type=None):
+        return [
+            AuditLogEntry(
+                action="DELETE",
+                component_type=component_type,
+                timestamp=start + timedelta(minutes=i * step_minutes),
+                user_id="u1",
+            )
+            for i in range(count)
+        ]
+
+    def _default_engine(self):
+        return AlertEngine(rules=[r.model_copy() for r in DEFAULT_ALERT_RULES])
+
+    def test_old_burst_fires_by_event_time(self):
+        entries = self._deletes(10, self.BASE - timedelta(hours=2))
+        fired = self._default_engine().check_batch(entries)
+        assert [a.rule_name for a in fired] == ["bulk_delete", "bulk_delete"]
+
+    def test_shuffled_batch_gives_same_result(self):
+        entries = self._deletes(10, self.BASE - timedelta(hours=2))
+        random.Random(7).shuffle(entries)
+        fired = self._default_engine().check_batch(entries)
+        assert [a.rule_name for a in fired] == ["bulk_delete", "bulk_delete"]
+
+    def test_sensitive_delete_two_minutes_old_fires(self):
+        entry = AuditLogEntry(
+            action="DELETE",
+            component_type="DATA_VIEW",
+            timestamp=self.BASE - timedelta(minutes=2),
+        )
+        fired = self._default_engine().check_batch([entry])
+        assert "sensitive_component_delete" in [a.rule_name for a in fired]
+
+    def test_events_outside_window_never_count_together(self):
+        rule = AlertRule(
+            name="pair", actions=[ActionType.DELETE],
+            threshold_count=2, threshold_window_minutes=60,
+        )
+        engine = AlertEngine(rules=[rule])
+        assert engine.check_batch(self._deletes(2, self.BASE, step_minutes=90)) == []
