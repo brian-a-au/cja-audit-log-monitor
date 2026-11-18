@@ -62,6 +62,8 @@ class MonitorState:
     last_check: datetime | None = None
     entries_since_start: int = 0
     alerts_triggered: int = 0
+    # The last poll's error, or None when the last poll worked.
+    last_error: str | None = None
 
 
 class AppState:

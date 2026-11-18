@@ -4,29 +4,46 @@ import threading
 from collections.abc import Iterator
 from datetime import UTC, datetime
 
+from textual.binding import Binding
 from textual.containers import Container, Horizontal
+from textual.validation import Integer
 from textual.widget import Widget
 from textual.widgets import Button, Input, Label, Static
 from textual.worker import Worker
 
+from ...alerts import FiredAlert
 from ...formatters import resolve_tcss_markup
-from ...models import AuditLogQuery
-from ...utils import entry_key, to_local
+from ...models import AuditLogEntry
+from ...monitor import SEEN_IDS_MAX, build_poll_query
+from ...utils import RecentIds, entry_key, to_local
 from ..state import AppState
 from ..widgets import AlertSummary, LogTable
 from .base import ContentView
 
-# Cap _seen_ids to prevent unbounded memory growth during long sessions
-_MAX_SEEN_IDS = 10_000
-# Fetch multiple pages per poll to avoid dropping events during bursts.
+# Rows kept in the live stream; older rows are dropped so long sessions stay fast.
+MONITOR_MAX_ROWS = 1000
+# Entries per page, and the most pages one poll reads during a burst.
+_POLL_PAGE_SIZE = 100
 _MAX_POLL_PAGES = 20
+# Allowed polling interval, in seconds.
+_MIN_INTERVAL = 5
+_MAX_INTERVAL = 3600
+
+
+class _IntervalInput(Input):
+    """The interval box. It takes digits only, so it lets space through to start/stop."""
+
+    def check_consume_key(self, key: str, character: str | None) -> bool:
+        """Do not claim space, so the view's start/stop binding still sees it."""
+        return key != "space" and super().check_consume_key(key, character)
 
 
 class MonitorScreen(ContentView):
     """Screen for real-time audit log monitoring."""
 
+    # Priority, so space reaches this binding before the focused interval box handles it.
     BINDINGS = [
-        ("space", "toggle_monitor", "start/stop"),
+        Binding("space", "toggle_monitor", "start/stop", priority=True),
     ]
 
     # The view itself takes focus so `space` works as soon as it is shown.
@@ -42,12 +59,14 @@ class MonitorScreen(ContentView):
         super().__init__(state, **kwargs)
         self._monitor_worker: Worker | None = None
         self._refresh_worker: Worker | None = None
-        self._last_timestamp: datetime | None = None
-        self._seen_ids: set[str] = set()
+        # When the last successful poll ran; the next poll reads from just before it.
+        self._last_poll_time: datetime | None = None
+        # Keys of recent entries, so the overlap between polls is not shown twice.
+        self._seen = RecentIds(SEEN_IDS_MAX)
         # Guard shared poll state against concurrent refresh/background workers.
         self._poll_lock = threading.Lock()
         # Set to end the running monitor loop. Each start makes a new event, so a loop
-        # from an earlier start cannot resume when monitoring starts again.
+        # or poll from an earlier start cannot write into a later session.
         self._stop_event: threading.Event | None = None
 
     def compose_content(self) -> Iterator[Widget]:
@@ -60,7 +79,13 @@ class MonitorScreen(ContentView):
             Button("▶ start", id="start-button", variant="success", compact=True),
             Button("■ stop", id="stop-button", variant="error", disabled=True, compact=True),
             Label("interval"),
-            Input(value="60", id="interval-input", type="integer", compact=True),
+            _IntervalInput(
+                value="60",
+                id="interval-input",
+                type="integer",
+                compact=True,
+                validators=[Integer(minimum=_MIN_INTERVAL, maximum=_MAX_INTERVAL)],
+            ),
             Label("s"),
             id="monitor-controls",
             classes="toolbar",
@@ -87,21 +112,47 @@ class MonitorScreen(ContentView):
         """Focus the view so `space` toggles monitoring right away."""
         return self
 
-    def refresh_data(self) -> None:
-        """Refresh monitor data for the active screen."""
-        if self._state.monitor.is_running:
-            if self._poll_lock.locked() or (
-                self._refresh_worker is not None and self._refresh_worker.is_running
-            ):
-                self.app.notify("Monitor poll already in progress.", severity="information")
-                return
-            self._refresh_worker = self.run_worker(
-                self._poll_once(),
-                exclusive=False,
-                thread=True,
-            )
-        else:
+    def refresh_data(self) -> bool:
+        """Poll now if monitoring is running.
+
+        Returns:
+            False when no poll started; the user has been told why.
+        """
+        if not self._state.monitor.is_running:
             self.app.notify("Monitor is stopped. Start monitoring to fetch live entries.")
+            return False
+        if self._poll_lock.locked() or (
+            self._refresh_worker is not None and self._refresh_worker.is_running
+        ):
+            self.app.notify("Monitor poll already in progress.", severity="information")
+            return False
+        self._refresh_worker = self.run_worker(
+            self._poll_once(self._stop_event),
+            exclusive=False,
+            thread=True,
+        )
+        return True
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        """Apply the interval when Enter is pressed in its box."""
+        if event.input.id == "interval-input":
+            self._apply_interval()
+
+    def _apply_interval(self) -> bool:
+        """Use the interval box's value if it is 5 to 3600 seconds.
+
+        Otherwise keep the current interval and mark the box invalid.
+
+        Returns:
+            True if the box held a valid interval.
+        """
+        interval_input = self.query_one("#interval-input", Input)
+        result = interval_input.validate(interval_input.value)  # sets or clears -invalid
+        if result is not None and not result.is_valid:
+            interval_input.add_class("-invalid")
+            return False
+        self._state.monitor.interval = int(interval_input.value)
+        return True
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button presses."""
@@ -119,35 +170,29 @@ class MonitorScreen(ContentView):
 
     def _start_monitoring(self) -> None:
         """Start the monitoring loop."""
-        # Get interval
-        try:
-            interval = int(self.query_one("#interval-input", Input).value)
-            if interval < 5:
-                interval = 5
-                self.query_one("#interval-input", Input).value = "5"
-        except ValueError:
-            interval = 60
+        if not self._apply_interval():
+            self._show_warning(
+                f"Interval must be {_MIN_INTERVAL} to {_MAX_INTERVAL} seconds; "
+                f"using {self._state.monitor.interval}."
+            )
+        monitor = self._state.monitor
+        monitor.is_running = True
+        monitor.entries_since_start = 0
+        monitor.alerts_triggered = 0
+        monitor.last_check = None
+        monitor.last_error = None
 
-        self._state.monitor.interval = interval
-        self._state.monitor.is_running = True
-        self._state.monitor.entries_since_start = 0
-        self._state.monitor.alerts_triggered = 0
-
-        # Initialize seen IDs with current entries
-        self._seen_ids.clear()
-        self._last_timestamp = datetime.now(UTC)
+        # A new session starts from now with nothing seen.
+        self._seen = RecentIds(SEEN_IDS_MAX)
+        self._last_poll_time = None
 
         # Update UI
         self.query_one("#start-button", Button).disabled = True
         self.query_one("#stop-button", Button).disabled = False
         self.query_one("#interval-input", Input).disabled = True
 
-        status_container = self.query_one("#monitor-status")
-        status_container.remove_class("monitor-stopped")
-        status_container.add_class("monitor-running")
-        self.query_one("#status-indicator", Static).update(
-            resolve_tcss_markup("[$success]● running[/$success]")
-        )
+        self._set_status("running")
+        self._update_stats_display()
 
         # Clear log table
         self.query_one("#monitor-log", LogTable).clear()
@@ -179,11 +224,21 @@ class MonitorScreen(ContentView):
         self.query_one("#stop-button", Button).disabled = True
         self.query_one("#interval-input", Input).disabled = False
 
+        self._set_status("stopped")
+
+    _STATUS_MARKUP = {
+        "running": "[$success]● running[/$success]",
+        "error": "[$warning]● error[/$warning] [$text-muted]· retrying each interval[/$text-muted]",
+        "stopped": "[$danger]● stopped[/$danger]",
+    }
+
+    def _set_status(self, status: str) -> None:
+        """Show ``running``, ``error`` or ``stopped`` in the status row."""
         status_container = self.query_one("#monitor-status")
-        status_container.remove_class("monitor-running")
-        status_container.add_class("monitor-stopped")
+        for name in self._STATUS_MARKUP:
+            status_container.set_class(status == name, f"monitor-{name}")
         self.query_one("#status-indicator", Static).update(
-            resolve_tcss_markup("[$danger]● stopped[/$danger]")
+            resolve_tcss_markup(self._STATUS_MARKUP[status])
         )
 
     def on_unmount(self) -> None:
@@ -202,133 +257,117 @@ class MonitorScreen(ContentView):
         The wait is ``stop.wait``, not a sleep, so a stop ends the loop at once.
         """
         while not stop.is_set():
-            try:
-                with self._poll_lock:
-                    await self._poll_for_new_entries()
-                    self._state.monitor.last_check = datetime.now(UTC)
-                if not stop.is_set():
-                    self.app.call_from_thread(self._update_stats_display)
-            except Exception as e:
-                if stop.is_set():
-                    break
-                self.app.call_from_thread(self.app.note_api_error, e)
-                self.app.call_from_thread(self._show_error, str(e))
-
+            with self._poll_lock:
+                self._poll_for_new_entries(stop)
             stop.wait(self._state.monitor.interval)
 
-    async def _poll_once(self) -> None:
+    async def _poll_once(self, stop: threading.Event | None = None) -> None:
         """Poll once for new entries (used by manual refresh)."""
-        try:
-            if not self._state.monitor.is_running:
-                return
-            with self._poll_lock:
-                if not self._state.monitor.is_running:
-                    return
-                await self._poll_for_new_entries()
-                if not self._state.monitor.is_running:
-                    return
-                self._state.monitor.last_check = datetime.now(UTC)
-            if self._state.monitor.is_running:
-                self.app.call_from_thread(self._update_stats_display)
-        except Exception as e:
-            self.app.call_from_thread(self.app.note_api_error, e)
-            self.app.call_from_thread(self._show_error, str(e))
-
-    async def _poll_for_new_entries(self) -> None:
-        """Poll API for new entries."""
-        if not self._state.monitor.is_running:
+        stop = stop or self._stop_event
+        if stop is None or stop.is_set() or not self._state.monitor.is_running:
             return
+        with self._poll_lock:
+            self._poll_for_new_entries(stop)
+
+    def _poll_for_new_entries(self, stop: threading.Event) -> None:
+        """Fetch entries not seen yet and hand them to the UI in one call.
+
+        Runs on a worker thread. Each poll reads from just before the last good poll up to
+        now and drops entries already seen. The first poll reads one page; later polls page
+        until a page is empty, has nothing new, or is the last, or the page limit is hit.
+        Nothing is written once ``stop`` is set, so a poll from a stopped session is dropped.
+        """
+        if stop.is_set():
+            return
+        now = datetime.now(UTC)
+        first_poll = self._last_poll_time is None
+        query = build_poll_query(self._last_poll_time, now, _POLL_PAGE_SIZE)
+        warnings: list[str] = []
         try:
-            query = AuditLogQuery(
-                start_date=self._last_timestamp,
-                page_size=100,
-                page=0,
-            )
-            entries = []
-            hit_page_limit = False
-            page = 0
-            while page < _MAX_POLL_PAGES:
-                if not self._state.monitor.is_running:
+            fresh: dict[str, AuditLogEntry] = {}
+            for page in range(1 if first_poll else _MAX_POLL_PAGES):
+                if stop.is_set():
                     return
                 query.page = page
                 response = self._state.client.get_logs(query)
                 batch = response.content
-                if not batch:
+                found_new = False
+                for entry in batch:
+                    key = entry_key(entry)
+                    if key not in self._seen and key not in fresh:
+                        fresh[key] = entry
+                        found_new = True
+                if not batch or response.last or not found_new:
                     break
-                entries.extend(batch)
-
-                oldest_ts = next(
-                    (entry.timestamp for entry in reversed(batch) if entry.timestamp),
-                    None,
-                )
-                reached_known_time = bool(
-                    self._last_timestamp and oldest_ts and oldest_ts <= self._last_timestamp
-                )
-                if response.last or reached_known_time:
-                    break
-                page += 1
             else:
-                hit_page_limit = True
-
-            if hit_page_limit:
-                self.app.call_from_thread(
-                    self._show_warning,
-                    "High event volume detected; only the most recent pages were fetched.",
-                )
+                if not first_poll:
+                    warnings.append(
+                        "High event volume detected; only the most recent pages were fetched."
+                    )
+            # The API returns newest first; keep them oldest first.
+            new_entries = list(reversed(fresh.values()))
+            if stop.is_set():
+                return
+            fired = self._state.check_alerts(new_entries) if new_entries else []
+            # A delivery-failure warning is drained after every poll, as the CLI does.
+            warning = self._state.notification_manager.pop_first_failure()
+            if warning:
+                warnings.append(warning)
         except Exception as e:
-            self.app.call_from_thread(self.app.note_api_error, e)
-            self.app.call_from_thread(self._show_error, f"API error: {e}")
+            if not stop.is_set():
+                self.app.call_from_thread(self._apply_poll_error, stop, e)
             return
 
-        if not self._state.monitor.is_running:
+        if stop.is_set():
             return
+        self.app.call_from_thread(self._apply_poll, stop, now, new_entries, fired, warnings)
 
-        # Filter out already seen entries
-        new_entries = []
-        for entry in entries:
-            key = entry_key(entry)
-            if key not in self._seen_ids:
-                self._seen_ids.add(key)
-                new_entries.append(entry)
+    def _apply_poll(
+        self,
+        stop: threading.Event,
+        polled_at: datetime,
+        new_entries: list[AuditLogEntry],
+        fired: list[FiredAlert],
+        warnings: list[str],
+    ) -> None:
+        """Show one good poll's results. Runs on the UI thread."""
+        if stop.is_set():
+            return  # the session this poll belongs to has ended
+        # Remember entries only once the whole poll worked, so a failed page is re-read.
+        for entry in new_entries:
+            self._seen.add(entry_key(entry))
+        self._last_poll_time = polled_at
 
-        # Prune _seen_ids if it grows too large
-        if len(self._seen_ids) > _MAX_SEEN_IDS:
-            # Keep only the most recent half
-            excess = len(self._seen_ids) - _MAX_SEEN_IDS // 2
-            it = iter(self._seen_ids)
-            to_remove = [next(it) for _ in range(excess)]
-            self._seen_ids.difference_update(to_remove)
+        monitor = self._state.monitor
+        monitor.last_check = polled_at
+        monitor.entries_since_start += len(new_entries)
+        monitor.alerts_triggered += len(fired)
+        if monitor.last_error is not None:
+            monitor.last_error = None
+            self._set_status("running")
+        self.app.note_api_ok()
 
         if new_entries:
-            # Update last timestamp
-            timestamps = [e.timestamp for e in new_entries if e.timestamp]
-            if timestamps:
-                self._last_timestamp = max(timestamps)
+            # The newest row is at the bottom and the view follows it, like `tail -f`.
+            table = self.query_one("#monitor-log", LogTable)
+            table.append_entries(new_entries, MONITOR_MAX_ROWS)
+        for fa in fired:
+            self._show_alert(fa.rule_name, fa.message)
+        for warning in warnings:
+            self._show_warning(warning)
+        self._update_stats_display()
 
-            # Update count
-            self._state.monitor.entries_since_start += len(new_entries)
-
-            # Check for alerts
-            fired = self._state.check_alerts(new_entries)
-            if fired:
-                self._state.monitor.alerts_triggered += len(fired)
-                for fa in fired:
-                    self.app.call_from_thread(self._show_alert, fa.rule_name, fa.message)
-
-            # Add entries to table (in reverse order so newest is at top)
-            for entry in reversed(new_entries):
-                self.app.call_from_thread(self._add_entry_to_table, entry)
-
-        # Drain any pending delivery-failure warning, regardless of whether this poll had new
-        # entries. Matches the CLI's _handle_entry behavior (drain after every alert-engine cycle).
-        warning = self._state.notification_manager.pop_first_failure()
-        if warning:
-            self.app.call_from_thread(self._show_warning, warning)
-
-    def _add_entry_to_table(self, entry) -> None:
-        """Add entry to the monitor log table."""
-        table = self.query_one("#monitor-log", LogTable)
-        table.append_entry(entry)
+    def _apply_poll_error(self, stop: threading.Event, error: Exception) -> None:
+        """Show a failed poll. Runs on the UI thread; only the first failure in a row toasts."""
+        if stop.is_set():
+            return
+        monitor = self._state.monitor
+        first_failure = monitor.last_error is None
+        monitor.last_error = str(error)
+        self.app.note_api_error(error)
+        self._set_status("error")
+        if first_failure:
+            self._show_error(str(error))
 
     def _update_stats_display(self) -> None:
         """Update the stats display."""
