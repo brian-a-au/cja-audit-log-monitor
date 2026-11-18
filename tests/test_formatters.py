@@ -283,6 +283,7 @@ class TestCliTableAt80Columns:
         text = self._render(80)
         assert "API_REQUEST" in text
         assert "2026-11-17 23:25:13" in text
+        assert "CALCULATED_METRIC" in text
 
 
 def test_entry_detail_time_names_utc():

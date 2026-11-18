@@ -155,7 +155,7 @@ def format_logs_table(
     table.add_column("Time (UTC)", style="dim", no_wrap=True, min_width=19)
     table.add_column("User", ratio=2, min_width=10, no_wrap=True, overflow="ellipsis")
     table.add_column("Action", no_wrap=True, min_width=13)
-    table.add_column("Component", ratio=1, min_width=8, no_wrap=True, overflow="ellipsis")
+    table.add_column("Component", min_width=12, max_width=17, no_wrap=True, overflow="ellipsis")
     table.add_column("Name", ratio=3, min_width=8, no_wrap=True, overflow="ellipsis")
 
     if show_details:
