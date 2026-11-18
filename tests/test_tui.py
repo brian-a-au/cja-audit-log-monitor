@@ -1958,6 +1958,7 @@ class TestExportScope:
         return app.screen
 
     async def test_scope_options_show_counts(self, mock_app_state, sample_audit_entries):
+        mock_app_state.page_loaded = True
         mock_app_state.entries = sample_audit_entries
         mock_app_state.total_entries = 28775
         app = _make_app(mock_app_state)
@@ -1972,6 +1973,7 @@ class TestExportScope:
     async def test_page_scope_is_default_and_writes_page(
         self, mock_app_state, sample_audit_entries, tmp_path
     ):
+        mock_app_state.page_loaded = True
         mock_app_state.entries = sample_audit_entries
         app = _make_app(mock_app_state)
         target = tmp_path / "page.json"
@@ -1989,6 +1991,7 @@ class TestExportScope:
     async def test_all_scope_fetches_every_matching_entry(
         self, mock_app_state, sample_audit_entries, sample_audit_entry, tmp_path
     ):
+        mock_app_state.page_loaded = True
         mock_app_state.entries = sample_audit_entries[:1]
         mock_app_state.total_entries = 30
         many = [sample_audit_entry.model_copy(update={"id": f"m{i}"}) for i in range(30)]
@@ -2014,6 +2017,7 @@ class TestExportScope:
     ):
         from cja_audit_log_monitor.tui.modals import ExportDialog
 
+        mock_app_state.page_loaded = True
         mock_app_state.entries = sample_audit_entries
         app = _make_app(mock_app_state)
         monkeypatch.setattr(ExportDialog, "AUTO_CLOSE_SECONDS", 0.05)
@@ -2051,6 +2055,7 @@ class TestExportScope:
             real_close(self)
 
         monkeypatch.setattr(ExportDialog, "_close_if_open", spy)
+        mock_app_state.page_loaded = True
         mock_app_state.entries = sample_audit_entries
         app = _make_app(mock_app_state)
         target = tmp_path / "x.json"
@@ -2080,6 +2085,182 @@ class TestExportScope:
             assert str(dialog.query_one("#export-button").label) == "export"
             assert str(dialog.query_one("#cancel-button").label) == "cancel"
             assert str(dialog.query_one("#export-title").render()) == "export audit logs"
+
+    async def test_pilot_clearing_path_and_changing_format_does_not_crash(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(120, 40)) as pilot:
+            dialog = await self._open(app, pilot)
+            dialog.query_one("#output-path").value = ""
+            await pilot.pause()
+            dialog.query_one("#format-csv").value = True
+            await pilot.pause()
+            assert app.is_running
+            assert dialog.query_one("#output-path").value == ""
+        assert app._exception is None
+
+    async def test_existing_file_needs_a_second_press(
+        self, mock_app_state, sample_audit_entries, tmp_path
+    ):
+        mock_app_state.page_loaded = True
+        mock_app_state.entries = sample_audit_entries
+        target = tmp_path / "out.json"
+        target.write_text("old")
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(120, 40)) as pilot:
+            dialog = await self._open(app, pilot)
+            dialog.query_one("#output-path").value = str(target)
+            await pilot.click("#export-button")
+            await pilot.pause()
+            status = dialog.query_one("#export-status").render().plain
+            assert "file exists · press export again to overwrite" in status
+            assert target.read_text() == "old"
+            # A click within the button's 0.2 s "active" flash is ignored; press directly.
+            dialog.query_one("#export-button").press()
+            assert await _wait_for(lambda: target.read_text() != "old", pilot, timeout=5.0)
+            await app.workers.wait_for_complete()
+
+    async def test_changing_path_or_format_resets_overwrite_confirmation(
+        self, mock_app_state, sample_audit_entries, tmp_path
+    ):
+        mock_app_state.page_loaded = True
+        mock_app_state.entries = sample_audit_entries
+        first = tmp_path / "a.json"
+        first.write_text("old")
+        second = tmp_path / "a.csv"
+        second.write_text("old")
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(120, 40)) as pilot:
+            dialog = await self._open(app, pilot)
+            path = dialog.query_one("#output-path")
+            path.value = str(first)
+            await pilot.click("#export-button")
+            await pilot.pause()
+            dialog.query_one("#format-csv").value = True  # path becomes a.csv
+            await pilot.pause()
+            dialog.query_one("#export-button").press()
+            await pilot.pause()
+            assert second.read_text() == "old"  # asked again instead of writing
+            assert "press export again" in dialog.query_one("#export-status").render().plain
+
+    async def test_missing_parent_folder_shows_error_without_crashing(
+        self, mock_app_state, sample_audit_entries, tmp_path
+    ):
+        mock_app_state.page_loaded = True
+        mock_app_state.entries = sample_audit_entries
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(120, 40)) as pilot:
+            dialog = await self._open(app, pilot)
+            dialog.query_one("#output-path").value = str(tmp_path / "nope" / "x.json")
+            await pilot.click("#export-button")
+            await pilot.pause()
+            status = dialog.query_one("#export-status").render().plain
+            assert "folder does not exist" in status
+            assert "\n" not in status
+            assert not dialog.query_one("#export-button").disabled
+        assert app._exception is None
+
+    async def test_enter_in_path_input_exports(
+        self, mock_app_state, sample_audit_entries, tmp_path
+    ):
+        mock_app_state.page_loaded = True
+        mock_app_state.entries = sample_audit_entries
+        target = tmp_path / "enter.json"
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(120, 40)) as pilot:
+            dialog = await self._open(app, pilot)
+            path = dialog.query_one("#output-path")
+            path.value = str(target)
+            path.focus()
+            await pilot.pause()
+            await pilot.press("enter")
+            assert await _wait_for(target.exists, pilot, timeout=5.0)
+            await app.workers.wait_for_complete()
+
+    async def test_limit_reached_is_reported_with_absolute_path(
+        self, mock_app_state, sample_audit_entry, tmp_path
+    ):
+        mock_app_state.page_loaded = True
+        mock_app_state.entries = [sample_audit_entry]
+        mock_app_state.total_entries = 12345
+        many = [sample_audit_entry.model_copy(update={"id": f"m{i}"}) for i in range(10_000)]
+        mock_app_state.client.get_logs_sample.return_value = (many, 12345)
+        target = tmp_path / "big.csv"
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            dialog = await self._open(app, pilot)
+            dialog.query_one("#scope-all").value = True
+            await pilot.pause()
+            dialog.query_one("#output-path").value = str(target)
+            await pilot.click("#export-button")
+            assert await _wait_for(
+                lambda: "limit reached" in dialog.query_one("#export-status").render().plain,
+                pilot,
+                timeout=10.0,
+            )
+            status = dialog.query_one("#export-status").render().plain
+            assert "exported 10,000 of 12,345 (limit reached)" in status
+            assert str(target.resolve()) in status.replace("\n", "")
+
+    async def test_path_with_markup_is_shown_literally(
+        self, mock_app_state, sample_audit_entries, tmp_path
+    ):
+        mock_app_state.page_loaded = True
+        mock_app_state.entries = sample_audit_entries
+        target = tmp_path / "[red]x.json"
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            dialog = await self._open(app, pilot)
+            dialog.query_one("#output-path").value = str(target)
+            await pilot.click("#export-button")
+            assert await _wait_for(target.exists, pilot, timeout=5.0)
+            assert await _wait_for(
+                lambda: "exported" in dialog.query_one("#export-status").render().plain,
+                pilot,
+            )
+            assert "[red]x.json" in dialog.query_one("#export-status").render().plain
+            await app.workers.wait_for_complete()
+        assert app._exception is None
+
+    async def test_before_log_browser_loads_page_scope_is_disabled_and_no_counts(
+        self, mock_app_state
+    ):
+        assert mock_app_state.page_loaded is False
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(120, 40)) as pilot:
+            dialog = await self._open(app, pilot)
+            page = dialog.query_one("#scope-page")
+            every = dialog.query_one("#scope-all")
+            assert page.disabled
+            assert every.value
+            assert "0" not in str(page.label)
+            assert "entries" not in str(page.label)
+            assert "entries" not in str(every.label)
+            assert "up to 10,000" in str(every.label)
+
+
+class TestPageLoadedFlag:
+    async def test_log_browser_sets_page_loaded(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            assert mock_app_state.page_loaded is False
+            view = await _show_and_load(app, pilot, "l")
+            assert view is not None
+            assert mock_app_state.page_loaded is True
+
+
+class TestSwapSuffix:
+    def test_empty_and_folder_unchanged(self):
+        from cja_audit_log_monitor.tui.modals.export_dialog import swap_suffix
+
+        assert swap_suffix("", ".csv") == ""
+        assert swap_suffix("~/exports.v2/", ".csv") == "~/exports.v2/"
+
+    def test_known_suffix_replaced_other_appended(self):
+        from cja_audit_log_monitor.tui.modals.export_dialog import swap_suffix
+
+        assert swap_suffix("a.json", ".csv") == "a.csv"
+        assert swap_suffix("report.v2", ".csv") == "report.v2.csv"
 
 
 class TestHelpScreen:

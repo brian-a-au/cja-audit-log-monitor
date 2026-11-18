@@ -92,6 +92,7 @@ class LogBrowserScreen(ContentView):
         """Update the log table with entries."""
         table = self.query_one("#log-table", LogTable)
         table.load_entries(entries)
+        self._state.page_loaded = True  # the export dialog may now offer "this page"
         if entries:
             self._set_table_message(None)
         elif self._filters_active():
