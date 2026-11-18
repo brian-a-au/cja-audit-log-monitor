@@ -257,6 +257,33 @@ class TestQueryParamsMatchLiveApi:
             assert "userEmail" not in params
 
 
+class TestDateFilterSendsBothDates:
+    """The live API rejects a date filter unless startDate and endDate are both sent."""
+
+    def test_start_only_adds_end_date_of_now(self):
+        start = datetime(2024, 1, 1, tzinfo=UTC)
+        params = AuditLogQuery(start_date=start).to_query_params()
+        assert params["startDate"] == "2024-01-01T00:00:00+0000"
+        end = datetime.strptime(params["endDate"], "%Y-%m-%dT%H:%M:%S%z")
+        assert abs((datetime.now(UTC) - end).total_seconds()) < 5
+
+    def test_end_only_adds_earliest_start_date(self):
+        end = datetime(2024, 1, 31, tzinfo=UTC)
+        params = AuditLogQuery(end_date=end).to_query_params()
+        assert params["startDate"] == "2000-01-01T00:00:00+0000"
+        assert params["endDate"] == "2024-01-31T00:00:00+0000"
+
+    def test_no_dates_sends_neither(self):
+        params = AuditLogQuery().to_query_params()
+        assert "startDate" not in params
+        assert "endDate" not in params
+
+    def test_model_fields_stay_none(self):
+        query = AuditLogQuery(start_date=datetime(2024, 1, 1, tzinfo=UTC))
+        query.to_query_params()
+        assert query.end_date is None
+
+
 class TestValuesSeenInLiveOrgs:
     """Component types and actions seen in a live org's audit logs."""
 
