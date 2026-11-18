@@ -345,36 +345,61 @@ AlertSummary {
     width: 1fr;
 }
 
-/* ---- Export dialog (centered modal, lighter chrome) ---- */
+/* ---- Export dialog (centered modal, same chrome as the views) ---- */
 ExportDialog {
     align: center middle;
 }
 
-ExportDialog > Vertical {
-    width: 60;
+#export-box {
+    width: 64;
     height: auto;
     padding: 1 2;
     background: $background;
-    border: round $primary 50%;
+    border-left: heavy $primary;
 }
 
 ExportDialog .modal-title {
     color: $text-strong;
-    text-style: bold;
+    margin: 0 0 1 0;
+}
+
+ExportDialog .field-label {
+    color: $text-muted;
+    margin: 1 0 0 0;
 }
 
 ExportDialog RadioSet {
+    width: 100%;
     height: auto;
-    margin: 1 0;
+    border: none;
     background: $background;
+}
+
+ExportDialog #format-select {
+    layout: horizontal;
+}
+
+ExportDialog #format-select RadioButton {
+    margin: 0 2 0 0;
 }
 
 ExportDialog Input {
     width: 100%;
-    margin: 1 0;
     background: $surface;
-    border: none;
-    color: $text;
+}
+
+ExportDialog .modal-buttons {
+    height: auto;
+    margin: 1 0 0 0;
+}
+
+ExportDialog .modal-buttons Button {
+    margin: 0 1 0 0;
+}
+
+#export-status {
+    height: auto;
+    margin: 1 0 0 0;
 }
 
 /* ---- Settings ---- */
@@ -443,34 +468,29 @@ HelpScreen {
 }
 
 #help-overlay {
-    width: 70;
+    width: 56;
     height: auto;
-    max-height: 90%;
+    max-height: 100%;
     padding: 1 2;
     background: $background;
-    border: round $primary 50%;
+    border-left: heavy $primary;
+    overflow-y: auto;
 }
 
-.help-title {
+#help-title {
     color: $text-strong;
-    text-style: bold;
-    margin: 0 0 1 0;
 }
 
 .help-section {
-    color: $text-muted;
     margin: 1 0 0 0;
 }
 
-.help-key {
-    width: 10;
-    color: $primary;
-    text-style: bold;
+.help-section-body {
+    height: auto;
 }
 
-.help-description {
-    width: 1fr;
-    color: $text;
+#help-footer {
+    margin: 1 0 0 0;
 }
 
 /* ---- Toolbars: one-row control strips ---- */
@@ -570,3 +590,10 @@ ContentView LoadingIndicator {
 .status-connected     { color: $success; }
 .status-disconnected  { color: $danger; }
 .status-warning       { color: $warning; }
+
+/* Shown under the stat cards when charts use only the newest entries */
+.sample-note {
+    height: auto;
+    margin: 0 0 1 0;
+    color: $text-muted;
+}

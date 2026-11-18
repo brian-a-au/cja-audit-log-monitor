@@ -27,6 +27,31 @@ def no_activity_message(days: int) -> str:
     )
 
 
+def sample_note_text(shown: int, total: int) -> str | None:
+    """Copy for when charts use only the newest entries; None when they use all of them."""
+    if total <= shown:
+        return None
+    return resolve_tcss_markup(
+        f"[$text-muted]charts and lists use the newest {shown:,} of {total:,} entries"
+        "[/$text-muted]"
+    )
+
+
+def sample_note() -> Static:
+    """An initially hidden line under the stat cards for the sample note."""
+    note = Static("", id="sample-note", classes="sample-note")
+    note.display = False
+    return note
+
+
+def show_sample_note(view: Widget, shown: int, total: int) -> None:
+    """Show or hide ``view``'s sample note for ``shown`` of ``total`` entries."""
+    note = view.query_one("#sample-note", Static)
+    text = sample_note_text(shown, total)
+    note.display = text is not None
+    note.update(text or "")
+
+
 def stat_card(label: str, value_id: str) -> Vertical:
     """A small card with a muted label above a bold value."""
     return Vertical(

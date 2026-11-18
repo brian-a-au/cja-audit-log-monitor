@@ -215,3 +215,25 @@ class TestExportEntries:
             output_path = Path(tmpdir) / "export.json"
             count = export_entries([sample_audit_entry], output_path, output_format="JSON")
             assert count == 1
+
+
+class TestUserName:
+    """Exports include the user's display name from the live API."""
+
+    def _entry(self):
+        return AuditLogEntry(id="1", user_id="u1", user_name="Pat Example", action="EDIT")
+
+    def test_dict_has_user_name(self):
+        assert entry_to_dict(self._entry())["user_name"] == "Pat Example"
+
+    def test_csv_has_user_name_column(self):
+        out = StringIO()
+        export_to_csv([self._entry()], out)
+        rows = list(csv.DictReader(StringIO(out.getvalue())))
+        assert rows[0]["user_name"] == "Pat Example"
+
+    def test_tsv_has_user_name_column(self):
+        out = StringIO()
+        export_to_tsv([self._entry()], out)
+        rows = list(csv.DictReader(StringIO(out.getvalue()), delimiter="\t"))
+        assert rows[0]["user_name"] == "Pat Example"

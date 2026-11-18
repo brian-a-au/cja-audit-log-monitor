@@ -124,7 +124,8 @@ class TestAuditLogQuery:
 
         assert params["pageSize"] == 50
         assert params["action"] == ["CREATE", "DELETE"]
-        assert params["page"] == 0
+        assert params["pageNumber"] == 0
+        assert "page" not in params
 
     def test_to_query_params_with_dates(self) -> None:
         """Test query params with date range."""
@@ -155,3 +156,93 @@ class TestAuditLogResponse:
         response = AuditLogResponse()
         assert response.content == []
         assert response.total_elements == 0
+
+
+# Shape of an entry as the live CJA Audit Logs API returns it (values made up).
+LIVE_API_ENTRY = {
+    "id": "6afce25938051732907b1022",
+    "dateCreated": "2026-11-17T23:25:13.000+00:00",
+    "action": "EDIT",
+    "description": "Updated data view",
+    "imsOrgId": "ABC123@AdobeOrg",
+    "user": {
+        "id": "ABCDEF1234@AdobeID",
+        "idType": "IMS",
+        "name": "Pat Example",
+        "email": "pat@example.com",
+    },
+    "component": {
+        "id": "dv_123",
+        "idType": "DATA_VIEW",
+        "name": "Production View",
+    },
+}
+
+
+class TestLiveApiShape:
+    """The live API nests user and component objects; the model must read them."""
+
+    def test_reads_nested_user(self):
+        entry = AuditLogEntry.model_validate(LIVE_API_ENTRY)
+        assert entry.user_id == "ABCDEF1234@AdobeID"
+        assert entry.user_email == "pat@example.com"
+        assert entry.user_name == "Pat Example"
+
+    def test_reads_nested_component(self):
+        entry = AuditLogEntry.model_validate(LIVE_API_ENTRY)
+        assert entry.component_type == "DATA_VIEW"
+        assert entry.component_id == "dv_123"
+        assert entry.component_name == "Production View"
+
+    def test_reads_ims_org_id(self):
+        entry = AuditLogEntry.model_validate(LIVE_API_ENTRY)
+        assert entry.org_id == "ABC123@AdobeOrg"
+
+    def test_response_parses_live_entries(self):
+        response = AuditLogResponse.model_validate(
+            {"content": [LIVE_API_ENTRY], "totalElements": 1, "totalPages": 1}
+        )
+        assert response.content[0].user_email == "pat@example.com"
+        assert response.content[0].component_type == "DATA_VIEW"
+
+    def test_missing_nested_objects_leave_fields_empty(self):
+        entry = AuditLogEntry.model_validate({"id": "x", "action": "EDIT"})
+        assert entry.user_email is None
+        assert entry.component_type is None
+
+    def test_null_nested_objects_are_ignored(self):
+        entry = AuditLogEntry.model_validate({"id": "x", "user": None, "component": None})
+        assert entry.user_id is None
+        assert entry.component_id is None
+
+    def test_flat_fields_still_work(self):
+        entry = AuditLogEntry.model_validate(
+            {"id": "x", "userEmail": "a@example.com", "componentType": "PROJECT"}
+        )
+        assert entry.user_email == "a@example.com"
+        assert entry.component_type == "PROJECT"
+
+
+class TestQueryParamsMatchLiveApi:
+    """Parameter names the live API honors (checked against a real org)."""
+
+    def test_page_is_sent_as_page_number(self):
+        params = AuditLogQuery(page=3, page_size=10).to_query_params()
+        assert params["pageNumber"] == 3
+        assert "page" not in params
+
+    def test_email_is_sent_as_user_email(self):
+        params = AuditLogQuery(user_id="pat@example.com").to_query_params()
+        assert params["userEmail"] == "pat@example.com"
+        assert "userId" not in params
+
+    def test_ims_ids_are_sent_as_user_id(self):
+        for value in (
+            "ABC123@82462040631c0cd4495ca6.e",
+            "ABC123@techacct.adobe.com",
+            "ABC123@AdobeID",
+            "ABC123",
+        ):
+            params = AuditLogQuery(user_id=value).to_query_params()
+            assert params["userId"] == value, value
+            assert "userEmail" not in params

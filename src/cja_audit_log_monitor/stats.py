@@ -4,7 +4,7 @@ from collections import Counter
 from datetime import UTC, datetime, timedelta
 
 from .models import AuditLogEntry, AuditLogQuery
-from .utils import get_user_identifier
+from .utils import get_user_identifier, to_local
 
 
 def calculate_stats(entries: list[AuditLogEntry]) -> dict:
@@ -63,7 +63,9 @@ def calculate_stats(entries: list[AuditLogEntry]) -> dict:
     }
 
 
-def get_hourly_distribution(entries: list[AuditLogEntry]) -> dict[int, int]:
+def get_hourly_distribution(
+    entries: list[AuditLogEntry], local: bool = False
+) -> dict[int, int]:
     """Get distribution of events by hour of day.
 
     Args:
@@ -75,13 +77,16 @@ def get_hourly_distribution(entries: list[AuditLogEntry]) -> dict[int, int]:
     hourly: Counter[int] = Counter()
     for entry in entries:
         if entry.timestamp:
-            hourly[entry.timestamp.hour] += 1
+            ts = to_local(entry.timestamp) if local else entry.timestamp
+            hourly[ts.hour] += 1
 
     # Ensure all hours are represented
     return {hour: hourly.get(hour, 0) for hour in range(24)}
 
 
-def get_daily_distribution(entries: list[AuditLogEntry]) -> dict[str, int]:
+def get_daily_distribution(
+    entries: list[AuditLogEntry], local: bool = False
+) -> dict[str, int]:
     """Get distribution of events by day.
 
     Args:
@@ -93,8 +98,8 @@ def get_daily_distribution(entries: list[AuditLogEntry]) -> dict[str, int]:
     daily: Counter[str] = Counter()
     for entry in entries:
         if entry.timestamp:
-            date_str = entry.timestamp.strftime("%Y-%m-%d")
-            daily[date_str] += 1
+            ts = to_local(entry.timestamp) if local else entry.timestamp
+            daily[ts.strftime("%Y-%m-%d")] += 1
 
     return dict(sorted(daily.items()))
 

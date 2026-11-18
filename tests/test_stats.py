@@ -85,3 +85,25 @@ class TestDistributions:
         # Should be sorted by count descending
         counts = [count for _, count in activity]
         assert counts == sorted(counts, reverse=True)
+
+
+class TestLocalDistributions:
+    def _entry(self, hour, day=17):
+        from datetime import UTC, datetime
+
+        from cja_audit_log_monitor.models import AuditLogEntry
+
+        return AuditLogEntry(id="x", timestamp=datetime(2026, 11, day, hour, tzinfo=UTC))
+
+    def test_hourly_local(self, los_angeles_tz):
+        from cja_audit_log_monitor.stats import get_hourly_distribution
+
+        assert get_hourly_distribution([self._entry(23)])[23] == 1
+        assert get_hourly_distribution([self._entry(23)], local=True)[15] == 1
+
+    def test_daily_local(self, los_angeles_tz):
+        from cja_audit_log_monitor.stats import get_daily_distribution
+
+        entry = self._entry(3, day=18)
+        assert get_daily_distribution([entry]) == {"2026-11-18": 1}
+        assert get_daily_distribution([entry], local=True) == {"2026-11-17": 1}

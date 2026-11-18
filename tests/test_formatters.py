@@ -242,3 +242,13 @@ class TestRenderBar:
         from cja_audit_log_monitor.formatters import render_bar
 
         assert render_bar(0, 10, 10) == ""
+
+
+def test_format_timestamp_local(los_angeles_tz):
+    from datetime import UTC, datetime
+
+    from cja_audit_log_monitor.formatters import format_timestamp
+
+    ts = datetime(2026, 11, 17, 23, 25, 13, tzinfo=UTC)
+    assert format_timestamp(ts) == "2026-11-17 23:25:13"
+    assert format_timestamp(ts, local=True) == "2026-11-17 15:25:13"

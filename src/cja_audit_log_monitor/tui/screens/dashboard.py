@@ -1,7 +1,7 @@
 """Dashboard screen showing summary statistics."""
 
 from collections.abc import Iterator
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from textual.containers import Horizontal, Vertical
 from textual.widget import Widget
@@ -11,11 +11,20 @@ from textual.worker import get_current_worker
 from ...alerts import analyze_for_anomalies
 from ...formatters import resolve_tcss_markup
 from ...stats import build_date_range_query, calculate_stats, get_hourly_distribution
+from ...utils import local_tz_name
 from ..state import AppState
 from ..widgets import ActionBarChart, HourlyChart
-from .base import ContentView, no_activity_message, not_connected_message, stat_card
+from .base import (
+    ContentView,
+    no_activity_message,
+    not_connected_message,
+    sample_note,
+    show_sample_note,
+    stat_card,
+)
 
 DASHBOARD_DAYS = 7
+DASHBOARD_SAMPLE = 1000
 
 
 class DashboardScreen(ContentView):
@@ -42,14 +51,15 @@ class DashboardScreen(ContentView):
             stat_card("total entries", "stat-total"),
             stat_card("active users", "stat-users"),
             stat_card("anomalies", "stat-alerts"),
-            stat_card(f"window · last {DASHBOARD_DAYS} days", "stat-range"),
+            stat_card(f"last {DASHBOARD_DAYS} days", "stat-range"),
             classes="dashboard-stats",
         )
+        yield sample_note()
         yield Horizontal(
             Vertical(
                 Static("ACTION DISTRIBUTION", classes="section-label"),
                 ActionBarChart(id="action-chart"),
-                Static("HOURLY ACTIVITY", classes="section-label"),
+                Static(f"HOURLY ACTIVITY · {local_tz_name()}", classes="section-label"),
                 HourlyChart(id="hourly-chart"),
                 id="dash-left",
             ),
@@ -99,7 +109,7 @@ class DashboardScreen(ContentView):
             )
 
             query = build_date_range_query(DASHBOARD_DAYS)
-            entries = self._state.client.get_all_logs(query, max_entries=1000)
+            entries, total = self._state.client.get_logs_sample(query, max_entries=DASHBOARD_SAMPLE)
 
             if worker.is_cancelled:
                 return
@@ -112,9 +122,9 @@ class DashboardScreen(ContentView):
 
             stats = calculate_stats(entries)
             anomalies = analyze_for_anomalies(entries)
-            hourly = get_hourly_distribution(entries)
+            hourly = get_hourly_distribution(entries, local=True)
 
-            self.app.call_from_thread(self._update_stats, stats, anomalies, hourly)
+            self.app.call_from_thread(self._update_stats, stats, anomalies, hourly, total)
 
         except Exception as e:
             self.app.call_from_thread(self._show_disconnected, str(e))
@@ -126,18 +136,21 @@ class DashboardScreen(ContentView):
         self.app.set_connection_status("disconnected", error)
         self.set_empty_state(not_connected_message(error))
 
-    def _update_stats(self, stats: dict, anomalies: list, hourly: dict[int, int]) -> None:
+    def _update_stats(
+        self, stats: dict, anomalies: list, hourly: dict[int, int], total: int | None = None
+    ) -> None:
         """Update statistics display."""
         self._stats = stats
         self.set_empty_state(None)
 
-        self.query_one("#stat-total", Static).update(f"{stats.get('total_entries', 0):,}")
+        shown = stats.get("total_entries", 0)
+        total = shown if total is None else max(total, shown)
+        self.query_one("#stat-total", Static).update(f"{total:,}")
+        show_sample_note(self, shown, total)
 
-        date_range = stats.get("date_range")
-        range_text = (
-            f"{date_range['start'][5:10]} → {date_range['end'][5:10]}" if date_range else "n/a"
-        )
-        self.query_one("#stat-range", Static).update(range_text)
+        now = datetime.now().astimezone()
+        start = now - timedelta(days=DASHBOARD_DAYS)
+        self.query_one("#stat-range", Static).update(f"{start:%m-%d} → {now:%m-%d}")
 
         top_users = stats.get("top_users", [])
         self.query_one("#stat-users", Static).update(str(len(top_users)))

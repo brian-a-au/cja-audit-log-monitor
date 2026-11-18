@@ -7,8 +7,9 @@ The Dashboard is the home screen of the TUI — your at-a-glance situational vie
 ## What you see
 
 - **Connection status** (in the header row, on every screen): `connecting`, `connected` with the Adobe org, or `disconnected` with the error.
-- **Stat cards**: total entries pulled, count of active users, count of recent anomalies (highlighted in warning color when non-zero), and the date window covered.
-- **Left column**: an action distribution chart (bars colored by action severity, with counts and percentages) and an hourly activity chart.
+- **Stat cards**: the total number of entries in the last 7 days, the number of active users, the number of recent anomalies (highlighted in warning color when non-zero), and the dates of the window.
+- **A sample note** under the cards when the window has more than 1,000 entries. The charts and lists then use the newest 1,000 entries, and the note says so.
+- **Left column**: an action distribution chart (bars colored by action severity, with counts and percentages) and an hourly activity chart in your local time zone.
 - **Right column**: the top active users in the last 7 days with their action counts, and recent anomalies.
 - **Recent anomalies**: up to five auto-detected unusual patterns (bulk deletes, off-hours activity, exports) flagged from the same window. The Dashboard shows recent anomalies as a passive review surface — the TUI does not dispatch them. To dispatch anomalies to Slack/webhooks, run `cja-audit-log-monitor cli anomalies [--watch]` (see [CLI Reference → `anomalies`](../cli.md#anomalies--detect-and-deliver-anomalies) and [Alert Rules → Anomaly delivery](../alert-rules.md#anomaly-delivery)).
 - **Last updated** timestamp and a `refresh` button.
@@ -25,4 +26,4 @@ The Dashboard is the home screen of the TUI — your at-a-glance situational vie
 - **Daily standup view**: open the TUI, glance at totals + top users + anomalies, close it. No SQL, no dashboard build-out.
 - **Incident first-look**: when a stakeholder asks "is something weird happening?", the dashboard answers in under a second — total volume, who's active, and whether anything tripped a rule.
 - **Connectivity smoke test**: a working dashboard means OAuth, scopes, product profiles, and API access are all wired up correctly. If the dashboard renders, the rest of the app will work.
-- **Lightweight by design**: only the most recent 1,000 entries are loaded so the screen is fast even on large orgs. Use the Statistics screen for longer windows.
+- **Lightweight by design**: the charts use at most the newest 1,000 entries, which takes one API request, so the screen is fast even on large orgs. The total still counts every entry in the window. Use the Statistics screen for more entries or longer windows.

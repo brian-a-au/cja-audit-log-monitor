@@ -6,7 +6,7 @@ from textual.widgets.data_table import RowKey
 
 from ...formatters import format_timestamp, get_action_color, get_action_icon
 from ...models import AuditLogEntry
-from ...utils import get_user_identifier
+from ...utils import get_user_identifier, local_tz_name
 
 
 class LogTable(DataTable):
@@ -16,7 +16,7 @@ class LogTable(DataTable):
     width is left. On narrow terminals ``user`` and ``component`` shrink first.
     """
 
-    COLUMN_WIDTHS = {"timestamp": 19, "user": 28, "action": 12, "component": 18}
+    COLUMN_WIDTHS = {"timestamp": 19, "user": 28, "action": 13, "component": 18}
     DETAIL_WIDTHS = {"description": 35, "ip": 15}
     MIN_WIDTHS = {"user": 16, "component": 12, "name": 12}
     NAME_FLOOR = 6
@@ -36,8 +36,9 @@ class LogTable(DataTable):
 
     def on_mount(self) -> None:
         """Set up table columns on mount."""
+        labels = {"timestamp": f"time ({local_tz_name()})"}
         for key, width in self.COLUMN_WIDTHS.items():
-            self.add_column(key, width=width, key=key)
+            self.add_column(labels.get(key, key), width=width, key=key)
         self.add_column("name", width=self.MIN_WIDTHS["name"], key="name")
         if self._show_details:
             for key, width in self.DETAIL_WIDTHS.items():
@@ -100,7 +101,7 @@ class LogTable(DataTable):
 
     def _build_row(self, entry: AuditLogEntry) -> list:
         row_data = [
-            format_timestamp(entry.timestamp),
+            format_timestamp(entry.timestamp, local=True),
             self._truncate(get_user_identifier(entry, default="-"), self.COLUMN_WIDTHS["user"]),
             self._format_action_cell(entry.action),
             entry.component_type or "-",

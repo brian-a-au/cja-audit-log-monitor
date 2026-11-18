@@ -363,7 +363,7 @@ class TestEmptyStatesAndLayout:
             assert "press c" in _empty_text(view)
 
     async def test_dashboard_empty_state_zero_entries(self, mock_app_state):
-        mock_app_state.client.get_all_logs.return_value = []
+        mock_app_state.client.get_logs_sample.return_value = ([], len([]))
         app = _make_app(mock_app_state)
         async with app.run_test(size=(140, 40)) as pilot:
             view = await _show_and_load(app, pilot, "d")
@@ -393,7 +393,7 @@ class TestEmptyStatesAndLayout:
             )
             for i in range(5)
         ]
-        mock_app_state.client.get_all_logs.return_value = entries
+        mock_app_state.client.get_logs_sample.return_value = (entries, len(entries))
         app = _make_app(mock_app_state)
         async with app.run_test(size=(100, 30)) as pilot:
             view = await _show_and_load(app, pilot, "d")
@@ -403,7 +403,7 @@ class TestEmptyStatesAndLayout:
             assert all(len(line) <= top.content_region.width for line in lines)
 
     async def test_stats_empty_state_zero_entries(self, mock_app_state):
-        mock_app_state.client.get_all_logs.return_value = []
+        mock_app_state.client.get_logs_sample.return_value = ([], len([]))
         app = _make_app(mock_app_state)
         async with app.run_test(size=(140, 40)) as pilot:
             view = await _show_and_load(app, pilot, "s")
@@ -589,7 +589,7 @@ class TestViewFocusAndScroll:
             )
             for i in range(48)
         ]
-        mock_app_state.client.get_all_logs.return_value = entries
+        mock_app_state.client.get_logs_sample.return_value = (entries, len(entries))
         app = _make_app(mock_app_state)
         async with app.run_test(size=(100, 30)) as pilot:
             view = await _show_and_load(app, pilot, key)
@@ -1230,7 +1230,7 @@ class TestModals:
             await pilot.press("e")
             await pilot.pause()
             assert isinstance(app.screen, ExportDialog)
-            radio_buttons = app.screen.query("RadioButton")
+            radio_buttons = app.screen.query("#format-select RadioButton")
             assert len(radio_buttons) == 3  # JSON, CSV, TSV
 
     async def test_export_dialog_has_export_button(self, mock_app_state):
@@ -1244,3 +1244,388 @@ class TestModals:
             assert isinstance(app.screen, ExportDialog)
             export_btn = app.screen.query_one("#export-button", Button)
             assert export_btn is not None
+
+
+class TestSampledTotals:
+    """Dashboard and stats show the API's true total, and say when charts use a sample."""
+
+    @pytest.mark.parametrize(("key", "total_id"), [("d", "#stat-total"), ("s", "#stats-total")])
+    async def test_total_is_true_api_total(
+        self, mock_app_state, sample_audit_entries, key, total_id
+    ):
+        mock_app_state.client.get_logs_sample.return_value = (sample_audit_entries, 28775)
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, key)
+            assert str(view.query_one(total_id, Static).render()) == "28,775"
+
+    @pytest.mark.parametrize("key", ["d", "s"])
+    async def test_sample_note_when_capped(self, mock_app_state, sample_audit_entries, key):
+        mock_app_state.client.get_logs_sample.return_value = (sample_audit_entries, 28775)
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, key)
+            note = view.query_one("#sample-note", Static)
+            assert note.display
+            n = len(sample_audit_entries)
+            assert f"newest {n:,} of 28,775 entries" in str(note.render())
+
+    @pytest.mark.parametrize("key", ["d", "s"])
+    async def test_no_sample_note_when_complete(self, mock_app_state, key):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, key)
+            assert not view.query_one("#sample-note", Static).display
+
+
+class TestExportScope:
+    """Export can save the current page or every matching entry."""
+
+    async def _open(self, app, pilot):
+        await pilot.pause()
+        await pilot.press("e")
+        await pilot.pause()
+        return app.screen
+
+    async def test_scope_options_show_counts(self, mock_app_state, sample_audit_entries):
+        mock_app_state.entries = sample_audit_entries
+        mock_app_state.total_entries = 28775
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(120, 40)) as pilot:
+            dialog = await self._open(app, pilot)
+            page = str(dialog.query_one("#scope-page").label)
+            every = str(dialog.query_one("#scope-all").label)
+            assert f"this page · {len(sample_audit_entries)} entries" in page
+            assert "all matching · 28,775 entries" in every
+            assert "up to 10,000" in every
+
+    async def test_page_scope_is_default_and_writes_page(
+        self, mock_app_state, sample_audit_entries, tmp_path
+    ):
+        mock_app_state.entries = sample_audit_entries
+        app = _make_app(mock_app_state)
+        target = tmp_path / "page.json"
+        async with app.run_test(size=(120, 40)) as pilot:
+            dialog = await self._open(app, pilot)
+            dialog.query_one("#output-path").value = str(target)
+            await pilot.click("#export-button")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+        import json
+
+        assert len(json.loads(target.read_text())["entries"]) == len(sample_audit_entries)
+        mock_app_state.client.get_logs_sample.assert_not_called()
+
+    async def test_all_scope_fetches_every_matching_entry(
+        self, mock_app_state, sample_audit_entries, sample_audit_entry, tmp_path
+    ):
+        mock_app_state.entries = sample_audit_entries[:1]
+        mock_app_state.total_entries = 30
+        many = [sample_audit_entry.model_copy(update={"id": f"m{i}"}) for i in range(30)]
+        mock_app_state.client.get_logs_sample.return_value = (many, 30)
+        app = _make_app(mock_app_state)
+        target = tmp_path / "all.json"
+        async with app.run_test(size=(120, 40)) as pilot:
+            dialog = await self._open(app, pilot)
+            dialog.query_one("#scope-all").value = True
+            await pilot.pause()
+            dialog.query_one("#output-path").value = str(target)
+            await pilot.click("#export-button")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+        import json
+
+        assert len(json.loads(target.read_text())["entries"]) == 30
+        _, kwargs = mock_app_state.client.get_logs_sample.call_args
+        assert kwargs["max_entries"] == 10_000
+
+    async def test_dialog_closes_itself_after_export_without_crashing(
+        self, mock_app_state, sample_audit_entries, tmp_path
+    ):
+        from cja_audit_log_monitor.tui.modals import ExportDialog
+
+        mock_app_state.entries = sample_audit_entries
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(120, 40)) as pilot:
+            dialog = await self._open(app, pilot)
+            dialog.query_one("#output-path").value = str(tmp_path / "x.json")
+            await pilot.click("#export-button")
+            await pilot.pause(2.0)
+            assert not isinstance(app.screen, ExportDialog)
+        assert app._exception is None
+
+    async def test_closing_before_auto_close_does_not_crash(
+        self, mock_app_state, sample_audit_entries, tmp_path
+    ):
+        mock_app_state.entries = sample_audit_entries
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(120, 40)) as pilot:
+            dialog = await self._open(app, pilot)
+            dialog.query_one("#output-path").value = str(tmp_path / "x.json")
+            await pilot.click("#export-button")
+            await pilot.pause()
+            await pilot.press("escape")
+            await pilot.pause(2.0)
+        assert app._exception is None
+
+    async def test_dialog_uses_lowercase_labels(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(120, 40)) as pilot:
+            dialog = await self._open(app, pilot)
+            assert str(dialog.query_one("#export-button").label) == "export"
+            assert str(dialog.query_one("#cancel-button").label) == "cancel"
+            assert str(dialog.query_one("#export-title").render()) == "export audit logs"
+
+
+class TestHelpScreen:
+    """Help lists every shortcut, in the app's lowercase style, without gaps."""
+
+    async def _open(self, app, pilot):
+        await pilot.pause()
+        await pilot.press("question_mark")
+        await pilot.pause()
+        return app.screen
+
+    async def test_lists_view_specific_keys(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(120, 40)) as pilot:
+            help_screen = await self._open(app, pilot)
+            text = "\n".join(str(s.render()) for s in help_screen.query(".help-section-body"))
+            for key, words in [
+                ("n", "next page"),
+                ("p", "previous page"),
+                ("space", "start or stop"),
+                ("enter", "entry details"),
+                ("esc", "close"),
+            ]:
+                line = next((ln for ln in text.splitlines() if ln.strip().startswith(key)), "")
+                assert words in line, (key, line)
+
+    async def test_title_is_lowercase(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(120, 40)) as pilot:
+            help_screen = await self._open(app, pilot)
+            assert str(help_screen.query_one("#help-title").render()) == "keyboard shortcuts"
+
+    async def test_rows_have_no_blank_gaps(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(120, 40)) as pilot:
+            help_screen = await self._open(app, pilot)
+            for body in help_screen.query(".help-section-body"):
+                lines = str(body.render()).splitlines()
+                assert all(line.strip() for line in lines)
+                assert body.region.height == len(lines)
+
+    async def test_escape_closes(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(120, 40)) as pilot:
+            help_screen = await self._open(app, pilot)
+            await pilot.press("escape")
+            await pilot.pause()
+            assert app.screen is not help_screen
+
+
+class TestLogBrowserMessages:
+    """The log browser explains an empty table instead of showing a blank grid."""
+
+    async def test_connection_error_is_shown_in_view(self, mock_app_state):
+        mock_app_state.client.get_logs.side_effect = RuntimeError(
+            "invalid_client: invalid client_secret parameter"
+        )
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, "l")
+            message = view.query_one("#table-message", Static)
+            assert message.display
+            assert "not connected" in str(message.render())
+            assert "invalid_client" in str(message.render())
+            assert view.query_one("#filter-bar").display
+
+    async def test_no_matches_says_so(self, mock_app_state):
+        from cja_audit_log_monitor.models import AuditLogResponse
+
+        mock_app_state.client.get_logs.return_value = AuditLogResponse(
+            content=[], total_elements=0, total_pages=0
+        )
+        mock_app_state.filters.search_text = "zzzz"
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, "l")
+            message = view.query_one("#table-message", Static)
+            assert message.display
+            assert "no entries match these filters" in str(message.render())
+
+    async def test_message_hidden_when_rows_load(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, "l")
+            assert not view.query_one("#table-message", Static).display
+
+
+class TestFooterBindings:
+    """The footer only offers keys that do something right now."""
+
+    async def test_close_details_only_when_panel_open(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, "l")
+            assert view.check_action("dismiss_details", ()) is False
+            await pilot.press("enter")
+            await pilot.pause()
+            assert view.check_action("dismiss_details", ()) is True
+            await pilot.press("escape")
+            await pilot.pause()
+            assert view.check_action("dismiss_details", ()) is False
+
+
+class TestLocalTimes:
+    """The TUI shows local time and names the zone."""
+
+    async def test_log_table_header_names_zone(self, mock_app_state, los_angeles_tz):
+        from cja_audit_log_monitor.tui.widgets.log_table import LogTable
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, "l")
+            table = view.query_one(LogTable)
+            labels = [str(col.label) for col in table.columns.values()]
+            assert labels[0] in ("time (PST)", "time (PDT)")
+
+    async def test_log_table_shows_local_time(
+        self, mock_app_state, sample_audit_entry, los_angeles_tz
+    ):
+        from datetime import UTC, datetime
+
+        from cja_audit_log_monitor.tui.widgets.log_table import LogTable
+
+        entry = sample_audit_entry.model_copy(
+            update={"timestamp": datetime(2026, 11, 17, 23, 25, 13, tzinfo=UTC)}
+        )
+        mock_app_state.client.get_logs.return_value.content = [entry]
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, "l")
+            table = view.query_one(LogTable)
+            assert str(table.get_row_at(0)[0]) == "2026-11-17 15:25:13"
+
+
+class TestLocalWindows:
+    """Window cards show the queried window in local dates; chart labels name the zone."""
+
+    async def test_dashboard_window_is_last_7_local_days(self, mock_app_state, los_angeles_tz):
+        from datetime import datetime, timedelta
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, "d")
+            now = datetime.now().astimezone()
+            expected = f"{(now - timedelta(days=7)):%m-%d} → {now:%m-%d}"
+            assert str(view.query_one("#stat-range", Static).render()) == expected
+
+    async def test_stats_period_is_queried_window(self, mock_app_state, los_angeles_tz):
+        from datetime import datetime, timedelta
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, "s")
+            now = datetime.now().astimezone()
+            expected = f"{(now - timedelta(days=7)):%Y-%m-%d} → {now:%Y-%m-%d}"
+            assert str(view.query_one("#stats-period", Static).render()) == expected
+
+    @pytest.mark.parametrize("key", ["d", "s"])
+    async def test_hourly_label_names_zone(self, mock_app_state, los_angeles_tz, key):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, key)
+            labels = [str(s.render()) for s in view.query(".section-label")]
+            hourly = next(label for label in labels if label.startswith("HOURLY ACTIVITY"))
+            assert hourly.endswith(("PST", "PDT"))
+
+    async def test_monitor_last_check_is_local(self, mock_app_state, los_angeles_tz):
+        from datetime import UTC, datetime
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.press("m")
+            await pilot.pause()
+            view = app._screens["monitor"]
+            mock_app_state.monitor.last_check = datetime(2026, 11, 17, 23, 25, 13, tzinfo=UTC)
+            view._update_stats_display()
+            await pilot.pause()
+            assert "last check 15:25:13" in str(view.query_one("#stats-info", Static).render())
+
+
+class TestSmallCopyFixes:
+    async def test_monitor_alerts_says_none_yet(self, mock_app_state):
+        from cja_audit_log_monitor.tui.widgets import AlertSummary
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.press("m")
+            await pilot.pause()
+            summary = app._screens["monitor"].query_one(AlertSummary)
+            assert str(summary.render()) == "no alerts yet"
+
+    async def test_alert_summary_short_message_not_cut(self, mock_app_state):
+        from cja_audit_log_monitor.tui.widgets import AlertSummary
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.press("m")
+            await pilot.pause()
+            summary = app._screens["monitor"].query_one(AlertSummary)
+            summary.add_alert("bulk_delete", "5 deletes in 60 min")
+            text = str(summary.render())
+            assert "bulk_delete: 5 deletes in 60 min" in text
+            assert "..." not in text and "…" not in text
+
+    async def test_rule_card_uses_singular_event(self, mock_app_state):
+        from cja_audit_log_monitor.alerts import AlertEngine
+
+        mock_app_state._alert_engine = AlertEngine()
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.press("a")
+            await pilot.pause()
+            text = "\n".join(str(s.render()) for s in app._screens["alerts"].query(Static))
+            assert "1 event / 1 min" in text
+            assert "1 events" not in text
+
+
+class TestSidebarKeys:
+    """View keys live in the sidebar, so the footer only lists actions and fits."""
+
+    async def test_sidebar_items_show_their_key(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(100, 30)) as pilot:
+            await pilot.pause()
+            texts = {
+                item.id: str(item.render()).strip() for item in app.query("#sidebar .nav-item")
+            }
+            assert texts["nav-dashboard"].endswith("d dashboard")
+            assert texts["nav-settings"].endswith("c config")
+
+    async def test_footer_hides_view_switch_keys(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(100, 30)) as pilot:
+            await pilot.pause()
+            shown = [
+                b.binding.action for b in app.active_bindings.values() if b.binding.show
+            ]
+            assert not any(action.startswith("switch_screen") for action in shown)
+            assert "refresh" in shown and "quit" in shown
+
+
+class TestActionColumn:
+    @pytest.mark.parametrize("size", [(140, 40), (100, 30)])
+    async def test_longest_action_fits(self, mock_app_state, sample_audit_entry, size):
+        from cja_audit_log_monitor.tui.widgets.log_table import LogTable
+
+        entry = sample_audit_entry.model_copy(update={"action": "API_REQUEST"})
+        mock_app_state.client.get_logs.return_value.content = [entry]
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=size) as pilot:
+            view = await _show_and_load(app, pilot, "l")
+            table = view.query_one(LogTable)
+            cell = table.get_row_at(0)[2]
+            assert table.columns["action"].width >= len(str(cell).rstrip())

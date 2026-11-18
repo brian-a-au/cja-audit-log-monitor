@@ -88,7 +88,8 @@ class AlertsScreen(ContentView):
         )
         if len(components) > 40:
             components = components[:39] + "…"
-        window = f"{rule.threshold_count} events / {rule.threshold_window_minutes} min"
+        noun = "event" if rule.threshold_count == 1 else "events"
+        window = f"{rule.threshold_count} {noun} / {rule.threshold_window_minutes} min"
         details = f"{window} · {actions} · {components}"
 
         return Vertical(

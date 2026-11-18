@@ -1,6 +1,7 @@
 """Statistics screen for analytics and visualizations."""
 
 from collections.abc import Iterator
+from datetime import datetime, timedelta
 
 from textual.containers import Horizontal, Vertical
 from textual.widget import Widget
@@ -15,9 +16,19 @@ from ...stats import (
     get_hourly_distribution,
     get_user_activity,
 )
+from ...utils import local_tz_name
 from ..state import AppState
 from ..widgets import ActionBarChart, HourlyChart
-from .base import ContentView, no_activity_message, not_connected_message, stat_card
+from .base import (
+    ContentView,
+    no_activity_message,
+    not_connected_message,
+    sample_note,
+    show_sample_note,
+    stat_card,
+)
+
+STATS_SAMPLE = 5000
 
 
 class StatsScreen(ContentView):
@@ -53,6 +64,7 @@ class StatsScreen(ContentView):
             stat_card("period", "stats-period"),
             classes="dashboard-stats",
         )
+        yield sample_note()
         yield Horizontal(
             Vertical(
                 Static("ACTION DISTRIBUTION", classes="section-label"),
@@ -60,7 +72,7 @@ class StatsScreen(ContentView):
                 classes="stats-column",
             ),
             Vertical(
-                Static("HOURLY ACTIVITY", classes="section-label"),
+                Static(f"HOURLY ACTIVITY · {local_tz_name()}", classes="section-label"),
                 HourlyChart(id="hourly-chart"),
                 classes="stats-column",
             ),
@@ -68,7 +80,7 @@ class StatsScreen(ContentView):
         )
         yield Horizontal(
             Vertical(
-                Static("DAILY ACTIVITY", classes="section-label"),
+                Static(f"DAILY ACTIVITY · {local_tz_name()}", classes="section-label"),
                 Static(id="daily-chart"),
                 classes="stats-column",
             ),
@@ -107,7 +119,7 @@ class StatsScreen(ContentView):
 
         try:
             query = build_date_range_query(self._days)
-            entries = self._state.client.get_all_logs(query, max_entries=5000)
+            entries, total = self._state.client.get_logs_sample(query, max_entries=STATS_SAMPLE)
 
             if worker.is_cancelled:
                 return
@@ -118,11 +130,11 @@ class StatsScreen(ContentView):
 
             # Calculate all statistics
             stats = calculate_stats(entries)
-            hourly = get_hourly_distribution(entries)
-            daily = get_daily_distribution(entries)
+            hourly = get_hourly_distribution(entries, local=True)
+            daily = get_daily_distribution(entries, local=True)
             users = get_user_activity(entries)
 
-            self.app.call_from_thread(self._update_display, stats, hourly, daily, users)
+            self.app.call_from_thread(self._update_display, stats, hourly, daily, users, total)
 
         except Exception as e:
             self.app.call_from_thread(self.set_empty_state, not_connected_message(str(e)))
@@ -135,16 +147,19 @@ class StatsScreen(ContentView):
         hourly: dict,
         daily: dict,
         users: list,
+        total: int | None = None,
     ) -> None:
         """Update all statistics displays."""
         self.set_empty_state(None)
 
-        self.query_one("#stats-total", Static).update(f"{stats.get('total_entries', 0):,}")
+        shown = stats.get("total_entries", 0)
+        total = shown if total is None else max(total, shown)
+        self.query_one("#stats-total", Static).update(f"{total:,}")
+        show_sample_note(self, shown, total)
         self.query_one("#stats-users", Static).update(f"{len(users):,}")
-        date_range = stats.get("date_range")
-        self.query_one("#stats-period", Static).update(
-            f"{date_range['start'][:10]} → {date_range['end'][:10]}" if date_range else "n/a"
-        )
+        now = datetime.now().astimezone()
+        start = now - timedelta(days=self._days)
+        self.query_one("#stats-period", Static).update(f"{start:%Y-%m-%d} → {now:%Y-%m-%d}")
 
         self.query_one("#action-chart", ActionBarChart).update_data(
             stats.get("action_counts", {}), width=20

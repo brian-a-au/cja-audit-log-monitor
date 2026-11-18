@@ -102,6 +102,7 @@ def mock_app_state(sample_settings, sample_audit_entries) -> AppState:
     # Mock client
     mock_client = MagicMock()
     mock_client.get_all_logs.return_value = sample_audit_entries
+    mock_client.get_logs_sample.return_value = (sample_audit_entries, len(sample_audit_entries))
     mock_client.get_logs.return_value = AuditLogResponse(
         content=sample_audit_entries,
         total_elements=len(sample_audit_entries),
@@ -129,3 +130,15 @@ def mock_app_state(sample_settings, sample_audit_entries) -> AppState:
     state._alert_engine = mock_alert_engine
 
     return state
+
+
+@pytest.fixture
+def los_angeles_tz(monkeypatch):
+    """Run a test with the local time zone set to America/Los_Angeles."""
+    import time
+
+    monkeypatch.setenv("TZ", "America/Los_Angeles")
+    time.tzset()
+    yield
+    monkeypatch.undo()
+    time.tzset()

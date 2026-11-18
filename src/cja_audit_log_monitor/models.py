@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class ActionType(str, Enum):
@@ -47,6 +47,15 @@ class ComponentType(str, Enum):
     USER_GROUP = "USER_GROUP"
 
 
+# Suffixes of IMS user ids seen in live audit logs, e.g. "ABC@82462040631c0cd4495ca6.e".
+_IMS_ID_SUFFIXES = (".e", "@techacct.adobe.com", "@AdobeID")
+
+
+def is_ims_user_id(value: str) -> bool:
+    """True when ``value`` is an IMS user id rather than an email address."""
+    return "@" not in value or value.endswith(_IMS_ID_SUFFIXES)
+
+
 class AuditLogEntry(BaseModel):
     """Single audit log entry from the API."""
 
@@ -54,6 +63,7 @@ class AuditLogEntry(BaseModel):
     timestamp: datetime | None = Field(None, alias="dateCreated")
     user_id: str | None = Field(None, alias="userId")
     user_email: str | None = Field(None, alias="userEmail")
+    user_name: str | None = Field(None, alias="userName")
     action: str | None = None
     component_type: str | None = Field(None, alias="componentType")
     component_id: str | None = Field(None, alias="componentId")
@@ -64,6 +74,31 @@ class AuditLogEntry(BaseModel):
     changes: dict[str, Any] | None = None
 
     model_config = {"populate_by_name": True}
+
+    @model_validator(mode="before")
+    @classmethod
+    def _flatten_live_api_shape(cls, data: Any) -> Any:
+        """Map the live API's nested objects onto the flat fields.
+
+        The CJA Audit Logs API returns ``user`` and ``component`` as objects
+        and the org as ``imsOrgId``. Flat keys, when present, take priority.
+        """
+        if not isinstance(data, dict):
+            return data
+        data = dict(data)
+        user = data.pop("user", None)
+        if isinstance(user, dict):
+            data.setdefault("userId", user.get("id"))
+            data.setdefault("userEmail", user.get("email"))
+            data.setdefault("userName", user.get("name"))
+        component = data.pop("component", None)
+        if isinstance(component, dict):
+            data.setdefault("componentType", component.get("idType"))
+            data.setdefault("componentId", component.get("id"))
+            data.setdefault("componentName", component.get("name"))
+        if "imsOrgId" in data:
+            data.setdefault("orgId", data.pop("imsOrgId"))
+        return data
 
 
 class PaginationInfo(BaseModel):
@@ -112,8 +147,9 @@ class AuditLogQuery(BaseModel):
 
     def to_query_params(self) -> dict[str, Any]:
         """Convert to API query parameters."""
+        # The live API pages with "pageNumber"; it silently ignores "page".
         params: dict[str, Any] = {
-            "page": self.page,
+            "pageNumber": self.page,
             "pageSize": self.page_size,
         }
 
@@ -130,7 +166,9 @@ class AuditLogQuery(BaseModel):
             params["component"] = [c.value for c in self.components]
 
         if self.user_id:
-            params["userId"] = self.user_id
+            # The API matches userId only against IMS ids; emails need userEmail.
+            key = "userId" if is_ims_user_id(self.user_id) else "userEmail"
+            params[key] = self.user_id
 
         if self.user_type:
             params["userType"] = self.user_type
