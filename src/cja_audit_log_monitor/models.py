@@ -146,6 +146,12 @@ class AuditLogResponse(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+# The API rejects a date filter unless both dates are sent. This stands in for a missing start.
+API_EARLIEST = datetime(2000, 1, 1, tzinfo=UTC)
+
+_DATE_FORMAT = "%Y-%m-%dT%H:%M:%S%z"
+
+
 class AuditLogQuery(BaseModel):
     """Query parameters for audit log requests."""
 
@@ -168,11 +174,12 @@ class AuditLogQuery(BaseModel):
             "pageSize": self.page_size,
         }
 
-        if self.start_date:
-            params["startDate"] = self.start_date.strftime("%Y-%m-%dT%H:%M:%S%z")
-
-        if self.end_date:
-            params["endDate"] = self.end_date.strftime("%Y-%m-%dT%H:%M:%S%z")
+        # The API needs both dates whenever either is set, so fill in the missing one.
+        if self.start_date or self.end_date:
+            start = self.start_date or API_EARLIEST
+            end = self.end_date or datetime.now(UTC)
+            params["startDate"] = start.strftime(_DATE_FORMAT)
+            params["endDate"] = end.strftime(_DATE_FORMAT)
 
         if self.actions:
             params["action"] = [a.value for a in self.actions]

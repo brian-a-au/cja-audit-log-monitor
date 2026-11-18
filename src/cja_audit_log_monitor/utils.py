@@ -1,10 +1,42 @@
 """Shared utilities for CJA Audit CLI."""
 
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 from datetime import UTC, datetime
 from pathlib import Path
 
 from .models import AuditLogEntry
+
+
+class RecentIds:
+    """A bounded set of keys that forgets the oldest one when full."""
+
+    def __init__(self, maxlen: int) -> None:
+        self._maxlen = maxlen
+        self._keys: OrderedDict[str, None] = OrderedDict()
+
+    def add(self, key: str) -> bool:
+        """Remember ``key``. Return True if it was new; a repeat refreshes its recency."""
+        is_new = key not in self._keys
+        self._keys[key] = None
+        self._keys.move_to_end(key)
+        while len(self._keys) > self._maxlen:
+            self._keys.popitem(last=False)
+        return is_new
+
+    def __contains__(self, key: object) -> bool:
+        return key in self._keys
+
+    def __len__(self) -> int:
+        return len(self._keys)
+
+
+def entry_key(entry: AuditLogEntry) -> str:
+    """Return a stable key for an entry: its id, or a fingerprint of its fields."""
+    return (
+        entry.id
+        or f"{entry.timestamp}-{entry.action}-{entry.component_type}-{entry.component_id}-"
+        f"{entry.user_id}-{entry.user_email}"
+    )
 
 
 def display_path(path: Path | str) -> str:

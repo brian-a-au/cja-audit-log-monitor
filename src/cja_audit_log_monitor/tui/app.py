@@ -287,15 +287,18 @@ class CJAAuditApp(App):
 
     def action_refresh(self) -> None:
         """Refresh current screen data."""
-        self.notify("Refreshing...", severity="information")
         self.post_message(RefreshData())
 
     def on_refresh_data(self, event: "RefreshData") -> None:
-        """Handle refresh requests by forwarding to the active screen."""
+        """Handle refresh requests by forwarding to the active screen.
+
+        A view's ``refresh_data`` returns False when it did not refresh and has already
+        told the user why, so only one toast shows.
+        """
         current = self._screens.get(self._current_screen)
         refresh_method = getattr(current, "refresh_data", None)
-        if callable(refresh_method):
-            refresh_method()
+        if callable(refresh_method) and refresh_method() is not False:
+            self.notify("Refreshing...", severity="information")
 
     def action_export(self) -> None:
         """Show export dialog."""

@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from cja_audit_log_monitor.utils import display_path
+from cja_audit_log_monitor.utils import RecentIds, display_path, entry_key
 
 
 class TestDisplayPath:
@@ -46,3 +46,42 @@ class TestLocalTime:
         from cja_audit_log_monitor.utils import local_tz_name
 
         assert local_tz_name() in ("PST", "PDT")
+
+
+class TestRecentIds:
+    """RecentIds is a bounded set that forgets the oldest key."""
+
+    def test_evicts_oldest(self):
+        ids = RecentIds(5)
+        for i in range(10):
+            assert ids.add(str(i)) is True
+        assert "0" not in ids
+        assert "9" in ids
+        assert len(ids) == 5
+
+    def test_repeat_is_not_new(self):
+        ids = RecentIds(5)
+        for i in range(10):
+            ids.add(str(i))
+        assert ids.add("9") is False
+
+    def test_repeat_refreshes_recency(self):
+        ids = RecentIds(3)
+        for key in ("a", "b", "c"):
+            ids.add(key)
+        ids.add("a")
+        ids.add("d")
+        assert "a" in ids
+        assert "b" not in ids
+
+
+class TestEntryKey:
+    """entry_key prefers the entry id."""
+
+    def test_uses_id(self, sample_audit_entry):
+        assert entry_key(sample_audit_entry) == sample_audit_entry.id
+
+    def test_fallback_without_id(self, sample_audit_entry):
+        entry = sample_audit_entry.model_copy(update={"id": None})
+        key = entry_key(entry)
+        assert key and str(entry.action) in key

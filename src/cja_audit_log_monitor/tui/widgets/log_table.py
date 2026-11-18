@@ -1,12 +1,17 @@
 """Custom DataTable widget for audit log entries."""
 
+from datetime import UTC, datetime
+
 from rich.text import Text
 from textual.widgets import DataTable
 from textual.widgets.data_table import RowKey
 
 from ...formatters import format_timestamp, get_action_color, get_action_icon
 from ...models import AuditLogEntry
-from ...utils import get_user_identifier, local_tz_name
+from ...utils import entry_key, get_user_identifier, local_tz_name
+
+# Sort key for an entry with no timestamp: it goes before every timed entry.
+_NO_TIME = datetime.min.replace(tzinfo=UTC)
 
 
 class LogTable(DataTable):
@@ -114,6 +119,11 @@ class LogTable(DataTable):
             ])
         return row_data
 
+    def clear(self, columns: bool = False) -> "LogTable":
+        """Remove all rows (and the entries behind them)."""
+        self._entries.clear()
+        return super().clear(columns)
+
     def load_entries(self, entries: list[AuditLogEntry]) -> None:
         """Load audit log entries into the table.
 
@@ -121,7 +131,6 @@ class LogTable(DataTable):
             entries: List of audit log entries to display.
         """
         self.clear()
-        self._entries.clear()
         # Refresh the zone name, which can change (daylight saving) in a long session.
         if "timestamp" in self.columns:
             self.columns["timestamp"].label = Text(f"time ({local_tz_name()})")
@@ -139,8 +148,34 @@ class LogTable(DataTable):
         row_key = self.coordinate_to_cell_key(self.cursor_coordinate).row_key
         return self._entries.get(row_key)
 
-    def append_entry(self, entry: AuditLogEntry) -> None:
-        """Append a new entry to the table (used by live monitor)."""
-        row_key = self.add_row(*self._build_row(entry), key=entry.id)
-        self._entries[row_key] = entry
+    def append_entries(self, entries: list[AuditLogEntry], max_rows: int) -> None:
+        """Add entries at the bottom, oldest first, keeping at most ``max_rows`` rows.
+
+        Used by the live monitor. Entries already in the table are skipped and the oldest
+        rows are dropped past ``max_rows``. If the cursor was on the last row (or the table
+        was empty), it moves to the new last row, so the view follows the stream.
+        """
+        following = self.row_count == 0 or self.cursor_row == self.row_count - 1
+        added = False
+        for entry in sorted(entries, key=lambda e: e.timestamp or _NO_TIME):
+            key = entry_key(entry)
+            if key in self.rows:
+                continue
+            row_key = self.add_row(*self._build_row(entry), key=key)
+            self._entries[row_key] = entry
+            added = True
+        if not added:
+            return
+        removed = 0
+        while self.row_count > max_rows:
+            oldest = next(iter(self._entries))
+            del self._entries[oldest]
+            self.remove_row(oldest)
+            removed += 1
+        if following:
+            self.move_cursor(row=self.row_count - 1)
+        elif removed:
+            # Keep the cursor on the same entry while older rows go away above it.
+            self.move_cursor(row=max(0, self.cursor_row - removed))
+        # Rows may have brought in the vertical scrollbar, narrowing the table.
         self.call_after_refresh(self._fit_columns)
