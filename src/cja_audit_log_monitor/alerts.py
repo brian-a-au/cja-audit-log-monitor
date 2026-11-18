@@ -10,7 +10,14 @@ from rich.panel import Panel
 
 from .formatters import format_alert
 from .models import ActionType, AlertRule, AuditLogEntry, ComponentType
-from .utils import get_user_identifier, group_by_user, local_tz_name, to_local, user_identities
+from .utils import (
+    get_user_identifier,
+    get_user_key,
+    group_by_user,
+    local_tz_name,
+    to_local,
+    user_identities,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -207,7 +214,7 @@ class AlertEngine:
             if not self._matches_rule(entry, rule):
                 continue
 
-            key = (rule.name, get_user_identifier(entry) if rule.per_user else "")
+            key = (rule.name, get_user_key(entry) if rule.per_user else "")
 
             # Add to event history
             self._event_history[key].append((timestamp, entry))

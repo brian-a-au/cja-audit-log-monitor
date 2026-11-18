@@ -482,3 +482,19 @@ class TestPerUserRules:
         rule = AlertRule(name="arch", actions=["archive"], threshold_count=1)
         entry = AuditLogEntry(action="ARCHIVE", timestamp=self.BASE)
         assert AlertEngine(rules=[rule]).check_entry(entry)
+
+    def test_same_display_name_different_ids_do_not_share_a_bucket(self) -> None:
+        def delete(i, uid):
+            return AuditLogEntry(
+                action="DELETE",
+                timestamp=self.BASE + timedelta(minutes=i),
+                user_id=uid,
+                user_name="Integration",
+            )
+
+        mixed = [delete(i, "AAA11111" if i % 2 else "BBB22222") for i in range(6)]
+        assert AlertEngine().check_batch(mixed) == []
+        one = [delete(i, "AAA11111") for i in range(5)]
+        fired = AlertEngine().check_batch(one)
+        assert len(fired) == 1
+        assert fired[0].entry.user_id == "AAA11111"
