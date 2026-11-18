@@ -57,6 +57,46 @@ def _patch_screen_workers():
 # ---------------------------------------------------------------------------
 
 
+class TestLazyClientCreation:
+    """AppState.client is built once even when worker threads race for it."""
+
+    def test_concurrent_access_builds_one_client(self, monkeypatch):
+        import threading
+        import time
+
+        created: list[object] = []
+
+        class SlowClient:
+            def __init__(self, settings, token_manager):
+                time.sleep(0.05)
+                created.append(self)
+
+            def close(self):
+                pass
+
+        monkeypatch.setattr("cja_audit_log_monitor.tui.state.AuditLogsClient", SlowClient)
+        monkeypatch.setattr(
+            "cja_audit_log_monitor.tui.state.TokenManager", lambda settings: object()
+        )
+        state = AppState()
+        state._settings = MagicMock()
+        barrier = threading.Barrier(8)
+        seen: list[object] = []
+
+        def grab():
+            barrier.wait()
+            seen.append(state.client)
+
+        threads = [threading.Thread(target=grab) for _ in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert len(created) == 1
+        assert len({id(c) for c in seen}) == 1
+
+
 class TestNotificationDispatch:
     """Tests for AppState notification_manager wiring and dispatch."""
 

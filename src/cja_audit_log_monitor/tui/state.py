@@ -1,6 +1,7 @@
 """Application state management for the TUI."""
 
 import logging
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -75,6 +76,7 @@ class AppState:
         self._config_path = config_path
         self._settings: CJASettings | None = None
         self._client: AuditLogsClient | None = None
+        self._client_lock = threading.Lock()
         self._token_manager: TokenManager | None = None
         self._alert_engine: AlertEngine | None = None
         self._notification_manager: NotificationManager | None = None
@@ -128,10 +130,11 @@ class AppState:
     @property
     def client(self) -> AuditLogsClient:
         """Get API client, creating if necessary."""
-        if self._client is None:
-            self._token_manager = TokenManager(self.settings)
-            self._client = AuditLogsClient(self.settings, self._token_manager)
-        return self._client
+        with self._client_lock:
+            if self._client is None:
+                self._token_manager = TokenManager(self.settings)
+                self._client = AuditLogsClient(self.settings, self._token_manager)
+            return self._client
 
     @property
     def alert_engine(self) -> AlertEngine:
@@ -149,10 +152,11 @@ class AppState:
 
     def refresh_client(self) -> None:
         """Refresh the API client connection."""
-        if self._client:
-            self._client.close()
-            self._client = None
-        self._token_manager = None
+        with self._client_lock:
+            if self._client:
+                self._client.close()
+                self._client = None
+            self._token_manager = None
 
     def verify_connection(self) -> dict:
         """Verify API connection and authentication.
@@ -228,9 +232,10 @@ class AppState:
 
     def close(self) -> None:
         """Clean up resources."""
-        if self._client:
-            self._client.close()
-            self._client = None
+        with self._client_lock:
+            if self._client:
+                self._client.close()
+                self._client = None
         if self._notification_manager:
             self._notification_manager.close()
             self._notification_manager = None
