@@ -3,6 +3,7 @@
 import csv
 import json
 import sys
+from datetime import UTC, datetime
 from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -307,3 +308,43 @@ class TestAtomicWrites:
         output = StringIO()
         export_to_json([sample_audit_entry], output)
         assert json.loads(output.getvalue())["exported_at"].endswith("+00:00")
+
+
+class TestFormulaInjection:
+    """CSV and TSV cells that start like a spreadsheet formula are prefixed with '."""
+
+    @staticmethod
+    def _entry(component_name: str, description: str = "d") -> AuditLogEntry:
+        return AuditLogEntry(
+            id="e1",
+            timestamp=datetime(2024, 1, 15, 10, 30, 0, tzinfo=UTC),
+            action="UPDATE",
+            component_name=component_name,
+            description=description,
+        )
+
+    @pytest.mark.parametrize(
+        ("fn", "delimiter"), [(export_to_csv, ","), (export_to_tsv, "\t")]
+    )
+    def test_formula_cell_is_prefixed(self, fn, delimiter) -> None:
+        out = StringIO()
+        fn([self._entry('=HYPERLINK("http://x")')], out)
+        rows = list(csv.DictReader(StringIO(out.getvalue()), delimiter=delimiter))
+        assert rows[0]["component_name"] == '\'=HYPERLINK("http://x")'
+
+    @pytest.mark.parametrize(
+        ("fn", "delimiter"), [(export_to_csv, ","), (export_to_tsv, "\t")]
+    )
+    def test_negative_looking_value_is_prefixed(self, fn, delimiter) -> None:
+        out = StringIO()
+        fn([self._entry("-5", "@cmd")], out)
+        rows = list(csv.DictReader(StringIO(out.getvalue()), delimiter=delimiter))
+        assert rows[0]["component_name"] == "'-5"
+        assert rows[0]["description"] == "'@cmd"
+
+    def test_timestamp_and_plain_text_unchanged(self) -> None:
+        out = StringIO()
+        export_to_csv([self._entry("Plain")], out)
+        rows = list(csv.DictReader(StringIO(out.getvalue())))
+        assert rows[0]["timestamp"].startswith("2024-01-15")
+        assert rows[0]["component_name"] == "Plain"

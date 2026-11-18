@@ -100,6 +100,64 @@ def export_to_json(
     return len(entries)
 
 
+_EXPORT_FIELDS = [
+    "id",
+    "timestamp",
+    "user_id",
+    "user_email",
+    "user_name",
+    "action",
+    "component_type",
+    "component_id",
+    "component_name",
+    "description",
+    "org_id",
+    "ip_address",
+]
+
+_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _cell(value: object) -> str:
+    """Render a cell, prefixing ``'`` when a spreadsheet could read it as a formula.
+
+    Text starting with ``=``, ``+``, ``-``, ``@``, tab or carriage return gets a
+    leading apostrophe. This also marks plain negative numbers such as ``-5``;
+    that is a deliberate trade-off. ``None`` becomes an empty cell.
+    """
+    if value is None:
+        return ""
+    text = str(value)
+    if text.startswith(_FORMULA_PREFIXES):
+        return "'" + text
+    return text
+
+
+def _write_delimited(
+    entries: list[AuditLogEntry] | Iterator[AuditLogEntry], f: TextIO, delimiter: str
+) -> int:
+    """Write entries as delimited text with a header row; return the entry count."""
+    writer = csv.writer(f, delimiter=delimiter)
+    writer.writerow(_EXPORT_FIELDS)
+    count = 0
+    for entry in entries:
+        row = entry_to_dict(entry)
+        writer.writerow([_cell(row[name]) for name in _EXPORT_FIELDS])
+        count += 1
+    return count
+
+
+def _export_delimited(
+    entries: list[AuditLogEntry] | Iterator[AuditLogEntry],
+    output: Path | TextIO,
+    delimiter: str,
+) -> int:
+    if isinstance(output, Path):
+        with atomic_write(output, newline="") as f:
+            return _write_delimited(entries, f, delimiter)
+    return _write_delimited(entries, output, delimiter)
+
+
 def export_to_csv(
     entries: list[AuditLogEntry] | Iterator[AuditLogEntry],
     output: Path | TextIO,
@@ -113,45 +171,7 @@ def export_to_csv(
     Returns:
         Number of entries exported.
     """
-    fieldnames = [
-        "id",
-        "timestamp",
-        "user_id",
-        "user_email",
-        "user_name",
-        "action",
-        "component_type",
-        "component_id",
-        "component_name",
-        "description",
-        "org_id",
-        "ip_address",
-    ]
-
-    count = 0
-
-    def write_csv(f: TextIO) -> int:
-        nonlocal count
-        writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
-        writer.writeheader()
-
-        for entry in entries:
-            row = entry_to_dict(entry)
-            # Format timestamp for CSV
-            if row["timestamp"]:
-                row["timestamp"] = row["timestamp"]
-            writer.writerow(row)
-            count += 1
-
-        return count
-
-    if isinstance(output, Path):
-        with atomic_write(output, newline="") as f:
-            write_csv(f)
-    else:
-        write_csv(output)
-
-    return count
+    return _export_delimited(entries, output, ",")
 
 
 def export_to_tsv(
@@ -167,44 +187,7 @@ def export_to_tsv(
     Returns:
         Number of entries exported.
     """
-    fieldnames = [
-        "id",
-        "timestamp",
-        "user_id",
-        "user_email",
-        "user_name",
-        "action",
-        "component_type",
-        "component_id",
-        "component_name",
-        "description",
-        "org_id",
-        "ip_address",
-    ]
-
-    count = 0
-
-    def write_tsv(f: TextIO) -> int:
-        nonlocal count
-        writer = csv.DictWriter(
-            f, fieldnames=fieldnames, extrasaction="ignore", delimiter="\t"
-        )
-        writer.writeheader()
-
-        for entry in entries:
-            row = entry_to_dict(entry)
-            writer.writerow(row)
-            count += 1
-
-        return count
-
-    if isinstance(output, Path):
-        with atomic_write(output, newline="") as f:
-            write_tsv(f)
-    else:
-        write_tsv(output)
-
-    return count
+    return _export_delimited(entries, output, "\t")
 
 
 def export_entries(
