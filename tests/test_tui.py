@@ -4809,3 +4809,21 @@ async def test_hostile_names_in_every_tui_view(mock_app_state) -> None:
             screen = app.export_screenshot()
             assert "\x1b]0;" not in screen and "PWNED\x07" not in screen
         assert app.is_running
+
+
+async def test_two_entries_with_the_same_id_on_one_page(mock_app_state, sample_audit_entries):
+    """G35: a repeated id on one page still shows every row."""
+    from cja_audit_log_monitor.tui.widgets import LogTable
+
+    page = sample_audit_entries[:5]
+    page[3] = page[3].model_copy(update={"id": page[1].id})
+    mock_app_state.client.get_logs.return_value = _logs_response(page, total_elements=5)
+    app = _make_app(mock_app_state)
+    async with app.run_test(size=(140, 40)) as pilot:
+        view = await _show_and_load(app, pilot, "l")
+        table = view.query_one("#log-table", LogTable)
+        assert await _wait_for(lambda: table.row_count == 5, pilot)
+        view.refresh_data()
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert table.row_count == 5

@@ -198,8 +198,9 @@ class LogTable(DataTable):
         if "timestamp" in self.columns:
             self.columns["timestamp"].label = Text(f"time ({local_tz_name()})")
 
+        used: dict[str, int] = {}
         for entry in entries:
-            row_key = self.add_row(*self._build_row(entry), key=entry.id)
+            row_key = self.add_row(*self._build_row(entry), key=_unique_key(entry.id, used))
             self._entries[row_key] = entry
         # Rows may have brought in the vertical scrollbar, narrowing the table.
         self.call_after_refresh(self._fit_columns)
@@ -242,3 +243,15 @@ class LogTable(DataTable):
             self.move_cursor(row=max(0, self.cursor_row - removed))
         # Rows may have brought in the vertical scrollbar, narrowing the table.
         self.call_after_refresh(self._fit_columns)
+
+
+def _unique_key(entry_id: str | None, used: dict[str, int]) -> str | None:
+    """A row key from the entry id: the id itself the first time, ``<id>~<n>`` after that.
+
+    The API can repeat an id; a repeated row key would fail the whole page.
+    """
+    if entry_id is None:
+        return None
+    seen = used.get(entry_id, 0)
+    used[entry_id] = seen + 1
+    return entry_id if seen == 0 else f"{entry_id}~{seen}"
