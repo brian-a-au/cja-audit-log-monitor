@@ -4270,3 +4270,57 @@ async def test_tui_reload_on_any_bad_config(bad_config, tmp_path) -> None:
         await pilot.pause()
         assert app.is_running
         assert state.config_error_summary
+
+
+# ---------------------------------------------------------------------------
+# Logged warnings show as toasts (G12)
+# ---------------------------------------------------------------------------
+
+
+async def test_tui_shows_config_permission_warning(tmp_path) -> None:
+    path = tmp_path / "config.yaml"
+    path.write_text("monitor_interval: 30\n")
+    path.chmod(0o644)
+    app = _make_app(AppState(path))
+    async with app.run_test(size=(140, 40), notifications=True) as pilot:
+        assert await _wait_for(
+            lambda: any("chmod 600" in n.message for n in app._notifications), pilot
+        )
+
+
+async def test_tui_shows_unknown_key_warning(tmp_path) -> None:
+    path = tmp_path / "config.yaml"
+    path.write_text("monitor_intervall: 30\n")
+    path.chmod(0o600)
+    app = _make_app(AppState(path))
+    async with app.run_test(size=(140, 40), notifications=True) as pilot:
+        assert await _wait_for(
+            lambda: any("monitor_intervall" in n.message for n in app._notifications), pilot
+        )
+
+
+async def test_tui_shows_a_warning_logged_on_a_worker_thread(mock_app_state) -> None:
+    import asyncio
+    import logging
+
+    app = _make_app(mock_app_state)
+    async with app.run_test(size=(140, 40), notifications=True) as pilot:
+        await pilot.pause()
+        log = logging.getLogger("cja_audit_log_monitor.notifications")
+        await asyncio.to_thread(log.error, "Failed to send webhook to example.com/…")
+        assert await _wait_for(
+            lambda: any("Failed to send webhook" in n.message for n in app._notifications),
+            pilot,
+        )
+
+
+async def test_toast_log_handler_is_removed_after_the_app_ends(mock_app_state) -> None:
+    import logging
+
+    from cja_audit_log_monitor.tui.log_toasts import ToastLogHandler
+
+    app = _make_app(mock_app_state)
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+    handlers = logging.getLogger("cja_audit_log_monitor").handlers
+    assert not any(isinstance(h, ToastLogHandler) for h in handlers)
