@@ -43,6 +43,8 @@ class FakeApi:
     block: threading.Event = field(default_factory=threading.Event)
     # Set by the server once a request is held by ``block``.
     blocked: threading.Event = field(default_factory=threading.Event)
+    # When set, audit log requests after this many are held, as with ``block``.
+    block_after: int | None = None
     url: str = ""
     server: ThreadingHTTPServer | None = None
 
@@ -127,6 +129,8 @@ def start(api: FakeApi) -> FakeApi:
                 return
             query = parse_qs(parsed.query)
             api.requests.append(query)
+            if api.block_after is not None and len(api.requests) > api.block_after:
+                api.block.set()
             api._hold()
             self._send(200, api.page(query))
 

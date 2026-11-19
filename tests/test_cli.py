@@ -3827,3 +3827,34 @@ class TestCountWording:
     def test_export_of_one_entry(self, tmp_path, sample_audit_entry) -> None:
         result = self._run(["export", "-o", str(tmp_path / "o.json")], [sample_audit_entry])
         assert "Exported 1 entry " in result.stderr
+
+
+@pytest.mark.parametrize("signal_name", ["SIGTERM", "SIGHUP"])
+def test_signal_during_export_leaves_no_temp_file(fake_api, tmp_path, signal_name) -> None:
+    """G44: a stopped export removes its hidden temp file."""
+    import signal
+    import subprocess
+
+    from .fakeapi import command, raw_entry
+
+    fake_api.entries = [raw_entry(i) for i in range(1500)]  # two pages of 1,000
+    fake_api.block_after = 1  # hold the second page, while the temp file is open
+    out = tmp_path / "out"
+    out.mkdir()
+    proc = subprocess.Popen(
+        [*command(), "cli", "export", "-F", "csv", "-o", str(out / "audit.csv")],
+        env=fake_api.env(tmp_path / "missing.yaml"),
+        cwd=tmp_path,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        assert fake_api.blocked.wait(30)
+        proc.send_signal(getattr(signal, signal_name))
+        proc.communicate(timeout=10)
+    finally:
+        fake_api.block.clear()
+        if proc.poll() is None:
+            proc.kill()
+    assert list(out.iterdir()) == []
+    assert proc.returncode != 0

@@ -228,6 +228,35 @@ def utf8_stdout(newline: str | None = None) -> Iterator[TextIO]:
         stream.detach()  # leave sys.stdout's buffer open
 
 
+@contextmanager
+def exit_on_termination() -> Iterator[None]:
+    """Turn SIGTERM and SIGHUP into a normal exit while a file is written.
+
+    Python's default for these signals ends the process at once, which would leave the
+    hidden temp file of an export behind. A normal exit runs the cleanup instead.
+    """
+    import signal
+
+    def stop(signum: int, frame: object) -> None:
+        raise SystemExit(128 + signum)
+
+    names = ("SIGTERM", "SIGHUP")
+    saved: dict[int, Any] = {}
+    for name in names:
+        sig = getattr(signal, name, None)
+        if sig is None:  # SIGHUP does not exist on Windows
+            continue
+        try:
+            saved[sig] = signal.signal(sig, stop)
+        except ValueError:  # not the main thread, e.g. under a test runner
+            pass
+    try:
+        yield
+    finally:
+        for sig, handler in saved.items():
+            signal.signal(sig, handler)
+
+
 def setup_logging(verbose: bool) -> None:
     """Configure logging based on verbosity."""
     level = logging.DEBUG if verbose else logging.WARNING
@@ -801,7 +830,7 @@ def export(
                 return
             yield entry
 
-    with client:
+    with client, exit_on_termination():
         if format in {"csv", "tsv"}:
             query.page_size = MAX_PAGE_SIZE  # fewer requests for a long export
             source: Any = up_to_limit(client.get_logs_paginated(query))
@@ -1298,7 +1327,7 @@ def report(
     json_output = json.dumps(report_data, indent=indent, default=str)
 
     if output and str(output) != "-":
-        with atomic_write(output, overwrite=force) as f:
+        with exit_on_termination(), atomic_write(output, overwrite=force) as f:
             f.write(json_output)
         err_console.print(f"[green]Report saved to {literal(str(output))}[/green]")
     else:
