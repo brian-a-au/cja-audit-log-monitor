@@ -66,7 +66,11 @@ HELP_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
 class HelpScreen(ModalScreen):
     """Help overlay listing every keyboard shortcut."""
 
+    # The app sets AUTO_FOCUS = None for the views; a dialog still focuses its first widget.
+    AUTO_FOCUS = "*"
+
     BINDINGS = [
+        Binding("q", "app.quit", "quit", show=False),
         Binding("escape", "dismiss", "close"),
         Binding("question_mark", "dismiss", "close"),
     ]
@@ -97,6 +101,9 @@ class CJAAuditApp(App):
     # The colours are fixed, so Textual's palette (themes, screenshots) would give mixed
     # results; it also used to leave the export dialog stuck.
     ENABLE_COMMAND_PALETTE = False
+    # No focus is picked when a dialog closes over a view that had none, so focus does
+    # not jump to the view's first button (and scroll the dashboard) after help or export.
+    AUTO_FOCUS = None
 
     TITLE = "CJA Audit Log Monitor"
     CSS_PATH = "styles.tcss"

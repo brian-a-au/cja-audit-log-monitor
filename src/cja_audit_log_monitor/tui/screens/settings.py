@@ -52,7 +52,7 @@ class SettingsScreen(ContentView):
         )
 
         # Authentication section
-        org_display = f"{settings.org_id[:12]}..." if settings.org_id else "(not set)"
+        org_display = settings.org_id or "(not set)"
         client_display = f"{settings.client_id[:12]}..." if settings.client_id else "(not set)"
         auth_section = Vertical(
             Static("AUTHENTICATION", classes="section-label"),
@@ -151,6 +151,8 @@ class SettingsScreen(ContentView):
         yield Container(
             LoadingIndicator(id="settings-loading"),
             Static("configuration", id="settings-title", classes="section-label view-title"),
+            # The buttons come first, so they are on screen at every size.
+            buttons,
             Container(
                 connection_section,
                 api_section,
@@ -160,7 +162,6 @@ class SettingsScreen(ContentView):
                 alerts_section,
                 id="settings-grid",
             ),
-            buttons,
             id="settings-container",
         )
 

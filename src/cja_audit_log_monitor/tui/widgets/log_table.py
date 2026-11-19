@@ -2,12 +2,11 @@
 
 from datetime import UTC, datetime
 
-from rich.cells import cell_len, set_cell_size
 from rich.text import Text
 from textual.widgets import DataTable
 from textual.widgets.data_table import RowKey
 
-from ...formatters import format_timestamp, get_action_color, get_action_icon
+from ...formatters import cut_cells, format_timestamp, get_action_color, get_action_icon
 from ...models import AuditLogEntry
 from ...utils import entry_key, get_user_identifier, local_tz_name
 
@@ -131,12 +130,7 @@ class LogTable(DataTable):
 
         Works on the plain string, so square brackets in the text are never markup.
         """
-        if width < 1:
-            return ""
-        if cell_len(text) <= width:
-            return text
-        # Cut by cells, not characters: a wide (CJK) glyph takes two cells.
-        return set_cell_size(text, width - 1).rstrip() + "…"
+        return cut_cells(text, width)
 
     def _width_of(self, key: str) -> int:
         """Current width of column ``key``, or its preferred width before the table is laid out."""
@@ -188,19 +182,27 @@ class LogTable(DataTable):
         return super().clear(columns)
 
     def load_entries(self, entries: list[AuditLogEntry]) -> None:
-        """Load audit log entries into the table.
+        """Load audit log entries into the table; the cursor stays on the same entry.
 
         Args:
             entries: List of audit log entries to display.
         """
+        selected = self.get_selected_entry() if self.row_count else None
+        keep = entry_key(selected) if selected is not None else None
         self.clear()
         # Refresh the zone name, which can change (daylight saving) in a long session.
         if "timestamp" in self.columns:
             self.columns["timestamp"].label = Text(f"time ({local_tz_name()})")
 
-        for entry in entries:
-            row_key = self.add_row(*self._build_row(entry), key=entry.id)
+        used: dict[str, int] = {}
+        cursor_row = 0
+        for index, entry in enumerate(entries):
+            row_key = self.add_row(*self._build_row(entry), key=_unique_key(entry.id, used))
             self._entries[row_key] = entry
+            if keep is not None and entry_key(entry) == keep:
+                cursor_row = index
+        if cursor_row:
+            self.move_cursor(row=cursor_row)
         # Rows may have brought in the vertical scrollbar, narrowing the table.
         self.call_after_refresh(self._fit_columns)
 
@@ -242,3 +244,15 @@ class LogTable(DataTable):
             self.move_cursor(row=max(0, self.cursor_row - removed))
         # Rows may have brought in the vertical scrollbar, narrowing the table.
         self.call_after_refresh(self._fit_columns)
+
+
+def _unique_key(entry_id: str | None, used: dict[str, int]) -> str | None:
+    """A row key from the entry id: the id itself the first time, ``<id>~<n>`` after that.
+
+    The API can repeat an id; a repeated row key would fail the whole page.
+    """
+    if entry_id is None:
+        return None
+    seen = used.get(entry_id, 0)
+    used[entry_id] = seen + 1
+    return entry_id if seen == 0 else f"{entry_id}~{seen}"

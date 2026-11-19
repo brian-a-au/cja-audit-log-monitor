@@ -5,6 +5,7 @@ import re
 from datetime import datetime
 from typing import Any
 
+from rich.cells import cell_len, set_cell_size
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -47,6 +48,24 @@ def resolve_tcss_markup(s: str) -> str:
         out = re.sub(rf"(?<!\\)\[{re.escape(token)}\]", f"[{hex_value}]", out)
         out = re.sub(rf"(?<!\\)\[/{re.escape(token)}\]", f"[/{hex_value}]", out)
     return out
+
+
+def cut_cells(text: str, width: int) -> str:
+    """Shorten ``text`` to ``width`` terminal cells, ending with an ellipsis if cut.
+
+    A wide (e.g. CJK) character takes two cells, so this cuts by cells, not characters.
+    """
+    if width < 1:
+        return ""
+    if cell_len(text) <= width:
+        return text
+    return set_cell_size(text, width - 1).rstrip() + "\u2026"
+
+
+def fit_cells(text: str, width: int) -> str:
+    """``text`` cut to ``width`` cells and padded with spaces to exactly ``width`` cells."""
+    short = cut_cells(text, width)
+    return short + " " * (width - cell_len(short))
 
 
 def literal(text: str) -> str:

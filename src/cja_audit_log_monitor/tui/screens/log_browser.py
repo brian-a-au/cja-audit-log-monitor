@@ -3,6 +3,7 @@
 from collections.abc import Iterator
 from datetime import datetime
 
+from textual.binding import Binding
 from textual.containers import Container, Horizontal
 from textual.css.query import NoMatches
 from textual.widget import Widget
@@ -24,8 +25,10 @@ class LogBrowserScreen(ContentView):
     BINDINGS = [
         ("enter", "view_details", "details"),
         ("escape", "dismiss_details", "close"),
-        ("n", "next_page", "next"),
-        ("p", "prev_page", "prev"),
+        # n and p stay out of the footer: the prev and next buttons show them on screen, and
+        # with the detail panel open at 80 columns the footer would push out "q quit".
+        Binding("n", "next_page", "next", show=False),
+        Binding("p", "prev_page", "prev", show=False),
     ]
 
     def compose_content(self) -> Iterator[Widget]:
@@ -80,6 +83,13 @@ class LogBrowserScreen(ContentView):
 
     def _update_table(self, entries: list, total: int) -> None:
         """Update the log table with entries."""
+        page_size = self._state.filters.page_size
+        last_page = max(0, (total + page_size - 1) // page_size - 1)
+        if not entries and total and self._state.filters.page > last_page:
+            # The total shrank under us: show the last page that has entries instead.
+            self._state.filters.page = last_page
+            self.refresh_data()
+            return
         table = self.query_one("#log-table", LogTable)
         table.load_entries(entries)
         self._state.entries = entries

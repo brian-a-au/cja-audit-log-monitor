@@ -9,7 +9,7 @@ from textual.widget import Widget
 from textual.widgets import Button, LoadingIndicator, Static
 
 from ...alerts import analyze_for_anomalies
-from ...formatters import literal, resolve_tcss_markup
+from ...formatters import fit_cells, literal, resolve_tcss_markup
 from ...stats import build_date_range_query, calculate_stats, get_hourly_distribution
 from ...utils import local_tz_name
 from ..state import AppState
@@ -218,12 +218,12 @@ class DashboardScreen(ContentView):
         if not self._top_users:
             widget.update(no_activity_message(self._days))
             return
-        # Fit "name count" on one line: count takes 6 cells (space + 5 digits).
-        name_width = max(8, min(28, widget.content_region.width - 6))
+        # Fit "name count" on one line: count takes 6 cells (space + 5 digits), plus one
+        # blank cell so the count does not touch the scrollbar.
+        name_width = max(8, min(28, widget.content_region.width - 7))
         lines = []
         for user, count in self._top_users[:8]:
-            name = user if len(user) <= name_width else user[: name_width - 1] + "…"
-            lines.append(f"{literal(f'{name:<{name_width}}')} {count:>5,}")
+            lines.append(f"{literal(fit_cells(user, name_width))} {count:>5,}")
         widget.update("\n".join(lines))
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
