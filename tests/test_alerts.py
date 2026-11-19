@@ -723,3 +723,37 @@ class TestFutureTimestampsAgeOut:
             for alert in engine.check_entry(self._delete(later - timedelta(seconds=seconds)))
         ]
         assert fired == []  # two real deletes do not make three
+
+
+def test_short_lookback_steady_night_is_not_flagged() -> None:
+    day = datetime(2026, 3, 1, tzinfo=UTC)
+    entries = [
+        AuditLogEntry(id=f"{h}-{i}", action="EDIT", user_id=f"u{i}",
+                      timestamp=day + timedelta(hours=h, minutes=i))
+        for h in (2, 3)
+        for i in range(10)
+    ]
+    kinds = [a["type"] for a in analyze_for_anomalies(entries, lookback_hours=2)]
+    assert "off_hours_activity" not in kinds
+    # Over a full day the same two busy night hours stand out.
+    kinds = [a["type"] for a in analyze_for_anomalies(entries)]
+    assert "off_hours_activity" in kinds
+
+
+def test_anomalies_command_passes_its_lookback() -> None:
+    from unittest.mock import MagicMock, patch
+
+    from click.testing import CliRunner
+
+    from cja_audit_log_monitor.cli import main
+
+    client = MagicMock()
+    client.get_all_logs.return_value = []
+    client.__enter__ = MagicMock(return_value=client)
+    client.__exit__ = MagicMock(return_value=False)
+    with (
+        patch("cja_audit_log_monitor.cli.get_client", return_value=(client, MagicMock())),
+        patch("cja_audit_log_monitor.cli.analyze_for_anomalies", return_value=[]) as analyze,
+    ):
+        CliRunner().invoke(main, ["cli", "anomalies", "--lookback", "2"])
+    assert analyze.call_args.kwargs.get("lookback_hours") == 2

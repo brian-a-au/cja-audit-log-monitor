@@ -336,7 +336,7 @@ class AlertEngine:
 
 
 def analyze_for_anomalies(
-    entries: list[AuditLogEntry], local: bool = False
+    entries: list[AuditLogEntry], local: bool = False, lookback_hours: int = 24
 ) -> list[dict[str, Any]]:
     """Analyze entries for anomalous patterns.
 
@@ -346,6 +346,8 @@ def analyze_for_anomalies(
         entries: List of audit log entries.
         local: Judge off-hours (midnight to 5am) by the local time zone
             instead of UTC. The TUI sets this; the CLI keeps UTC.
+        lookback_hours: How many hours ``entries`` cover. The off-hours check compares
+            an hour with the average hour of that span (at most 24 hours).
 
     Returns:
         List of anomaly reports.
@@ -404,7 +406,7 @@ def analyze_for_anomalies(
             hour_counts[ts.hour] += 1
 
     if hour_counts:
-        avg_per_hour = sum(hour_counts.values()) / 24
+        avg_per_hour = sum(hour_counts.values()) / max(1, min(lookback_hours, 24))
         for hour, count in hour_counts.items():
             # Flag a real burst in off-hours (midnight up to OFF_HOURS_END)
             if (

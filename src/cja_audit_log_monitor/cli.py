@@ -972,7 +972,7 @@ def _run_anomalies_cycle(
     # any iterable-of-entries the client/mock returns.
     entries = list(client.get_all_logs(query))
 
-    raw_anomalies = analyze_for_anomalies(entries)
+    raw_anomalies = analyze_for_anomalies(entries, lookback_hours=lookback)
     new_anomalies = dedup.suppress_seen(raw_anomalies)
 
     as_json = output_format == "json"
