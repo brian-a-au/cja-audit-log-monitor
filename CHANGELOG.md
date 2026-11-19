@@ -25,7 +25,7 @@ Terminal app
 
 Command line
 
-- A command line under `cja-audit-log-monitor cli` with commands to list, search, and query logs, and to look up a user, a component, an action, or a dashboard.
+- A command line under `cja-audit-log-monitor cli` with commands to list, search, and query logs, and to look up a user, a component, an action, or a dashboard. The `show` command looks up one entry by its id.
 - Commands for statistics, a timeline, top users, and a report that you can write to a file.
 - Commands to watch for new events (`monitor` and `tail`) and to scan for anomalies (`anomalies`), once or on repeat.
 - Commands to list the alert rules and test them against recent logs.

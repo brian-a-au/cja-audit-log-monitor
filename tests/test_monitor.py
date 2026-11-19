@@ -558,6 +558,24 @@ class TestPollErrors:
         monitor._run_poll(status)
         assert "0 new" in status.update.call_args.args[0]
 
+    def test_warning_pauses_the_live_status_while_printing(self, mock_client: MagicMock) -> None:
+        events: list[str] = []
+        status = MagicMock()
+        status.stop.side_effect = lambda: events.append("stop")
+        status.start.side_effect = lambda: events.append("start")
+        err_console = MagicMock()
+        err_console.print.side_effect = lambda *a, **k: events.append("print")
+        monitor = AuditLogMonitor(mock_client, console=MagicMock(), err_console=err_console)
+        monitor._status = status
+        monitor._print_warning("Slack failed")
+        assert events == ["stop", "print", "start"]
+
+    def test_warning_without_a_status_just_prints(self, mock_client: MagicMock) -> None:
+        err_console = MagicMock()
+        monitor = AuditLogMonitor(mock_client, console=MagicMock(), err_console=err_console)
+        monitor._print_warning("Slack failed")
+        err_console.print.assert_called_once()
+
     def test_stopping_message_prints_once(self, mock_client: MagicMock) -> None:
         console = MagicMock()
         monitor = AuditLogMonitor(mock_client, console=console, interval=1)

@@ -172,7 +172,7 @@ Queries the logs for a preset date range. Pick at most one preset. With no prese
 | `--last-week` | | The last 7 days. |
 | `--last-month` | | The last 30 days. |
 | `-u`, `--user` | all | A user id or an email address. |
-| `-a`, `--action` | all | An action type. |
+| `-a`, `--action` | all | An action type. You can repeat it. |
 | `-C`, `--component` | all | A component type. You can repeat it. |
 | `-l`, `--limit` | 100 | The most entries to return. |
 | `-F`, `--output-format` | `table` | `table` or `json`. |
@@ -264,7 +264,7 @@ Shows activity by day and by hour of the day, in UTC.
 | Flag | Default | Meaning |
 |---|---|---|
 | `-d`, `--days` | from config (7) | How many days to look at. |
-| `-a`, `--action` | all | An action type. |
+| `-a`, `--action` | all | An action type. You can repeat it. |
 | `-C`, `--component` | all | A component type. You can repeat it. |
 | `-u`, `--user` | all | A user. |
 | `-F`, `--output-format` | `table` | `table` or `json`. The JSON always has all 24 hours, even when they are 0. |
@@ -301,7 +301,7 @@ How each poll works:
 - Each later poll reads from 5 minutes before the last good poll up to now. The tool skips entries it has already shown. This overlap catches events that the API indexed late.
 - New events are handled oldest first.
 - One poll reads at most 20 pages. If it reaches that limit, the tool logs a warning.
-- A status line shows the time of the last poll and how many entries were new. After the first poll, it says `Baseline` and shows how many existing entries it found, because those are not counted as new.
+- A status line shows the time of the last poll and how many entries were new. For the first poll, it says `Baseline` and shows how many existing entries it found. After that it says how many entries are new.
 
 How errors are handled:
 
