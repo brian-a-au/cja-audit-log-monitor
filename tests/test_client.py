@@ -1,5 +1,6 @@
 """Tests for API client."""
 
+import re
 import threading
 import time
 from datetime import UTC, datetime, timedelta
@@ -139,8 +140,10 @@ class TestAuditLogsClient:
         self,
         client: AuditLogsClient,
         httpx_mock: HTTPXMock,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Test API error handling."""
+        monkeypatch.setattr("cja_audit_log_monitor.client.time.sleep", lambda s: None)
         httpx_mock.add_response(
             url="https://cja.adobe.io/auditlogs/api/v1/auditlogs",
             status_code=500,
@@ -575,3 +578,47 @@ class TestPagedQueryIsCopied:
         with client:
             entries = list(client.get_logs_paginated())
         assert [e.id for e in entries] == ["a", "b"]
+
+
+class TestRetryAndRefresh:
+    """The retry paths that a long-running monitor depends on (G50)."""
+
+    URL = "https://cja.adobe.io/auditlogs/api/v1/auditlogs"
+
+    def test_401_refreshes_the_token_and_retries(
+        self, client: AuditLogsClient, sample_api_response: dict, httpx_mock: HTTPXMock
+    ) -> None:
+        httpx_mock.add_response(url=self.URL, status_code=401, json={"error": "expired"})
+        httpx_mock.add_response(url=self.URL, json=sample_api_response)
+        with client:
+            response = client.get_logs()
+        assert len(response.content) == 1
+        token_calls = [r for r in httpx_mock.get_requests() if "/ims/token" in str(r.url)]
+        assert len(token_calls) == 2
+
+    def test_network_error_is_retried(
+        self,
+        client: AuditLogsClient,
+        sample_api_response: dict,
+        httpx_mock: HTTPXMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr("cja_audit_log_monitor.client.time.sleep", lambda s: None)
+        httpx_mock.add_exception(httpx.ConnectError("down"), url=self.URL)
+        httpx_mock.add_response(url=self.URL, json=sample_api_response)
+        with client:
+            response = client.get_logs()
+        assert len(response.content) == 1
+
+    def test_verify_connection_reports_a_failed_call(
+        self, client: AuditLogsClient, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("cja_audit_log_monitor.client.time.sleep", lambda s: None)
+        httpx_mock.add_response(
+            url=re.compile(re.escape(self.URL) + r"\?.*"), status_code=403,
+            json={"error": "no access"},
+        )
+        with client:
+            result = client.verify_connection()
+        assert result["connected"] is False
+        assert "403" in result["error"]

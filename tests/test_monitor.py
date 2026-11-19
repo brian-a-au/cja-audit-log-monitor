@@ -1,14 +1,25 @@
 """Tests for monitoring module."""
 
+import io
 from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
+from rich.console import Console
 
 from cja_audit_log_monitor.auth import AuthenticationError
 from cja_audit_log_monitor.client import APIError
 from cja_audit_log_monitor.models import AuditLogEntry, AuditLogResponse
 from cja_audit_log_monitor.monitor import POLL_OVERLAP, AuditLogMonitor, build_poll_query
+
+
+@pytest.fixture(autouse=True)
+def _quiet_consoles(monkeypatch):
+    """Monitors built without a console print into a buffer, not the test output."""
+    monkeypatch.setattr(
+        "cja_audit_log_monitor.monitor.Console",
+        lambda *args, **kwargs: Console(*args, file=io.StringIO(), **kwargs),
+    )
 
 
 @pytest.fixture
@@ -21,7 +32,7 @@ def mock_client() -> MagicMock:
 @pytest.fixture
 def monitor(mock_client: MagicMock) -> AuditLogMonitor:
     """Create a monitor instance with mock client."""
-    return AuditLogMonitor(mock_client, interval=1)
+    return AuditLogMonitor(mock_client, console=Console(file=io.StringIO()), interval=1)
 
 
 class TestAuditLogMonitor:

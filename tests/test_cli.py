@@ -17,6 +17,17 @@ def _settings() -> MagicMock:
     return MagicMock(default_days=7, default_page_size=100, monitor_interval=60)
 
 
+@pytest.fixture(autouse=True)
+def _restore_signal_handlers():
+    """`anomalies --watch` installs process signal handlers; put the old ones back."""
+    import signal
+
+    saved = {sig: signal.getsignal(sig) for sig in (signal.SIGINT, signal.SIGTERM)}
+    yield
+    for sig, handler in saved.items():
+        signal.signal(sig, handler)
+
+
 @pytest.fixture
 def runner() -> CliRunner:
     """Create CLI test runner."""

@@ -476,6 +476,20 @@ class TestEventTimeWindows:
         fired = self._default_engine().check_batch(entries)
         assert [a.rule_name for a in fired] == ["bulk_delete", "bulk_delete"]
 
+    def test_newest_first_batch_gives_the_sorted_result(self):
+        """Pages come newest first; the result must not depend on that order."""
+        rule = AlertRule(
+            name="three", actions=[ActionType.DELETE],
+            threshold_count=3, threshold_window_minutes=10,
+        )
+        early = self._deletes(3, self.BASE - timedelta(hours=2), step_minutes=1)
+        late = self._deletes(2, self.BASE - timedelta(minutes=30), step_minutes=1)
+        oldest_first = early + late
+        sorted_fired = AlertEngine(rules=[rule]).check_batch(oldest_first)
+        newest_first = AlertEngine(rules=[rule.model_copy()]).check_batch(oldest_first[::-1])
+        assert len(sorted_fired) == 1
+        assert len(newest_first) == len(sorted_fired)
+
     def test_sensitive_delete_two_minutes_old_fires(self):
         entry = AuditLogEntry(
             action="DELETE",

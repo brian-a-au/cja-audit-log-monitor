@@ -592,3 +592,21 @@ class TestLogFilterAndBadUrls:
             assert manager.send_slack("r", "m") is False
         assert "SECRET" not in caplog.text
         assert "SECRET" not in (manager.pop_first_failure() or "")
+
+
+class TestDeliveryDetails:
+    """Webhook headers and closing the client (G50)."""
+
+    def test_webhook_sends_its_headers(self, httpx_mock):
+        webhook = WebhookConfig(url="https://example.com/hook", headers={"Authorization": "x"})
+        manager = NotificationManager(NotificationConfig(webhooks=[webhook]))
+        httpx_mock.add_response(url="https://example.com/hook", status_code=200)
+        assert manager.send_webhook(webhook, {"a": 1}) is True
+        assert httpx_mock.get_requests()[0].headers["Authorization"] == "x"
+
+    def test_close_closes_the_http_client(self):
+        manager = NotificationManager(NotificationConfig())
+        http = manager.client
+        manager.close()
+        assert http.is_closed
+        assert manager._client is None

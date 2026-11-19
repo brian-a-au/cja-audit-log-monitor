@@ -217,3 +217,34 @@ class TestTokenManagerThreads:
 
         assert tokens == ["shared"] * 8
         assert len(httpx_mock.get_requests()) == 1
+
+
+class TestTokenLifecycle:
+    """Expiry and the token request itself (G50)."""
+
+    IMS = "https://ims-na1.adobelogin.com/ims/token/v3"
+
+    def test_expired_token_is_fetched_again(
+        self, sample_settings: CJASettings, httpx_mock: HTTPXMock
+    ) -> None:
+        from datetime import UTC, datetime, timedelta
+
+        httpx_mock.add_response(url=self.IMS, json={"access_token": "a", "expires_in": 86400})
+        httpx_mock.add_response(url=self.IMS, json={"access_token": "b", "expires_in": 86400})
+        manager = TokenManager(sample_settings)
+        assert manager.get_token() == "a"
+        manager._token_expiry = datetime.now(UTC) - timedelta(seconds=1)
+        assert manager.get_token() == "b"
+
+    def test_token_request_sends_the_credentials(
+        self, sample_settings: CJASettings, httpx_mock: HTTPXMock
+    ) -> None:
+        from urllib.parse import parse_qs
+
+        httpx_mock.add_response(url=self.IMS, json={"access_token": "a", "expires_in": 86400})
+        TokenManager(sample_settings).get_token()
+        body = parse_qs(httpx_mock.get_requests()[0].content.decode())
+        assert body["grant_type"] == ["client_credentials"]
+        assert body["client_id"] == [sample_settings.client_id]
+        assert body["client_secret"] == [sample_settings.secret.get_secret_value()]
+        assert body["scope"] == [",".join(sample_settings.scopes_list)]
