@@ -11,7 +11,7 @@ from textual.widgets import Button, Checkbox, Static
 
 from cja_audit_log_monitor.alerts import FiredAlert
 from cja_audit_log_monitor.config import ConfigError
-from cja_audit_log_monitor.models import AlertRule
+from cja_audit_log_monitor.models import AlertRule, AuditLogResponse
 from cja_audit_log_monitor.notifications import NotificationManager
 from cja_audit_log_monitor.tui.app import CJAAuditApp, HelpScreen
 from cja_audit_log_monitor.tui.state import AppState
@@ -1259,6 +1259,30 @@ class TestMonitorStream:
             await _drive_poll(screen, pilot)
             query = mock_app_state.client.get_logs.call_args.args[0]
             assert query.start_date == last_good - POLL_OVERLAP
+            screen._stop_monitoring()
+
+    async def test_tui_backlog_over_limit_reports_skipped_count(
+        self, mock_app_state, monkeypatch
+    ):
+        import cja_audit_log_monitor.monitor as monitor_module
+
+        monkeypatch.setattr(monitor_module, "MAX_POLL_PAGES", 2)
+        page = _monitor_entries(0, 5)
+        mock_app_state.client.get_logs.side_effect = None
+        mock_app_state.client.get_logs.return_value = AuditLogResponse(
+            content=page, total_elements=30, total_pages=6, last=False
+        )
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40), notifications=True) as pilot:
+            screen = await _start_monitor_without_loop(app, pilot, monkeypatch)
+            await _drive_poll(screen, pilot)
+            assert await _wait_for(
+                lambda: any(
+                    "20 older events in this gap were skipped" in n.message
+                    for n in app._notifications
+                ),
+                pilot,
+            )
             screen._stop_monitoring()
 
     async def test_monitor_query_has_end_date(self, mock_app_state, monkeypatch):

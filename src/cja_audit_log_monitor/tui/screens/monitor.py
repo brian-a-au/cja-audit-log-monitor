@@ -16,7 +16,13 @@ from ...alerts import FiredAlert
 from ...config import MAX_MONITOR_INTERVAL
 from ...formatters import resolve_tcss_markup
 from ...models import AuditLogEntry
-from ...monitor import SEEN_IDS_MAX, build_poll_query, fetch_unseen
+from ...monitor import (
+    POLL_PAGE_SIZE,
+    SEEN_IDS_MAX,
+    build_poll_query,
+    fetch_unseen,
+    skipped_message,
+)
 from ...utils import RecentIds, entry_key, to_local
 from ..state import AppState
 from ..widgets import AlertSummary, LogTable
@@ -26,8 +32,6 @@ logger = logging.getLogger(__name__)
 
 # Rows kept in the live stream; older rows are dropped so long sessions stay fast.
 MONITOR_MAX_ROWS = 1000
-# Entries per page. The most pages one poll reads is shared with the CLI (fetch_unseen).
-_POLL_PAGE_SIZE = 100
 # Rows the first poll of a session shows as context. They are not alerted on or counted.
 _CONTEXT_ROWS = 100
 # Allowed polling interval, in seconds (the same limits as monitor_interval).
@@ -309,18 +313,18 @@ class MonitorScreen(ContentView):
             return
         now = datetime.now(UTC)
         first_poll = self._last_poll_time is None
-        query = build_poll_query(self._last_poll_time, now, _POLL_PAGE_SIZE)
+        query = build_poll_query(self._last_poll_time, now, POLL_PAGE_SIZE)
         warnings: list[str] = []
         try:
-            new_entries, hit_cap = fetch_unseen(
+            new_entries, skipped = fetch_unseen(
                 self._state.client.get_logs, query, self._seen, stop=stop
             )
         except Exception as e:
             if not stop.is_set():
                 self.app.call_from_thread(self._apply_poll_error, stop, e)
             return
-        if hit_cap:
-            warnings.append("High event volume detected; only the most recent pages were fetched.")
+        if skipped != 0:
+            warnings.append(skipped_message(skipped))
 
         fired: list[FiredAlert] = []
         try:
