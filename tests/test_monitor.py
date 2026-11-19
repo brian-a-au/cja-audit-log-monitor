@@ -593,7 +593,7 @@ class TestPollErrors:
         monitor = AuditLogMonitor(mock_client, console=console, interval=1)
         monitor._signal_handler(2, None)
         monitor._signal_handler(15, None)
-        stops = [c for c in console.print.call_args_list if "Stopping monitor" in str(c)]
+        stops = [c for c in console.print.call_args_list if "Monitor stopped" in str(c)]
         assert len(stops) == 1
 
 
@@ -932,3 +932,83 @@ class TestBacklog:
         ids = [e.id for e in seen]
         assert len(ids) == len(set(ids)) == len(gap) + len(deletes)
         assert "bulk_delete" in fired
+
+
+class TestCtrlC:
+    """Ctrl+C stops at once, even while a poll or a webhook send is blocked (G4)."""
+
+    def test_signal_during_a_poll_stops_at_once(self, mock_client: MagicMock) -> None:
+        import signal
+
+        console = MagicMock()
+        monitor = AuditLogMonitor(mock_client, console=console, interval=5)
+
+        def blocked_poll(query):
+            monitor._signal_handler(signal.SIGINT, None)
+            raise AssertionError("the poll went on after Ctrl+C")
+
+        mock_client.get_logs.side_effect = blocked_poll
+        monitor.start()
+        printed = " ".join(str(c) for c in console.print.call_args_list)
+        assert "Monitor stopped." in printed
+        assert monitor.stopped_by_user is True
+
+    def test_ctrl_c_stops_during_a_blocked_poll(self, fake_api, tmp_path) -> None:
+        import signal
+        import subprocess
+        import time
+
+        from .fakeapi import command
+
+        fake_api.block.set()
+        proc = subprocess.Popen(
+            [*command(), "cli", "monitor", "-i", "5", "--no-alerts"],
+            env=fake_api.env(tmp_path / "missing.yaml"),
+            cwd=tmp_path,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        try:
+            assert fake_api.blocked.wait(30), "the monitor never reached the API"
+            sent = time.monotonic()
+            proc.send_signal(signal.SIGINT)
+            out, err = proc.communicate(timeout=10)
+            elapsed = time.monotonic() - sent
+        finally:
+            fake_api.block.clear()
+            if proc.poll() is None:
+                proc.kill()
+        assert elapsed < 2, f"took {elapsed:.1f}s after Ctrl+C"
+        assert proc.returncode == 0, err
+        assert "Monitor stopped." in out + err
+
+    def test_signal_during_a_webhook_send_stops_at_once(self, mock_client: MagicMock) -> None:
+        import itertools
+        import signal
+
+        from cja_audit_log_monitor.alerts import AlertEngine
+        from cja_audit_log_monitor.models import ActionType, AlertRule
+
+        deletes = [_entry(f"d{i}", i / 10, action="DELETE") for i in range(3)]
+        mock_client.get_logs.side_effect = [
+            AuditLogResponse(content=[], last=True),
+            AuditLogResponse(content=list(reversed(deletes)), last=True),
+        ]
+        nm = MagicMock()
+        nm.is_configured.return_value = True
+        nm.pop_first_failure.return_value = None
+        monitor = AuditLogMonitor(
+            mock_client, console=MagicMock(), interval=5,
+            alert_engine=AlertEngine([AlertRule(name="any", actions=[ActionType.DELETE])]),
+            notification_manager=nm,
+        )
+        nm.notify_alert.side_effect = lambda *a: monitor._signal_handler(signal.SIGINT, None)
+        shown: list[str] = []
+        monitor._display_entry = lambda entry: shown.append(entry.id)
+        ticks = itertools.count(0, 10)
+        with patch("cja_audit_log_monitor.monitor.time.monotonic", lambda: next(ticks)):
+            with patch("cja_audit_log_monitor.monitor.time.sleep"):
+                monitor.start()
+        assert nm.notify_alert.call_count == 1
+        assert monitor.stopped_by_user is True

@@ -799,9 +799,10 @@ def monitor(
                 alert_engine=alert_engine,
                 notification_manager=nm,
             )
-            monitor_instance.start(duration=duration)
+            with client:
+                monitor_instance.start(duration=duration)
 
-        if monitor_instance.successful_polls == 0:
+        if monitor_instance.successful_polls == 0 and not monitor_instance.stopped_by_user:
             err_console.print("[red]No poll succeeded; see the errors above.[/red]")
             sys.exit(1)
 
@@ -1229,9 +1230,10 @@ def tail(
             err_console.print(f"[green]Tailing audit logs{filter_str}[/green]")
             err_console.print(f"[dim]Polling every {interval}s, Ctrl+C to stop[/dim]\n")
 
-            monitor_instance.start()
+            with client:
+                monitor_instance.start()
 
-        if monitor_instance.successful_polls == 0:
+        if monitor_instance.successful_polls == 0 and not monitor_instance.stopped_by_user:
             err_console.print("[red]No poll succeeded; see the errors above.[/red]")
             sys.exit(1)
 

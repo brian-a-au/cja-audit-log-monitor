@@ -5,6 +5,7 @@ import signal
 import threading
 import time
 from collections.abc import Callable
+from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 
 from rich.console import Console
@@ -142,6 +143,10 @@ class AuditLogMonitor:
         # How many polls worked, so a caller can tell a run where every poll failed.
         self.successful_polls = 0
         self._stop_announced = False
+        # True while a poll (and its alerts and deliveries) runs; Ctrl+C then ends it at once.
+        self._in_poll = False
+        # True once Ctrl+C or SIGTERM stopped the monitor.
+        self.stopped_by_user = False
         self._on_new_entry: Callable[[AuditLogEntry], None] | None = None
 
     def set_callback(self, callback: Callable[[AuditLogEntry], None]) -> None:
@@ -256,14 +261,29 @@ class AuditLogMonitor:
         self.console.print(text)
 
     def _signal_handler(self, signum: int, frame: object) -> None:
-        """Handle interrupt signal."""
+        """Stop the monitor. During a poll, end the poll at once.
+
+        A poll can block on the network or on a webhook for minutes, so waiting for it
+        would make Ctrl+C look broken. The entries of an interrupted poll are dropped.
+        """
         self._running = False
+        self.stopped_by_user = True
         if not self._stop_announced:
             self._stop_announced = True
-            self.console.print("\n[yellow]Stopping monitor...[/yellow]")
+            self.console.print("\n[yellow]Monitor stopped.[/yellow]")
+        if self._in_poll:
+            raise KeyboardInterrupt
 
     def _run_poll(self, status: Status) -> None:
         """Poll once, show the result, and update the status line."""
+        self._in_poll = True
+        try:
+            self._poll_and_show(status)
+        finally:
+            self._in_poll = False
+
+    def _poll_and_show(self, status: Status) -> None:
+        """The body of ``_run_poll``."""
         is_baseline = self._last_poll_time is None
         entries = self._get_new_entries()
         if self._skipped != 0:
@@ -317,7 +337,9 @@ class AuditLogMonitor:
             self.console.print()
 
             # Initial fetch sets the baseline; show the newest few entries for context.
-            with self.console.status("Waiting for first poll...") as status:
+            with suppress(KeyboardInterrupt), self.console.status(
+                "Waiting for first poll..."
+            ) as status:
                 self._status = status
                 self._run_poll(status)
 
