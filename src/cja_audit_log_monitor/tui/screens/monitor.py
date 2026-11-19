@@ -98,7 +98,7 @@ class MonitorScreen(ContentView):
             Static(resolve_tcss_markup("[$danger]● stopped[/$danger]"), id="status-indicator"),
             Static("last check — · new 0 · alerts 0", id="stats-info"),
             id="monitor-status",
-            classes="monitor-stopped",
+            classes="monitor-status monitor-stopped",
         )
 
         yield Container(

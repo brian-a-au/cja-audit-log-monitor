@@ -96,6 +96,23 @@ FooterKey:hover {
     padding: 0 1;        /* offset to compensate for the left border */
 }
 
+/* Narrow terminals (< 100 columns): the sidebar shows only the key letters. */
+Screen.-narrow #sidebar {
+    width: 5;
+}
+
+Screen.-narrow #sidebar .nav-section-label {
+    display: none;
+}
+
+Screen.-narrow #sidebar .nav-item {
+    padding: 0 1;
+}
+
+Screen.-narrow #sidebar .nav-item.active {
+    padding: 0;
+}
+
 /* ---- Main content ---- */
 #main-content {
     width: 1fr;
@@ -117,7 +134,7 @@ FooterKey:hover {
 .stat-card,
 .settings-section,
 .rule-card,
-#monitor-status {
+.monitor-status {
     height: auto;
     padding: 1 2;
     background: $surface;
@@ -146,6 +163,11 @@ FooterKey:hover {
     width: 1fr;
     height: 5;
     margin: 0 1 0 0;
+}
+
+/* Tighter padding at 80 columns so labels like "total entries" stay on one line. */
+Screen.-narrow .stat-card {
+    padding: 1 1;
 }
 
 .stat-value {
@@ -186,6 +208,7 @@ FilterBar {
     height: 2;
     dock: top;
     padding: 0 1;
+    layout: horizontal;
     background: $background;
     border-bottom: solid rgba(255, 255, 255, 0.06);
 }
@@ -193,6 +216,9 @@ FilterBar {
 FilterBar Horizontal {
     height: 1;
 }
+
+FilterBar #filter-text-row { width: 1fr; }
+FilterBar #filter-select-row { width: auto; }
 
 FilterBar Input {
     width: 1fr;
@@ -210,6 +236,20 @@ FilterBar Select {
 FilterBar Button {
     margin: 0;
 }
+
+/* Narrow terminals: two rows, search and user above the selects and reset. */
+Screen.-narrow FilterBar {
+    height: 3;
+    layout: vertical;
+}
+
+Screen.-narrow FilterBar Horizontal {
+    width: 100%;
+}
+
+Screen.-narrow FilterBar #filter-user { max-width: 100%; }
+Screen.-narrow FilterBar #filter-action { width: 1fr; }
+Screen.-narrow FilterBar #filter-component { width: 1fr; }
 
 
 /* ---- Stats panel ---- */
@@ -266,6 +306,10 @@ AlertSummary {
     border-left: heavy $danger;
 }
 
+.monitor-error {
+    border-left: heavy $warning;
+}
+
 #alert-summary {
     max-height: 8;
 }
@@ -289,6 +333,25 @@ AlertSummary {
 
 #entry-detail-panel.hidden {
     display: none;
+}
+
+/* Below 160 columns the panel covers the table: beside a 40-wide panel the table would be
+ * too narrow for time, user and action. */
+Screen.-narrow #entry-detail-panel,
+Screen.-normal #entry-detail-panel {
+    dock: none;
+    layer: above;
+    width: 100%;
+}
+
+Screen.-narrow #log-table-and-panel,
+Screen.-normal #log-table-and-panel {
+    layers: below above;
+}
+
+Screen.-narrow #log-table,
+Screen.-normal #log-table {
+    layer: below;
 }
 
 #entry-detail-panel .modal-title {
@@ -370,7 +433,7 @@ ExportDialog .modal-buttons Button {
 /* ---- Settings ---- */
 #settings-grid {
     layout: grid;
-    grid-size: 2;
+    grid-size: 1;
     grid-gutter: 1 2;
     height: auto;
     margin: 1 0 0 0;
@@ -378,6 +441,11 @@ ExportDialog .modal-buttons Button {
 
 .settings-section {
     margin: 0;
+}
+
+/* Two columns only from 160 columns: a 36-character config path needs a wide column. */
+Screen.-wide #settings-grid {
+    grid-size: 2;
 }
 
 .settings-row {
@@ -434,12 +502,12 @@ HelpScreen {
 
 #help-overlay {
     width: 56;
+    max-width: 100%;
     height: auto;
     max-height: 100%;
     padding: 1 2;
     background: $background;
     border-left: heavy $primary;
-    overflow-y: auto;
 }
 
 #help-title {
@@ -549,6 +617,28 @@ ContentView LoadingIndicator {
 #dash-right {
     width: 1fr;
     height: auto;
+}
+
+/* From 160 columns the dashboard fills the terminal: the hourly chart takes the spare rows. */
+Screen.-wide #dash-columns {
+    height: 1fr;
+    min-height: 20;
+}
+
+/* The left column takes what the fixed-width right column leaves. */
+Screen.-wide #dash-left {
+    width: 1fr;
+    height: 1fr;
+}
+
+Screen.-wide #dash-right {
+    width: 56;
+}
+
+/* 7 lines: six bar rows would not fit a shorter chart without clipping the hour axis. */
+Screen.-wide #hourly-chart {
+    height: 1fr;
+    min-height: 7;
 }
 
 /* ---- Status indicators (used in dashboard/connection text) ---- */

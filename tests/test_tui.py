@@ -540,6 +540,119 @@ class TestTableFit:
             await pilot.pause()
             assert table.columns["name"].width > 30
 
+    @pytest.mark.parametrize("size", [(80, 24), (100, 30)])
+    async def test_log_browser_fits_small_terminals(
+        self, mock_app_state, sample_audit_entries, size
+    ):
+        from cja_audit_log_monitor.tui.widgets import LogTable
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=size) as pilot:
+            await pilot.press("l")
+            await pilot.pause()
+            view = app._screens["logs"]
+            view._update_table(sample_audit_entries, 150)
+            await pilot.pause()
+            await pilot.pause()
+            assert app.query_one("#filter-search").region.width >= 12
+            assert app.query_one("#filter-user").region.width >= 12
+            bar = app.query_one("#filter-bar")
+            assert app.query_one("#filter-reset").region.right <= bar.region.right
+            table = app.query_one("#log-table", LogTable)
+            assert table.virtual_size.width <= table.scrollable_content_region.width
+            count = app.query_one("#entry-count", Static)
+            assert "150 entries" in _plain(count)
+            assert count.region.right <= app.query_one("#pagination").region.right
+
+    async def test_detail_panel_covers_table_at_80_cols(
+        self, mock_app_state, sample_audit_entries
+    ):
+        from cja_audit_log_monitor.tui.modals import EntryDetailPanel
+        from cja_audit_log_monitor.tui.widgets import LogTable
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.press("l")
+            await pilot.pause()
+            app._screens["logs"]._update_table(sample_audit_entries, 10)
+            await pilot.pause()
+            app.query_one("#log-table", LogTable).focus()
+            await pilot.press("enter")
+            await pilot.pause()
+            panel = app.query_one("#entry-detail-panel", EntryDetailPanel)
+            assert panel.is_visible()
+            assert panel.region.width >= 60
+            table = app.query_one("#log-table", LogTable)
+            assert table.virtual_size.width <= table.scrollable_content_region.width
+            assert table.scrollable_content_region.width >= 60
+
+    async def test_detail_panel_open_at_100_cols_keeps_table_readable(
+        self, mock_app_state, sample_audit_entry
+    ):
+        from cja_audit_log_monitor.tui.modals import EntryDetailPanel
+        from cja_audit_log_monitor.tui.widgets import LogTable
+
+        entries = [
+            sample_audit_entry.model_copy(
+                update={"id": f"e{i}", "user_email": f"someone.with.long.name{i}@example.com"}
+            )
+            for i in range(5)
+        ]
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(100, 30)) as pilot:
+            await pilot.press("l")
+            await pilot.pause()
+            app._screens["logs"]._update_table(entries, 5)
+            await pilot.pause()
+            table = app.query_one("#log-table", LogTable)
+            table.focus()
+            await pilot.press("enter")
+            await pilot.pause()
+            await pilot.pause()
+            panel = app.query_one("#entry-detail-panel", EntryDetailPanel)
+            assert panel.is_visible()
+            assert panel.region.contains_region(table.region)
+            assert table.virtual_size.width <= table.scrollable_content_region.width
+            users = [str(table.get_row_at(i)[1]) for i in range(table.row_count)]
+            assert all(u.endswith("…") for u in users)
+            assert all(len(u) <= table.columns["user"].width for u in users)
+            await pilot.press("tab")
+            await pilot.pause()
+            await pilot.press("escape")
+            assert await _wait_for(lambda: not panel.is_visible(), pilot)
+            assert await _wait_for(lambda: app.focused is table, pilot)
+            assert table.region.width > 0 and table.display
+
+    def test_fit_columns_hides_component_name_then_type(self):
+        from cja_audit_log_monitor.tui.widgets import LogTable
+
+        table = LogTable()
+        assert table._visible_columns(100) == ["timestamp", "user", "action", "component", "name"]
+        narrow = table._visible_columns(70)
+        assert "name" not in narrow and "component" in narrow
+        assert table._visible_columns(45) == ["timestamp", "user", "action"]
+
+    def test_truncate_uses_width_and_is_plain(self):
+        from cja_audit_log_monitor.tui.widgets import LogTable
+
+        assert LogTable._truncate("abcdefghij", 5) == "abcd…"
+        assert LogTable._truncate("abc", 5) == "abc"
+        assert LogTable._truncate("[bold]x[/bold]yyyy", 6) == "[bold…"
+
+    async def test_monitor_stream_fits_80_cols(self, mock_app_state, sample_audit_entries):
+        from cja_audit_log_monitor.tui.widgets import LogTable
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.press("m")
+            await pilot.pause()
+            table = app.query_one("#monitor-log", LogTable)
+            table.append_entries(sample_audit_entries, 100)
+            await pilot.pause()
+            await pilot.pause()
+            assert table.row_count == len(sample_audit_entries)
+            assert table.virtual_size.width <= table.scrollable_content_region.width
+
     def test_long_user_truncated_with_ellipsis(self, sample_audit_entry):
         from cja_audit_log_monitor.tui.widgets import LogTable
 
@@ -3790,3 +3903,238 @@ class TestFilterDropdownEscape:
             await pilot.press("escape")
             await pilot.pause()
             assert app.focused is not select
+
+
+class TestNarrowLayout:
+    """At 80 columns the sidebar is compact and the footer still shows quit."""
+
+    async def test_narrow_sidebar_and_footer(self, mock_app_state):
+        from textual.widgets import Footer
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            assert app.screen.has_class("-narrow")
+            assert app.query_one("#sidebar").region.width <= 6
+            footer_text = " ".join(
+                str(w.render()) for w in app.query_one(Footer).query("*") if hasattr(w, "render")
+            )
+            assert "quit" in footer_text
+
+    async def test_footer_keeps_quit_visible_with_details_open(self, mock_app_state):
+        from textual.widgets import Footer
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            await _show_and_load(app, pilot, "l")
+            table = app.query_one("#log-table")
+            assert table.row_count > 0
+            await pilot.press("enter")
+            panel = app.screen_stack[0].query_one("#entry-detail-panel")
+            assert await _wait_for(panel.is_visible, pilot)
+            await pilot.pause()
+
+            def quit_visible() -> bool:
+                keys = [
+                    w
+                    for w in app.query_one(Footer).query("FooterKey")
+                    if "quit" in str(w.render())
+                ]
+                return bool(keys) and all(k.region.right <= app.size.width for k in keys)
+
+            assert await _wait_for(quit_visible, pilot)
+
+    async def test_wide_sidebar_keeps_labels(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.pause()
+            assert app.screen.has_class("-normal")
+            assert app.query_one("#sidebar").region.width == 22
+
+    @staticmethod
+    def _label(app, nav_id: str) -> str:
+        return str(app.screen_stack[0].query_one(f"#{nav_id}").render()).strip()
+
+    async def test_command_palette_opens_with_ctrl_p(self, mock_app_state):
+        from textual.command import CommandPalette
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            await pilot.press("ctrl+p")
+            assert await _wait_for(lambda: isinstance(app.screen, CommandPalette), pilot)
+
+    async def test_narrow_nav_label_is_key_only(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            assert self._label(app, "nav-logs") == "l"
+
+    async def test_labels_follow_resize(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.pause()
+            assert self._label(app, "nav-logs") == "l logs"
+            await pilot.resize_terminal(80, 24)
+            assert await _wait_for(lambda: self._label(app, "nav-logs") == "l", pilot)
+            await pilot.resize_terminal(140, 40)
+            assert await _wait_for(lambda: self._label(app, "nav-logs") == "l logs", pilot)
+
+    async def test_resize_under_modal_updates_labels(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.pause()
+            await pilot.press("question_mark")
+            assert await _wait_for(lambda: isinstance(app.screen, HelpScreen), pilot)
+            await pilot.resize_terminal(80, 24)
+            assert await _wait_for(lambda: self._label(app, "nav-logs") == "l", pilot)
+            await pilot.press("escape")
+            assert await _wait_for(lambda: not isinstance(app.screen, HelpScreen), pilot)
+            assert self._label(app, "nav-logs") == "l"
+
+    async def test_click_nav_item_at_80_columns(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            await pilot.click("#nav-logs")
+            assert await _wait_for(lambda: app._current_screen == "logs", pilot)
+
+
+class TestConfigHelpDashboardFit:
+    """The config view, help overlay and dashboard fit every terminal size."""
+
+    @staticmethod
+    def _value_for(view, label: str):
+        from textual.widgets import Static as _Static
+
+        for row in view.query(".settings-row"):
+            texts = [str(w.render()) for w in row.query(_Static)]
+            if texts and texts[0].strip() == label:
+                return row.query(".settings-value").first()
+        raise AssertionError(f"no config row {label!r}")
+
+    async def test_config_shows_api_url_at_80_columns(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.press("c")
+            await pilot.pause()
+            value = self._value_for(app._screens["settings"], "api base url")
+            assert value.region.width >= len(str(mock_app_state.settings.api_base_url))
+            assert str(mock_app_state.settings.api_base_url) in str(value.render())
+
+    async def test_config_path_on_one_line_at_100_columns(self, mock_app_state):
+        from pathlib import Path
+
+        mock_app_state._config_path = Path("/Users/someone/.cja-audit-log-monitor/config.yaml")
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(100, 30)) as pilot:
+            await pilot.press("c")
+            await pilot.pause()
+            value = self._value_for(app._screens["settings"], "config file")
+            assert value.region.height == 1
+            assert "config.yaml" in str(value.render())
+
+    async def test_help_body_scrolls_with_keyboard_at_80x24(self, mock_app_state):
+        from textual.containers import VerticalScroll
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            await pilot.press("question_mark")
+            assert await _wait_for(lambda: isinstance(app.screen, HelpScreen), pilot)
+            body = app.screen.query_one("#help-overlay")
+            assert isinstance(body, VerticalScroll)
+            assert await _wait_for(lambda: app.screen.focused is body, pilot)
+            assert body.max_scroll_y > 0
+            await pilot.press("pagedown")
+            assert await _wait_for(lambda: body.scroll_y > 0, pilot)
+
+    async def test_dashboard_charts_grow_on_wide_terminals(self, mock_app_state):
+        heights = {}
+        for size in [(140, 42), (200, 60)]:
+            app = _make_app(mock_app_state)
+            async with app.run_test(size=size) as pilot:
+                view = await _show_and_load(app, pilot, "d")
+                heights[size] = view.query_one("#hourly-chart").region.height
+        assert heights[(200, 60)] > heights[(140, 42)], heights
+
+    async def test_monitor_status_border_follows_state(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 42)) as pilot:
+            await pilot.press("m")
+            await pilot.pause()
+            view = app._screens["monitor"]
+            row = view.query_one("#monitor-status")
+            colors = {}
+            for state in ("stopped", "running", "error"):
+                view._set_status(state)
+                await pilot.pause()
+                colors[state] = row.styles.border_left[1]
+            assert len({str(c) for c in colors.values()}) == 3, colors
+
+
+class TestWideDashboardFill:
+    """Wide dashboards fill their columns; short ones keep the chart axis."""
+
+    async def test_hourly_chart_fills_its_column_at_200x60(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(200, 60)) as pilot:
+            view = await _show_and_load(app, pilot, "d")
+            chart = view.query_one("#hourly-chart")
+            column = view.query_one("#dash-left")
+            assert await _wait_for(lambda: chart.region.width > 0, pilot)
+            widest = max(len(line.rstrip()) for line in _plain(chart).splitlines())
+            assert widest >= 0.7 * column.content_region.width, (
+                widest,
+                column.content_region.width,
+            )
+
+    @pytest.mark.parametrize("size", [(80, 24), (100, 30), (140, 42)])
+    async def test_hourly_chart_cells_unchanged_below_wide(self, mock_app_state, size):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=size) as pilot:
+            view = await _show_and_load(app, pilot, "d")
+            chart = view.query_one("#hourly-chart")
+            widest = max(len(line.rstrip()) for line in _plain(chart).splitlines())
+            assert widest <= 49, widest
+
+    async def test_hourly_chart_keeps_axis_at_160x24(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(160, 24)) as pilot:
+            view = await _show_and_load(app, pilot, "d")
+            chart = view.query_one("#hourly-chart")
+            assert chart.region.height >= 7, chart.region.height
+
+    async def test_anomalies_label_is_one_line_at_80x24(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(80, 24)) as pilot:
+            view = await _show_and_load(app, pilot, "d")
+            card = view.query_one("#stat-alerts").parent
+            labels = [w for w in card.query(".stat-label")]
+            assert labels and all(w.region.height == 1 for w in labels)
+
+    async def test_cjk_user_names_do_not_scroll_sideways_at_80x24(
+        self, mock_app_state, sample_audit_entry
+    ):
+        from rich.cells import cell_len
+
+        from cja_audit_log_monitor.tui.widgets import LogTable
+
+        entries = [
+            sample_audit_entry.model_copy(
+                update={"id": f"e{i}", "user_email": "山田太郎山田太郎" * 4}
+            )
+            for i in range(3)
+        ]
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.press("l")
+            await pilot.pause()
+            app._screens["logs"]._update_table(entries, 3)
+            await pilot.pause()
+            table = app.query_one("#log-table", LogTable)
+            assert table.virtual_size.width <= table.scrollable_content_region.width
+            users = [str(table.get_row_at(i)[1]) for i in range(table.row_count)]
+            assert all(u.endswith("…") for u in users), users
+            assert all(cell_len(u) <= table.columns["user"].width for u in users), users

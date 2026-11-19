@@ -6,7 +6,7 @@ from typing import Literal
 from textual import events
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.css.query import NoMatches
 from textual.message import Message
 from textual.screen import ModalScreen
@@ -72,7 +72,7 @@ class HelpScreen(ModalScreen):
     def compose(self) -> ComposeResult:
         """Compose help screen content."""
         key_width = max(len(key) for _, rows in HELP_SECTIONS for key, _ in rows) + 2
-        with Vertical(id="help-overlay"):
+        with VerticalScroll(id="help-overlay"):
             yield Static("keyboard shortcuts", id="help-title", classes="modal-title")
             for title, rows in HELP_SECTIONS:
                 yield Static(title.upper(), classes="section-label help-section")
@@ -93,6 +93,9 @@ class CJAAuditApp(App):
 
     TITLE = "CJA Audit Log Monitor"
     CSS_PATH = "styles.tcss"
+    # Width classes on the screen (-narrow / -normal / -wide) drive layout in styles.tcss.
+    HORIZONTAL_BREAKPOINTS = [(0, "-narrow"), (100, "-normal"), (160, "-wide")]
+    _NARROW_BELOW = HORIZONTAL_BREAKPOINTS[1][0]
 
     BINDINGS = [
         Binding("d", "switch_screen('dashboard')", "dashboard", show=False),
@@ -119,6 +122,7 @@ class CJAAuditApp(App):
         self._current_screen = "dashboard"
         self._screens: dict[str, ContentView] = {}
         self._mounted_views: set[str] = set()
+        self._nav_narrow: bool | None = None
 
     NAV_KEYS = {
         "nav-dashboard": "d",
@@ -146,7 +150,7 @@ class CJAAuditApp(App):
                 Static("NAVIGATE", classes="nav-section-label"),
                 *(
                     Static(
-                        self._nav_text(nav_id, nav_id == "nav-dashboard"),
+                        self._nav_text(nav_id, nav_id == "nav-dashboard", self.size.width),
                         id=nav_id,
                         classes="nav-item active" if nav_id == "nav-dashboard" else "nav-item",
                     )
@@ -156,12 +160,15 @@ class CJAAuditApp(App):
             ),
             ContentSwitcher(id="main-content"),
         )
-        yield Footer()
+        yield Footer(show_command_palette=False)
 
-    def _nav_text(self, nav_id: str, active: bool) -> str:
+    def _nav_text(self, nav_id: str, active: bool, width: int) -> str:
         """Sidebar label: active marker, the view's key, then its name."""
-        prefix = "▸ " if active else "  "
         key = self.NAV_KEYS[nav_id]
+        if width < self._NARROW_BELOW:
+            # Compact sidebar: just the key letter (the marker is the active style).
+            return resolve_tcss_markup(f"[$primary]{key}[/$primary]")
+        prefix = "▸ " if active else "  "
         return prefix + resolve_tcss_markup(
             f"[$primary]{key}[/$primary] {self.NAV_LABELS[nav_id]}"
         )
@@ -238,6 +245,20 @@ class CJAAuditApp(App):
         # Show dashboard by default
         await self._show_screen("dashboard")
 
+    def on_resize(self, event: events.Resize) -> None:
+        """Re-render the sidebar labels when the width crosses the narrow breakpoint.
+
+        This runs before Textual's own handler updates ``self.size``, so it uses
+        ``event.size``. Nav items are looked up on the base screen, because
+        ``App.query`` only sees the active screen (a modal may be open).
+        """
+        narrow = event.size.width < self._NARROW_BELOW
+        if narrow == self._nav_narrow:
+            return
+        self._nav_narrow = narrow
+        for item in self.screen_stack[0].query("#sidebar .nav-item"):
+            item.update(self._nav_text(item.id, item.has_class("active"), event.size.width))
+
     async def _show_screen(self, screen_name: str) -> None:
         """Show a screen in the main content area.
 
@@ -251,7 +272,7 @@ class CJAAuditApp(App):
         for item in self.query("#sidebar .nav-item"):
             is_active = item.id == f"nav-{screen_name}"
             item.set_class(is_active, "active")
-            item.update(self._nav_text(item.id, is_active))
+            item.update(self._nav_text(item.id, is_active, self.size.width))
 
         view = self._screens.get(screen_name)
         if view is None:

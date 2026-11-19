@@ -23,9 +23,9 @@ class LogBrowserScreen(ContentView):
 
     BINDINGS = [
         ("enter", "view_details", "details"),
-        ("escape", "dismiss_details", "close details"),
-        ("n", "next_page", "next page"),
-        ("p", "prev_page", "prev page"),
+        ("escape", "dismiss_details", "close"),
+        ("n", "next_page", "next"),
+        ("p", "prev_page", "prev"),
     ]
 
     def compose_content(self) -> Iterator[Widget]:
@@ -203,7 +203,7 @@ class LogBrowserScreen(ContentView):
             self.app.notify("no entry selected", severity="warning")
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
-        """Offer "close details" in the footer only while the panel is open."""
+        """Offer "close" in the footer only while the panel is open."""
         if action == "dismiss_details":
             try:
                 return self.query_one("#entry-detail-panel", EntryDetailPanel).is_visible()

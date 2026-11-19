@@ -35,10 +35,14 @@ class FilterBar(Static):
         pass
 
     def compose(self) -> ComposeResult:
-        """Compose filter bar widgets — single row, hairline divider only."""
-        with Horizontal():
+        """Compose the filter bar: a text row and a select row.
+
+        Side by side on one line normally; stacked as two lines under ``-narrow``.
+        """
+        with Horizontal(id="filter-text-row"):
             yield Input(placeholder="search", id="filter-search", compact=True)
             yield Input(placeholder="user", id="filter-user", compact=True)
+        with Horizontal(id="filter-select-row"):
             yield Select(
                 [(a.value, a.value) for a in ActionType],
                 prompt="action",
