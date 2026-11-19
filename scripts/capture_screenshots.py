@@ -29,13 +29,13 @@ from cja_audit_log_monitor.models import ActionType, AuditLogEntry, AuditLogResp
 def generate_mock_entries(count: int = 150) -> list[AuditLogEntry]:
     """Generate realistic mock audit log entries."""
     users = [
-        "alice.smith@company.com",
-        "bob.jones@company.com",
-        "carol.williams@company.com",
-        "david.brown@company.com",
-        "eva.martinez@company.com",
-        "frank.wilson@company.com",
-        "grace.taylor@company.com",
+        "alice.smith@example.com",
+        "bob.jones@example.com",
+        "carol.williams@example.com",
+        "david.brown@example.com",
+        "eva.martinez@example.com",
+        "frank.wilson@example.com",
+        "grace.taylor@example.com",
     ]
 
     actions = [
@@ -233,6 +233,8 @@ def setup_mock_state(app, entries: list[AuditLogEntry]) -> None:
     app.state._settings = mock_settings
     app.state._client = mock_client
     app.state._token_manager = MagicMock()
+    # Never show the real config location in images.
+    app.state._config_path = Path("~/.cja-audit-log-monitor/config.yaml")
 
     # Pre-populate state data
     app.state.entries = entries

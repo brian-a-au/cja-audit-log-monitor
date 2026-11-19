@@ -657,7 +657,7 @@ class TestTableFit:
         from cja_audit_log_monitor.tui.widgets import LogTable
 
         entry = sample_audit_entry.model_copy(
-            update={"user_email": "a.very.long.user.name.for.testing@example-company.com"}
+            update={"user_email": "a.very.long.user.name.for.testing@example.com"}
         )
         row = LogTable()._build_row(entry)
         user_cell = str(row[1])

@@ -24,7 +24,7 @@ The Log Browser is the workhorse for triage and forensic lookups — a paginated
 ## Use cases & benefits
 
 - **Forensics**: "who deleted this Workspace project last Tuesday?" Filter by component name, action=DELETE, narrow by date — the answer is 3 keystrokes away.
-- **User audit**: filter by `user@company.com` to get every action taken by a specific account, paginated.
+- **User audit**: filter by `user@example.com` to get every action taken by a specific account, paginated.
 - **Compliance evidence**: filter to the relevant scope, hit `e`, and you have a CSV ready to attach to a ticket or audit response.
 - **Side-panel pattern**: unlike a full-screen modal, the detail panel keeps the table cursor visible, so you can scroll through entries one-by-one without losing your place.
 - **Server-side pagination** means the table is responsive even when the underlying result set spans hundreds of thousands of entries.
