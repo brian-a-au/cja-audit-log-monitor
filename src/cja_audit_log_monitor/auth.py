@@ -4,6 +4,7 @@ import logging
 import re
 import threading
 from datetime import UTC, datetime, timedelta
+from urllib.parse import urlparse
 
 import httpx
 
@@ -20,9 +21,11 @@ class AuthenticationError(Exception):
     answering 429 or 5xx. Bad or missing credentials are not transient.
     """
 
-    def __init__(self, message: str, transient: bool = False) -> None:
+    def __init__(self, message: str, transient: bool = False, network: bool = False) -> None:
         super().__init__(message)
         self.transient = transient
+        # True when IMS could not be reached at all (DNS, refused, timed out).
+        self.network = network
 
 
 class TokenManager:
@@ -50,8 +53,11 @@ class TokenManager:
 
             token = self._get_oauth_token()
 
-            # Set expiry with 5 minute buffer
-            expiry = datetime.now(UTC) + timedelta(seconds=token.expires_in - 300)
+            # Refresh 5 minutes early, or at half the lifetime for a short-lived token.
+            # A lifetime is capped at a day, so an odd value cannot overflow the date.
+            lifetime = min(max(token.expires_in, 0), 86_400)
+            margin = 300 if lifetime > 600 else lifetime // 2
+            expiry = datetime.now(UTC) + timedelta(seconds=lifetime - margin)
             token.expires_at = expiry
             self._token = token
             self._token_expiry = expiry
@@ -87,6 +93,8 @@ class TokenManager:
                 except ValueError:
                     raise AuthenticationError("IMS returned a non-JSON response") from None
 
+                if not isinstance(token_data, dict) or not token_data.get("access_token"):
+                    raise AuthenticationError("IMS response had no access_token")
                 try:
                     return TokenInfo(
                         access_token=token_data["access_token"],
@@ -100,14 +108,20 @@ class TokenManager:
             status = e.response.status_code
             raise AuthenticationError(error_detail, transient=status == 429 or status >= 500) from e
         except httpx.RequestError as e:
-            raise AuthenticationError(f"OAuth request failed: {e}", transient=True) from e
+            host = urlparse(token_url).hostname or token_url
+            raise AuthenticationError(
+                f"could not reach {host} ({type(e).__name__})", transient=True, network=True
+            ) from e
 
     def _parse_oauth_error(self, e: httpx.HTTPStatusError) -> str:
         """Parse OAuth error response and return helpful message."""
         try:
             error_data = e.response.json()
-            error_code = error_data.get("error", "")
-            error_desc = error_data.get("error_description", "")
+            error_code = str(error_data.get("error", ""))[:100]
+            error_desc = re.sub(
+                r"client_secret=[^&\s]+", "client_secret=***",
+                str(error_data.get("error_description", "")),
+            )[:200]
 
             if error_code == "invalid_client":
                 return (

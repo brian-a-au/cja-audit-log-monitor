@@ -9,6 +9,7 @@ from email.utils import parsedate_to_datetime
 from typing import Any
 
 import httpx
+from pydantic import ValidationError
 
 from .auth import TokenManager
 from .config import CJASettings
@@ -70,8 +71,11 @@ class RateLimitError(APIError):
     """Raised when rate limited by API."""
 
     def __init__(self, retry_after: float | None = None) -> None:
-        super().__init__("Rate limited by API", status_code=429)
         self.retry_after = 30 if retry_after is None else retry_after
+        super().__init__(
+            f"Rate limited by API; the server asked to wait {self.retry_after:g} seconds",
+            status_code=429,
+        )
 
 
 class AuditLogsClient:
@@ -194,7 +198,7 @@ class AuditLogsClient:
                     raise RateLimitError(retry_after=retry_after)
 
                 if response.status_code in RETRYABLE_STATUS and attempt < retry_count - 1:
-                    delay = _retry_delay(None, attempt)
+                    delay = _retry_delay(response.headers.get("Retry-After"), attempt)
                     logger.warning(
                         "Server error %d, retrying in %g seconds (attempt %d/%d)",
                         response.status_code,
@@ -214,7 +218,11 @@ class AuditLogsClient:
                         self.token_manager.invalidate_token()
                         headers = self.token_manager.get_auth_headers()
                         continue
-                    raise APIError("Authentication failed", status_code=401)
+                    raise APIError(
+                        "Authentication failed (401). Check that ORG_ID, CLIENT_ID and "
+                        "SECRET are current in the Developer Console.",
+                        status_code=401,
+                    )
 
                 response.raise_for_status()
                 try:
@@ -233,8 +241,11 @@ class AuditLogsClient:
                 except Exception:
                     error_detail = e.response.text
 
+                detail_text = str(error_detail)
+                if len(detail_text) > 300:
+                    detail_text = detail_text[:299] + "\u2026"
                 raise APIError(
-                    f"API request failed: {e.response.status_code} - {error_detail}",
+                    f"API request failed: {e.response.status_code} - {detail_text}",
                     status_code=e.response.status_code,
                     response=error_detail,
                 ) from e
@@ -280,8 +291,22 @@ class AuditLogsClient:
                 f"API returned an unexpected response (expected a JSON object, "
                 f"got {type(data).__name__})"
             )
+        content = data.get("content")
+        if not isinstance(content, list):
+            raise APIError("API returned an unexpected response (no list of entries)")
 
-        return AuditLogResponse.model_validate(data)
+        # Read each entry on its own, so one the tool cannot read does not lose the page.
+        entries: list[AuditLogEntry] = []
+        for raw in content:
+            try:
+                entries.append(AuditLogEntry.model_validate(raw))
+            except ValidationError:
+                pass
+        skipped = len(content) - len(entries)
+        if skipped:
+            noun = "entry" if skipped == 1 else "entries"
+            logger.warning("skipped %d %s the tool could not read", skipped, noun)
+        return AuditLogResponse.model_validate({**data, "content": entries})
 
     def get_logs_paginated(
         self,
@@ -326,9 +351,12 @@ class AuditLogsClient:
 
             pages_fetched += 1
 
+            # A page of entries already seen ends paging only when the API gives no page
+            # count; otherwise late entries can still follow on later pages.
+            more_pages = bool(response.total_pages) and page + 1 < response.total_pages
             if (
                 response.last
-                or not new_entries
+                or (not new_entries and not more_pages)
                 or is_final_page(page, response)
                 or (max_pages is not None and pages_fetched >= max_pages)
             ):
@@ -407,6 +435,7 @@ class AuditLogsClient:
         self,
         component_id: str,
         component_type: str | None = None,
+        max_entries: int | None = None,
     ) -> list[AuditLogEntry]:
         """Get all audit logs for a specific component (e.g., dashboard).
 
@@ -426,7 +455,7 @@ class AuditLogsClient:
             except ValueError:
                 logger.warning("Unknown component type: %s", component_type)
 
-        return self.get_all_logs(query)
+        return self.get_all_logs(query, max_entries=max_entries)
 
     def verify_connection(self) -> dict[str, Any]:
         """Verify API connection and authentication.

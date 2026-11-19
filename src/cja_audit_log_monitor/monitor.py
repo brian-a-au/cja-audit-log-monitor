@@ -9,14 +9,13 @@ from contextlib import contextmanager, suppress
 from datetime import UTC, datetime, timedelta
 
 from rich.console import Console
-from rich.markup import escape
 from rich.status import Status
 from rich.text import Text
 
 from .alerts import AlertEngine, order_oldest_first
 from .auth import AuthenticationError
 from .client import APIError, AuditLogsClient, is_final_page
-from .formatters import get_action_color
+from .formatters import get_action_color, literal
 from .models import AuditLogEntry, AuditLogQuery, AuditLogResponse
 from .notifications import NotificationManager
 from .utils import RecentIds, entry_key, get_user_identifier
@@ -127,8 +126,8 @@ class AuditLogMonitor:
             entry_filter: Optional predicate; only entries it accepts are returned.
         """
         self.client = client
-        self.console = console or Console()
-        self.err_console = err_console or Console(stderr=True)
+        self.console = console or Console(emoji=False)
+        self.err_console = err_console or Console(stderr=True, emoji=False)
         self._status: Status | None = None
         self.interval = interval
         self.alert_engine = alert_engine
@@ -242,7 +241,7 @@ class AuditLogMonitor:
         if status is not None:
             status.stop()
         try:
-            self.err_console.print(f"[yellow]{escape(text)}[/yellow]")
+            self.err_console.print(f"[yellow]{literal(text)}[/yellow]")
         finally:
             if status is not None:
                 status.start()
@@ -341,7 +340,7 @@ class AuditLogMonitor:
         clock = datetime.now(UTC).strftime("%H:%M:%S UTC")
         if self._poll_error is not None:
             status.update(
-                f"Last poll {clock} failed: {escape(self._poll_error)}. "
+                f"Last poll {clock} failed: {literal(self._poll_error)}. "
                 f"Retrying in {self.interval}s"
             )
         elif is_baseline:

@@ -1,7 +1,7 @@
 """Tests for CLI commands."""
 
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -2362,7 +2362,7 @@ class TestConfiguredDefaults:
 
     def test_help_says_the_default_comes_from_config(self, runner: CliRunner) -> None:
         result = runner.invoke(main, ["cli", "stats", "--help"])
-        assert "from config" in " ".join(result.output.split())
+        assert "default_days from the config" in " ".join(result.output.split())
 
     def test_init_template_has_no_output_format(self, runner: CliRunner) -> None:
         with runner.isolated_filesystem():
@@ -2468,10 +2468,10 @@ class TestConsistentFlags:
         assert "default: 50" in " ".join(result.output.split())
         stats_help = runner.invoke(main, ["cli", "stats", "--help"], env={"COLUMNS": "200"})
         assert "[default: None]" not in stats_help.output
-        assert "from config" in " ".join(stats_help.output.split())
+        assert "default_days from the config" in " ".join(stats_help.output.split())
         monitor_help = runner.invoke(main, ["cli", "monitor", "--help"], env={"COLUMNS": "200"})
         assert "[default: None]" not in monitor_help.output
-        assert "from config" in " ".join(monitor_help.output.split())
+        assert "monitor_interval from the config" in " ".join(monitor_help.output.split())
 
 
 class TestJsonFormatEverywhere:
@@ -2732,8 +2732,8 @@ class TestWatchJsonAndHelpDefaults:
         monitor_help = " ".join(
             runner.invoke(main, ["cli", "monitor", "--help"], env={"COLUMNS": "200"}).output.split()
         )
-        assert f"from config ({fields['default_days'].default})" in stats_help
-        assert f"from config ({fields['monitor_interval'].default})" in monitor_help
+        assert f"{fields['default_days'].default} if unset" in stats_help
+        assert f"{fields['monitor_interval'].default} if unset" in monitor_help
 
     def test_anomalies_help_mentions_one_object_per_line(self, runner: CliRunner) -> None:
         out = " ".join(
@@ -3240,3 +3240,318 @@ class TestExportFormatAndMessages:
         assert str(target) in result.stderr.replace("\n", "")
         assert "--force" in result.stderr
         assert ".tmp" not in result.stderr
+
+
+HOSTILE_NAME = "\x1b]0;PWNED\x07\x1b[2J[/b] 日本 \ud83d"
+
+
+def _hostile_entry() -> AuditLogEntry:
+    return AuditLogEntry.model_validate({
+        "id": "h1",
+        "dateCreated": "2026-01-15T10:00:00Z",
+        "action": "DELETE",
+        "componentName": HOSTILE_NAME,
+        "componentType": "PROJECT",
+        "user": {"id": "U1", "name": HOSTILE_NAME, "email": "h@example.com"},
+        "description": HOSTILE_NAME,
+    })
+
+
+@pytest.mark.parametrize(
+    "args",
+    [["list"], ["list", "-D"], ["search"], ["show", "h1"], ["stats"], ["timeline"],
+     ["top-users"], ["user", "-u", "h@example.com"], ["list", "-F", "json"]],
+    ids=lambda a: " ".join(a),
+)
+def test_hostile_names_on_every_output(args) -> None:
+    """Review Focus 4: odd names reach no terminal as control codes, and nothing crashes."""
+    entry = _hostile_entry()
+    client = MagicMock()
+    client.__enter__ = MagicMock(return_value=client)
+    client.__exit__ = MagicMock(return_value=False)
+    client.get_all_logs.return_value = [entry]
+    client.get_logs_paginated.side_effect = lambda *a, **k: iter([entry])
+    client.get_logs_sample.return_value = ([entry], 1)
+    with patch("cja_audit_log_monitor.cli.get_client", return_value=(client, _settings())):
+        result = CliRunner().invoke(main, ["cli", *args])
+    assert result.exit_code == 0, result.output
+    assert "\x1b]0;" not in result.output
+    assert "\x1b[2J" not in result.output
+    if "json" in args:
+        json.loads(result.stdout)
+
+
+@pytest.mark.parametrize("fmt", ["json", "csv", "tsv"])
+def test_hostile_names_in_exports(fmt) -> None:
+    from io import StringIO
+
+    from cja_audit_log_monitor.export import export_entries
+
+    out = StringIO()
+    export_entries([_hostile_entry()], out, output_format=fmt)
+    assert "\x1b" not in out.getvalue()
+
+
+def test_hostile_names_in_slack() -> None:
+    from cja_audit_log_monitor.notifications import NotificationManager
+
+    payload = NotificationManager()._build_slack_payload("r", "m", _hostile_entry())
+    assert "\x1b" not in json.dumps(payload, ensure_ascii=False)
+
+
+@pytest.mark.parametrize("encoding", ["cp1252", "ascii"])
+@pytest.mark.parametrize(
+    "args",
+    [["list"], ["search"], ["query", "--today"], ["stats"], ["verify"], ["alerts", "list"],
+     ["timeline"], ["show", "id-1"]],
+    ids=lambda a: " ".join(a),
+)
+def test_commands_run_on_a_narrow_stdout(fake_api, tmp_path, encoding, args) -> None:
+    import subprocess
+
+    from .fakeapi import command, raw_entry
+
+    fake_api.entries = [raw_entry(1, componentName="日本 report")]
+    env = fake_api.env(tmp_path / "missing.yaml")
+    env["PYTHONIOENCODING"] = encoding
+    result = subprocess.run(
+        [*command(), "cli", *args], env=env, cwd=tmp_path,
+        capture_output=True, timeout=60,
+    )
+    assert result.returncode == 0, result.stderr.decode(errors="replace")
+    assert b"UnicodeEncodeError" not in result.stderr
+
+
+def test_csv_to_stdout_is_utf8_on_cp1252(fake_api, tmp_path) -> None:
+    import subprocess
+
+    from .fakeapi import command, raw_entry
+
+    fake_api.entries = [raw_entry(1, componentName="日本 report")]
+    env = fake_api.env(tmp_path / "missing.yaml")
+    env["PYTHONIOENCODING"] = "cp1252"
+    result = subprocess.run(
+        [*command(), "cli", "export", "-F", "csv", "-o", "-"], env=env, cwd=tmp_path,
+        capture_output=True, timeout=60,
+    )
+    assert result.returncode == 0, result.stderr.decode(errors="replace")
+    assert "日本 report" in result.stdout.decode("utf-8")
+
+
+class TestOneLineErrors:
+    @pytest.mark.parametrize(
+        "args", [["list", "-d", "100000000"], ["anomalies", "--lookback", "100000000"],
+                 ["stats", "-d", "4000"]],
+        ids=["list", "anomalies", "stats"],
+    )
+    def test_huge_days_is_a_usage_error(self, runner, args) -> None:
+        result = runner.invoke(main, ["cli", *args])
+        assert result.exit_code == 2
+
+    def test_unexpected_error_is_one_line(self, runner) -> None:
+        client = MagicMock()
+        client.__enter__ = MagicMock(return_value=client)
+        client.__exit__ = MagicMock(return_value=False)
+        client.get_all_logs.side_effect = ZeroDivisionError("odd")
+        with patch("cja_audit_log_monitor.cli.get_client", return_value=(client, _settings())):
+            result = runner.invoke(main, ["cli", "list"])
+        assert result.exit_code == 1
+        lines = [line for line in result.stderr.splitlines() if line.strip()]
+        assert lines == ["Unexpected error: ZeroDivisionError: odd"]
+
+
+class TestFiltersAndDates:
+    """Filters, limits and date ranges do what the flags say (G28, G29, G45)."""
+
+    @staticmethod
+    def _client():
+        client = MagicMock()
+        client.__enter__ = MagicMock(return_value=client)
+        client.__exit__ = MagicMock(return_value=False)
+        client.get_all_logs.return_value = []
+        client.get_component_logs.return_value = []
+        return client
+
+    def _run(self, args):
+        client = self._client()
+        with patch("cja_audit_log_monitor.cli.get_client", return_value=(client, _settings())):
+            result = CliRunner().invoke(main, ["cli", *args])
+        return result, client
+
+    @pytest.mark.parametrize("command", [["component", "-i", "x"], ["dashboard", "-i", "x"]])
+    def test_component_and_dashboard_fetch_only_the_limit(self, command) -> None:
+        result, client = self._run([*command, "-l", "5"])
+        assert result.exit_code == 0, result.output
+        assert client.get_component_logs.call_args.kwargs.get("max_entries") == 5
+
+    @pytest.mark.parametrize(
+        "args",
+        [["search", "-u", ""], ["search", "--component-id", " "], ["search", "--desc", ""],
+         ["query", "-u", ""], ["timeline", "-u", " "], ["tail", "-u", ""],
+         ["tail", "--component-id", ""]],
+        ids=lambda a: " ".join(a),
+    )
+    def test_blank_filter_is_a_usage_error(self, args) -> None:
+        result, client = self._run(args)
+        assert result.exit_code == 2
+        client.get_all_logs.assert_not_called()
+
+    def test_filter_values_are_stripped(self) -> None:
+        result, client = self._run(["user", "-u", " a@example.com "])
+        assert result.exit_code == 0
+        query = client.get_all_logs.call_args.args[0]
+        assert query.to_query_params()["userEmail"] == "a@example.com"
+
+    @pytest.mark.parametrize("value", ["2026-01-15", "20260115"])
+    def test_end_date_forms_get_end_of_day(self, value) -> None:
+        from cja_audit_log_monitor.cli import parse_date
+
+        parsed = parse_date(value, end_of_day=True)
+        assert (parsed.hour, parsed.minute, parsed.second) == (23, 59, 59)
+
+    def test_ambiguous_date_is_a_usage_error(self) -> None:
+        result, _ = self._run(["search", "-e", "2026-1-5"])
+        assert result.exit_code == 2
+
+    @pytest.mark.parametrize("args", [["-s", "2999-01-01"], ["-e", "1999-01-01"]])
+    def test_one_sided_range_is_checked(self, args) -> None:
+        result, client = self._run(["search", *args])
+        assert result.exit_code == 2
+        client.get_all_logs.assert_not_called()
+
+    def test_offset_dates_are_sent_in_utc(self) -> None:
+        from cja_audit_log_monitor.models import AuditLogQuery
+
+        query = AuditLogQuery(
+            start_date=datetime(2026, 1, 15, 5, 0, tzinfo=timezone(timedelta(hours=5))),
+            end_date=datetime(2026, 1, 15, 6, 0, tzinfo=timezone(timedelta(hours=5))),
+        )
+        params = query.to_query_params()
+        assert params["startDate"] == "2026-01-15T00:00:00+0000"
+        assert params["endDate"] == "2026-01-15T01:00:00+0000"
+
+
+class TestMessagesAndHelp:
+    """Messages, help text and small CLI items (G45, G47, G48)."""
+
+    @staticmethod
+    def _client():
+        client = MagicMock()
+        client.__enter__ = MagicMock(return_value=client)
+        client.__exit__ = MagicMock(return_value=False)
+        client.get_all_logs.return_value = []
+        return client
+
+    def test_empty_stats_json_has_user_count(self, runner) -> None:
+        with patch("cja_audit_log_monitor.cli.get_client",
+                   return_value=(self._client(), _settings())):
+            result = runner.invoke(main, ["cli", "stats", "-F", "json"])
+        assert result.exit_code == 0, result.output
+        assert json.loads(result.stdout)["statistics"]["user_count"] == 0
+
+    def test_ctrl_c_on_a_single_anomaly_scan_exits_1(self, runner) -> None:
+        client = self._client()
+        client.get_all_logs.side_effect = KeyboardInterrupt
+        with patch("cja_audit_log_monitor.cli.get_client", return_value=(client, _settings())):
+            result = runner.invoke(main, ["cli", "anomalies"])
+        assert result.exit_code == 1
+
+    def test_show_prints_ids_and_dashes(self, runner) -> None:
+        entry = AuditLogEntry(id="e1", user_id="U1@AdobeID", user_name="Una",
+                              component_id="c-9", action="EDIT")
+        client = self._client()
+        client.get_logs_paginated.side_effect = lambda *a, **k: iter([entry])
+        client.get_all_logs.return_value = [entry]
+        with patch("cja_audit_log_monitor.cli.get_client", return_value=(client, _settings())):
+            result = runner.invoke(main, ["cli", "show", "e1"])
+        assert result.exit_code == 0, result.output
+        for text in ("e1", "U1@AdobeID", "Una", "c-9"):
+            assert text in result.stdout
+        assert "None" not in result.stdout
+
+    @pytest.mark.parametrize("text", ["a\\[b]", "end\\\\", "end\\\\\\", ":smile: x"])
+    def test_names_print_exactly(self, runner, text) -> None:
+        entry = AuditLogEntry(id="e1", action="EDIT", component_name=text)
+        client = self._client()
+        client.get_all_logs.return_value = [entry]
+        with patch("cja_audit_log_monitor.cli.get_client", return_value=(client, _settings())):
+            result = runner.invoke(main, ["cli", "list", "-D"])
+        assert text in result.stdout.replace("\n", "")
+
+    def test_403_names_the_product_profile(self, runner) -> None:
+        from cja_audit_log_monitor.client import APIError
+
+        client = self._client()
+        client.get_all_logs.side_effect = APIError(
+            "API request failed: 403 - {'error_code': '403003'}", status_code=403
+        )
+        with patch("cja_audit_log_monitor.cli.get_client", return_value=(client, _settings())):
+            result = runner.invoke(main, ["cli", "list"])
+        assert "product profile" in result.stderr
+
+    def test_rate_limit_message_shows_the_wait(self) -> None:
+        from cja_audit_log_monitor.client import RateLimitError
+
+        assert "45" in str(RateLimitError(retry_after=45))
+
+    def test_verify_prints_authentication_failed(self, runner) -> None:
+        from cja_audit_log_monitor.auth import AuthenticationError
+
+        client = self._client()
+        client.verify_connection.side_effect = AuthenticationError("invalid_client")
+        with patch("cja_audit_log_monitor.cli.get_client", return_value=(client, _settings())):
+            result = runner.invoke(main, ["cli", "verify"])
+        assert result.exit_code == 1
+        assert "Authentication failed:" in result.stdout
+
+    @pytest.mark.parametrize(
+        ("command", "option"),
+        [("search", "--component"), ("export", "--action"), ("export", "--component"),
+         ("query", "--action"), ("query", "--component"), ("timeline", "--action"),
+         ("timeline", "--component")],
+    )
+    def test_repeatable_options_say_so(self, runner, command, option) -> None:
+        result = runner.invoke(main, ["cli", command, "--help"], terminal_width=200)
+        line = next(line for line in result.output.splitlines() if option in line)
+        assert "more than once" in line
+
+    def test_date_help_names_utc_and_end_of_day(self, runner) -> None:
+        result = runner.invoke(main, ["cli", "search", "--help"], terminal_width=300)
+        text = " ".join(result.output.split())
+        assert "UTC" in text and "end of that day" in text
+
+    def test_days_help_does_not_claim_a_fixed_default(self, runner) -> None:
+        result = runner.invoke(main, ["cli", "stats", "--help"], terminal_width=300)
+        assert "from config (7)" not in result.output
+        assert "default_days" in result.output
+
+    @pytest.mark.parametrize("command", ["user", "component", "dashboard"])
+    def test_limit_help_is_honest(self, runner, command) -> None:
+        result = runner.invoke(main, ["cli", command, "--help"], terminal_width=200)
+        assert "Show all audit events" not in result.output
+
+
+def test_verify_says_authentication_failed_for_an_ims_failure(runner) -> None:
+    client = MagicMock()
+    client.__enter__ = MagicMock(return_value=client)
+    client.__exit__ = MagicMock(return_value=False)
+    client.verify_connection.return_value = {
+        "connected": False, "authenticated": False, "org_id": "o", "api_url": "u",
+        "error": "invalid_client",
+    }
+    with patch("cja_audit_log_monitor.cli.get_client", return_value=(client, _settings())):
+        result = runner.invoke(main, ["cli", "verify"])
+    assert result.exit_code == 1
+    assert "Authentication failed: invalid_client" in result.stdout
+
+
+def test_dns_failure_is_a_network_error_naming_the_host(sample_settings, httpx_mock) -> None:
+    import httpx
+
+    from cja_audit_log_monitor.auth import TokenManager
+
+    httpx_mock.add_exception(httpx.ConnectError("[Errno 8] nodename nor servname"))
+    with pytest.raises(Exception) as info:
+        TokenManager(sample_settings).get_token()
+    assert "could not reach ims-na1.adobelogin.com" in str(info.value)
+    assert getattr(info.value, "network", False) is True

@@ -304,11 +304,11 @@ class TestTimestampTimezone:
         assert entry.timestamp is not None
         assert entry.timestamp.tzinfo == UTC
 
-    def test_aware_timestamp_is_kept(self) -> None:
+    def test_aware_timestamp_is_converted_to_utc(self) -> None:
         raw = {"id": "a", "dateCreated": "2026-11-18T10:00:00+02:00"}
         entry = AuditLogEntry.model_validate(raw)
-        assert entry.timestamp is not None
-        assert entry.timestamp.utcoffset() == timedelta(hours=2)
+        assert entry.timestamp == datetime(2026, 11, 18, 8, 0, tzinfo=UTC)
+        assert entry.timestamp.utcoffset() == timedelta(0)
 
 
 def test_response_last_defaults_to_false() -> None:
@@ -338,3 +338,37 @@ class TestAlertRuleValidation:
         rule = AlertRule(name="x", actions=["delete", ActionType.EXPORT], components=["data_view"])
         assert rule.actions == ["DELETE", "EXPORT"]
         assert rule.components == ["DATA_VIEW"]
+
+
+class TestControlCharacters:
+    """Control characters in entry text never reach a terminal (G31)."""
+
+    HOSTILE = "name\x1b]0;PWNED\x07\x1b[2J\x1b[41mRED\x9b\x7f\ttab\rcr"
+
+    def test_printable_replaces_control_characters(self) -> None:
+        from cja_audit_log_monitor.models import printable
+
+        text = printable(self.HOSTILE + "\nline")
+        assert "\x1b" not in text and "\x07" not in text and "\x9b" not in text
+        assert "\x7f" not in text and "\r" not in text
+        assert "\ttab" not in text and " tab" in text
+        assert "\nline" in text  # a line break stays
+
+    def test_entry_text_fields_are_printable(self) -> None:
+        entry = AuditLogEntry.model_validate({
+            "id": "1",
+            "componentName": self.HOSTILE,
+            "description": self.HOSTILE,
+            "user": {"id": "U1", "name": self.HOSTILE, "email": "e\x1b@example.com"},
+        })
+        for value in (entry.component_name, entry.description, entry.user_name,
+                      entry.user_email):
+            assert "\x1b" not in value
+
+
+def test_offset_timestamp_is_converted_to_utc() -> None:
+    entry = AuditLogEntry.model_validate(
+        {"id": "1", "dateCreated": "2026-11-18T23:30:00.000-07:00"}
+    )
+    assert entry.timestamp == datetime(2026, 11, 19, 6, 30, tzinfo=UTC)
+    assert entry.timestamp.utcoffset() == timedelta(0)

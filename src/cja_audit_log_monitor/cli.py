@@ -2,6 +2,7 @@
 
 import asyncio
 import functools
+import io
 import json
 import logging
 import os
@@ -10,15 +11,15 @@ import sys
 import threading
 import time
 from collections.abc import Callable, Iterator
+from contextlib import contextmanager, suppress
 from datetime import UTC, datetime, timedelta
 from itertools import islice
 from pathlib import Path
-from typing import Any, ParamSpec, TypeVar
+from typing import Any, ParamSpec, TextIO, TypeVar
 
 import click
 from rich.console import Console
 from rich.logging import RichHandler
-from rich.markup import escape
 from rich.text import Text
 
 from . import __version__
@@ -26,6 +27,7 @@ from .alerts import AlertEngine, analyze_for_anomalies, engine_rules
 from .auth import AuthenticationError, TokenManager
 from .client import MAX_PAGE_SIZE, APIError, AuditLogsClient, RateLimitError
 from .config import (
+    MAX_DAYS,
     CJASettings,
     ConfigError,
     create_default_config,
@@ -39,8 +41,9 @@ from .formatters import (
     format_single_entry,
     format_stats_panel,
     format_user_stats_table,
+    literal,
 )
-from .models import ActionType, AuditLogEntry, AuditLogQuery, ComponentType
+from .models import API_EARLIEST, ActionType, AuditLogEntry, AuditLogQuery, ComponentType
 from .monitor import AuditLogMonitor
 from .notifications import AnomalyDedupFilter, NotificationManager
 from .stats import build_date_range_query, calculate_stats, generate_report
@@ -51,14 +54,17 @@ R = TypeVar("R")
 
 # Shared validators: counts must be at least 1; polling intervals at least 5 seconds.
 POSITIVE_INT = click.IntRange(min=1)
+# A day count, up to about ten years, so a typo cannot overflow a date.
+DAYS = click.IntRange(min=1, max=MAX_DAYS)
+LOOKBACK_HOURS = click.IntRange(min=1, max=MAX_DAYS * 24)
 INTERVAL_SECONDS = click.IntRange(min=5)
 
 
 def days_option(what: str) -> Callable[[Callable[P, R]], Callable[P, R]]:
     """The --days option. Left unset, the command uses the configured default_days."""
     return click.option(
-        "--days", "-d", type=POSITIVE_INT, default=None,
-        help=f"{what} (default: from config (7))",
+        "--days", "-d", type=DAYS, default=None,
+        help=f"{what} (default: default_days from the config, 7 if unset)",
     )
 
 
@@ -74,18 +80,19 @@ def output_format_option(func: Callable[P, R]) -> Callable[P, R]:
 
 
 def require_text(ctx: click.Context, param: click.Parameter, value: str | None) -> str | None:
-    """Reject an empty or blank ID, which would silently match everything."""
+    """Reject an empty or blank filter, which would silently match everything; strip it."""
     if value is not None and not value.strip():
         raise click.BadParameter("must not be empty")
-    return value
+    return value.strip() if value is not None else None
 
 
 def days_or_default(days: int | None, settings: CJASettings) -> int:
     """The --days value, or the configured default_days when the flag was not given."""
     return settings.default_days if days is None else days
 
-console = Console()
-err_console = Console(stderr=True)
+# emoji=False: a name such as ":smile:" prints as written.
+console = Console(emoji=False)
+err_console = Console(stderr=True, emoji=False)
 
 
 def emit_json(data: Any, compact: bool = False) -> None:
@@ -128,16 +135,33 @@ def handle_cli_errors(func: Callable[P, R]) -> Callable[P, R]:
             label = "Configuration error"
             error: Exception = e
         except AuthenticationError as e:
-            label = "Authentication error"
+            label = "Network error" if e.network else "Authentication error"
             error = e
         except APIError as e:
             label = "API error"
             error = e
+            if e.status_code == 403:
+                error = APIError(
+                    f"{e}. Check that the service account is in a product profile with "
+                    "CJA access in the Admin Console.",
+                    status_code=403,
+                )
         except OSError as e:
             label = "File error"
             error = e
+        except (click.ClickException, click.exceptions.Abort, click.exceptions.Exit):
+            raise  # usage errors and Ctrl+C keep Click's own handling and exit codes
+        except Exception as e:
+            # A bug or an odd answer the tool did not expect: one line, and the
+            # traceback only with -v.
+            logging.getLogger(__name__).debug("Unexpected error", exc_info=True)
+            err_console.print(
+                f"[red]Unexpected error:[/red] {literal(type(e).__name__)}: {literal(str(e))}",
+                soft_wrap=True,
+            )
+            sys.exit(1)
         # soft_wrap: one logical line, however long the path, so the terminal wraps it.
-        err_console.print(f"[red]{label}:[/red] {escape(str(error))}", soft_wrap=True)
+        err_console.print(f"[red]{label}:[/red] {literal(str(error))}", soft_wrap=True)
         sys.exit(1)
 
     return wrapper
@@ -158,6 +182,36 @@ def check_output_path(output: Path | None, force: bool) -> Path | None:
     if exists and not force:
         raise FileExistsError(f"{path} already exists; use --force to overwrite")
     return path
+
+
+def _tolerate_narrow_encodings() -> None:
+    """Print a character the console cannot encode as '?' instead of crashing.
+
+    On Windows a pipe or redirect gets a narrow encoding such as cp1252, which has no
+    place for the tool's icons and bars, or for a CJK name. Exports to stdout write
+    UTF-8 bytes instead (see ``utf8_stdout``), so their data is never changed.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            with suppress(Exception):
+                reconfigure(errors="replace")
+
+
+@contextmanager
+def utf8_stdout(newline: str | None = None) -> Iterator[TextIO]:
+    """A text stream that writes UTF-8 to stdout, whatever the console encoding."""
+    buffer = getattr(sys.stdout, "buffer", None)
+    if buffer is None:  # e.g. a test runner's string stream: already text, any encoding
+        yield sys.stdout
+        return
+    sys.stdout.flush()
+    stream = io.TextIOWrapper(buffer, encoding="utf-8", newline=newline, write_through=True)
+    try:
+        yield stream
+    finally:
+        stream.flush()
+        stream.detach()  # leave sys.stdout's buffer open
 
 
 def setup_logging(verbose: bool) -> None:
@@ -184,53 +238,62 @@ def get_client(config_path: Path | None = None) -> tuple[AuditLogsClient, CJASet
     return client, settings
 
 
-_DATE_ONLY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_DATE_ONLY = re.compile(r"^\d{4}-\d{2}-\d{2}$|^\d{8}$")
+_HAS_TIME = re.compile(r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}")
+_DATE_FORMS = "use YYYY-MM-DD, YYYYMMDD, or an ISO date and time such as 2026-01-15T10:00Z"
 
 
 def parse_date(date_str: str | None, end_of_day: bool = False) -> datetime | None:
-    """Parse a date string to a timezone-aware datetime (UTC when no zone is given).
+    """Parse a date string to a timezone-aware UTC datetime.
 
-    A date-only value means midnight UTC, or 23:59:59 UTC with ``end_of_day=True`` so an
-    end date covers the whole day. Values that carry a time are used as given.
+    A date-only value (``YYYY-MM-DD`` or ``YYYYMMDD``) means midnight UTC, or 23:59:59 UTC
+    with ``end_of_day=True`` so an end date covers the whole day. A value with a time is
+    read as UTC when it has no zone, and converted to UTC when it has one.
     """
     if not date_str:
         return None
 
     normalized = date_str.strip()
-    date_only = bool(_DATE_ONLY.match(normalized))
-    if normalized.endswith("Z"):
+    if normalized.endswith(("Z", "z")):
         normalized = normalized[:-1] + "+00:00"
-
-    parsed: datetime | None = None
+    date_only = bool(_DATE_ONLY.match(normalized))
+    if not date_only and not _HAS_TIME.match(normalized):
+        raise click.BadParameter(f"{date_str!r} is not a date: {_DATE_FORMS}")
     try:
         parsed = datetime.fromisoformat(normalized)
     except ValueError:
-        for fmt in ("%Y-%m-%d", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%d %H:%M:%S"):
-            try:
-                parsed = datetime.strptime(normalized, fmt)
-                break
-            except ValueError:
-                continue
-    if parsed is None:
-        raise click.BadParameter(f"Invalid date format: {date_str}")
+        raise click.BadParameter(f"{date_str!r} is not a date: {_DATE_FORMS}") from None
 
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=UTC)
     if date_only and end_of_day:
         parsed = parsed.replace(hour=23, minute=59, second=59)
-    return parsed
+    return parsed.astimezone(UTC)
 
 
 def parse_date_range(
     start_date: str | None, end_date: str | None
 ) -> tuple[datetime | None, datetime | None]:
-    """Parse ``--start-date`` and ``--end-date``; reject a start that is after the end."""
+    """Parse ``--start-date`` and ``--end-date``; reject a range that ends before it starts.
+
+    With only one of the two, the other is the default the API is sent (the earliest
+    date, or now), and the range is checked against it.
+    """
     start = parse_date(start_date)
     end = parse_date(end_date, end_of_day=True)
     if start and end and start > end:
         raise click.BadParameter(
             f"--start-date ({start_date}) is after --end-date ({end_date})",
             param_hint="--start-date",
+        )
+    if start and not end and start > datetime.now(UTC):
+        raise click.BadParameter(
+            f"--start-date ({start_date}) is in the future", param_hint="--start-date"
+        )
+    if end and not start and end < API_EARLIEST:
+        raise click.BadParameter(
+            f"--end-date ({end_date}) is before {API_EARLIEST:%Y-%m-%d}",
+            param_hint="--end-date",
         )
     return start, end
 
@@ -283,6 +346,7 @@ def main(ctx: click.Context, verbose: bool, config: Path | None) -> None:
     Use 'cja-audit-log-monitor cli <command>' for traditional CLI commands.
     """
     setup_logging(verbose)
+    _tolerate_narrow_encodings()
     ctx.ensure_object(dict)
     ctx.obj["verbose"] = verbose
     ctx.obj["config_path"] = config
@@ -345,7 +409,7 @@ def cli(ctx: click.Context) -> None:
     "--component",
     "-C",
     multiple=True,
-    help="Filter by component type (can specify multiple)",
+    help="Filter by component type (can be given more than once)",
 )
 @click.option("--details", "-D", is_flag=True, help="Show additional details")
 @output_format_option
@@ -390,23 +454,29 @@ def cli_list(
 
 
 @cli.command()
-@click.option("--user", "-u", help="Filter by user ID or email")
+@click.option("--user", "-u", callback=require_text, help="Filter by user ID or email")
 @click.option(
     "--action",
     "-a",
     multiple=True,
-    help="Filter by action type (can specify multiple)",
+    help="Filter by action type (can be given more than once)",
 )
-@click.option("--start-date", "-s", help="Start date (YYYY-MM-DD)")
-@click.option("--end-date", "-e", help="End date (YYYY-MM-DD)")
+@click.option(
+    "--start-date", "-s",
+    help="Start date in UTC: YYYY-MM-DD, YYYYMMDD, or an ISO date and time",
+)
+@click.option(
+    "--end-date", "-e",
+    help="End date in UTC, same forms; a date without a time means the end of that day",
+)
 @click.option(
     "--component",
     "-C",
     multiple=True,
-    help="Filter by component type",
+    help="Filter by component type (can be given more than once)",
 )
-@click.option("--component-id", help="Filter by specific component ID")
-@click.option("--description", "--desc", help="Search in description")
+@click.option("--component-id", callback=require_text, help="Filter by specific component ID")
+@click.option("--description", "--desc", callback=require_text, help="Search in description")
 @click.option("--limit", "-l", type=POSITIVE_INT, default=100, help="Maximum entries to return")
 @click.option("--details", "-D", is_flag=True, help="Show additional details")
 @output_format_option
@@ -472,14 +542,13 @@ def search(
 @click.pass_context
 @handle_cli_errors
 def dashboard(ctx: click.Context, dashboard_id: str, limit: int, output_format: str) -> None:
-    """Show all audit events for a specific dashboard/project."""
+    """Show audit events for a specific dashboard/project (newest first, -l limits)."""
     config_path = ctx.obj.get("config_path")
 
     client, settings = get_client(config_path)
 
     with client:
-        entries = client.get_component_logs(dashboard_id, "PROJECT")
-        entries = entries[:limit]
+        entries = client.get_component_logs(dashboard_id, "PROJECT", max_entries=limit)
 
     if output_format == "json":
         from .export import entry_to_dict
@@ -492,10 +561,10 @@ def dashboard(ctx: click.Context, dashboard_id: str, limit: int, output_format: 
         return
 
     if not entries:
-        console.print(f"[dim]No audit logs found for dashboard {escape(dashboard_id)}[/dim]")
+        console.print(f"[dim]No audit logs found for dashboard {literal(dashboard_id)}[/dim]")
         return
 
-    console.print(f"[bold]Audit history for dashboard:[/bold] {escape(dashboard_id)}\n")
+    console.print(f"[bold]Audit history for dashboard:[/bold] {literal(dashboard_id)}\n")
     table = format_logs_table(entries, show_details=True)
     console.print(table)
     console.print(f"\n[dim]Found {len(entries)} entries[/dim]")
@@ -513,7 +582,7 @@ def dashboard(ctx: click.Context, dashboard_id: str, limit: int, output_format: 
 def user(
     ctx: click.Context, user_id: str, days: int | None, limit: int, output_format: str
 ) -> None:
-    """Show all audit events for a specific user."""
+    """Show audit events for a specific user (newest first, -l limits)."""
     config_path = ctx.obj.get("config_path")
 
     client, settings = get_client(config_path)
@@ -529,7 +598,7 @@ def user(
         if output_format == "json":
             emit_json({"user": user_id, "entries": [], "count": 0})
         else:
-            console.print(f"[dim]No audit logs found for user {escape(user_id)}[/dim]")
+            console.print(f"[dim]No audit logs found for user {literal(user_id)}[/dim]")
         return
 
     if output_format == "json":
@@ -542,7 +611,7 @@ def user(
         }
         emit_json(data)
     else:
-        console.print(f"[bold]Audit history for user:[/bold] {escape(user_id)}\n")
+        console.print(f"[bold]Audit history for user:[/bold] {literal(user_id)}\n")
         table = format_logs_table(entries, show_details=True)
         console.print(table)
         console.print(f"\n[dim]Found {len(entries)} entries[/dim]")
@@ -570,14 +639,13 @@ def component(
     limit: int,
     output_format: str,
 ) -> None:
-    """Show all audit events for a specific component."""
+    """Show audit events for a specific component (newest first, -l limits)."""
     config_path = ctx.obj.get("config_path")
 
     client, settings = get_client(config_path)
 
     with client:
-        entries = client.get_component_logs(component_id, component_type)
-        entries = entries[:limit]
+        entries = client.get_component_logs(component_id, component_type, max_entries=limit)
 
     if not entries:
         if output_format == "json":
@@ -588,7 +656,7 @@ def component(
                 "count": 0,
             })
         else:
-            console.print(f"[dim]No audit logs found for component {escape(component_id)}[/dim]")
+            console.print(f"[dim]No audit logs found for component {literal(component_id)}[/dim]")
         return
 
     if output_format == "json":
@@ -603,7 +671,7 @@ def component(
         emit_json(data)
     else:
         type_str = f" ({component_type})" if component_type else ""
-        header = f"[bold]Audit history for component:[/bold] {escape(component_id)}{type_str}"
+        header = f"[bold]Audit history for component:[/bold] {literal(component_id)}{type_str}"
         console.print(f"{header}\n")
         table = format_logs_table(entries, show_details=True)
         console.print(table)
@@ -625,20 +693,26 @@ def component(
     required=True,
     help="Output file path, or - for stdout",
 )
-@click.option("--start-date", "-s", help="Start date (YYYY-MM-DD)")
-@click.option("--end-date", "-e", help="End date (YYYY-MM-DD)")
+@click.option(
+    "--start-date", "-s",
+    help="Start date in UTC: YYYY-MM-DD, YYYYMMDD, or an ISO date and time",
+)
+@click.option(
+    "--end-date", "-e",
+    help="End date in UTC, same forms; a date without a time means the end of that day",
+)
 @days_option("Number of days (if no date range)")
 @click.option(
     "--action",
     "-a",
     multiple=True,
-    help="Filter by action type",
+    help="Filter by action type (can be given more than once)",
 )
 @click.option(
     "--component",
     "-C",
     multiple=True,
-    help="Filter by component type",
+    help="Filter by component type (can be given more than once)",
 )
 @click.option("--pretty/--compact", default=True, help="Pretty print JSON")
 @click.option(
@@ -670,7 +744,7 @@ def export(
         suffix = Path(str(output)).suffix.lower().lstrip(".")
         if suffix in {"json", "csv", "tsv"}:
             format = suffix
-    destination: Any = sys.stdout if to_stdout else output
+    destination: Any = output
 
     start, end = parse_date_range(start_date, end_date)
     client, settings = get_client(config_path)
@@ -711,15 +785,19 @@ def export(
         # An empty result still writes an empty document, so a scheduled export never
         # leaves yesterday's file in place.
         try:
-            count = export_entries(
-                source, destination, output_format=format, pretty=pretty, overwrite=force
-            )
+            if to_stdout:
+                with utf8_stdout(newline="" if format != "json" else None) as stream:
+                    count = export_entries(source, stream, output_format=format, pretty=pretty)
+            else:
+                count = export_entries(
+                    source, destination, output_format=format, pretty=pretty, overwrite=force
+                )
         except FileExistsError:
             raise FileExistsError(
                 f"{output} appeared during the export; use --force to overwrite"
             ) from None
 
-    target = "stdout" if to_stdout else escape(str(output))
+    target = "stdout" if to_stdout else literal(str(output))
     if count == 0:
         err_console.print(
             f"[yellow]No audit logs matched; wrote an empty file to {target}.[/yellow]"
@@ -794,7 +872,7 @@ def stats(ctx: click.Context, days: int | None, top: int, output_format: str) ->
         if anomalies:
             console.print("\n[yellow bold]Potential Anomalies Detected:[/yellow bold]")
             for anomaly in anomalies:
-                console.print(f"  [yellow]•[/yellow] {escape(str(anomaly['description']))}")
+                console.print(f"  [yellow]•[/yellow] {literal(str(anomaly['description']))}")
 
 
 @cli.command()
@@ -803,7 +881,10 @@ def stats(ctx: click.Context, days: int | None, top: int, output_format: str) ->
     "-i",
     type=INTERVAL_SECONDS,
     default=None,
-    help="Polling interval in seconds (minimum 5, default: from config (60))",
+    help=(
+        "Polling interval in seconds, 5 to 86,400 "
+        "(default: monitor_interval from the config, 60 if unset)"
+    ),
 )
 @click.option(
     "--duration", type=POSITIVE_INT,
@@ -872,7 +953,7 @@ def monitor(
 )
 @click.option(
     "--lookback",
-    type=POSITIVE_INT,
+    type=LOOKBACK_HOURS,
     default=24,
     help="Hours of history to scan per cycle",
 )
@@ -930,13 +1011,15 @@ def anomalies(
                         cycle_delay = max(interval, e.retry_after)
                     # In --watch mode, transient upstream errors must not kill
                     # the daemon. Log and continue to the next cycle.
-                    err_console.print(f"[yellow]API error this cycle:[/yellow] {escape(str(e))}")
+                    err_console.print(f"[yellow]API error this cycle:[/yellow] {literal(str(e))}")
                 if not watch:
                     break
                 time.sleep(cycle_delay)
 
     except KeyboardInterrupt:
         err_console.print("\n[yellow]Anomaly scan stopped.[/yellow]")
+        if not watch:
+            sys.exit(1)  # an interrupted one-off scan did not finish, as for other commands
 
 
 _RETRYABLE_ANOMALY_STATUSES = frozenset({408, 425, 429, 500, 502, 503, 504})
@@ -1006,7 +1089,7 @@ def _run_anomalies_cycle(
         # be parsed as Rich markup.
         description = anomaly.get("description", anomaly.get("type", "anomaly"))
         if not as_json:
-            console.print(f"[yellow]•[/yellow] {escape(description)}")
+            console.print(f"[yellow]•[/yellow] {literal(description)}")
 
     # Each anomaly goes to each channel until that channel accepts it once.
     channels = set(nm.channels()) if nm.config.notify_on_anomalies else set()
@@ -1023,7 +1106,7 @@ def _run_anomalies_cycle(
     dedup.forget_missing(raw_anomalies)
 
     for warning in nm.pop_failures():
-        err_console.print(f"[yellow]⚠ {escape(str(warning))}[/yellow]")
+        err_console.print(f"[yellow]⚠ {literal(str(warning))}[/yellow]")
 
 
 @cli.command()
@@ -1038,7 +1121,7 @@ def init(ctx: click.Context) -> None:
             return
 
     create_default_config(config_path)
-    console.print(f"[green]Created config file at:[/green] {escape(str(config_path))}")
+    console.print(f"[green]Created config file at:[/green] {literal(str(config_path))}")
     console.print("\n[dim]Set these environment variables for authentication:[/dim]")
     console.print("  ORG_ID=your_org_id@AdobeOrg")
     console.print("  CLIENT_ID=your_client_id")
@@ -1058,17 +1141,17 @@ def config(ctx: click.Context) -> None:
     console.print("[bold]Current Configuration[/bold]\n")
     effective_config_path = config_path or get_config_path()
     missing = "" if effective_config_path.exists() else " (not found)"
-    console.print(f"Config file: {escape(str(effective_config_path))}{missing}")
-    console.print(f"API base URL: {escape(str(settings.api_base_url))}")
-    console.print(f"IMS base URL: {escape(str(settings.ims_base_url))}")
+    console.print(f"Config file: {literal(str(effective_config_path))}{missing}")
+    console.print(f"API base URL: {literal(str(settings.api_base_url))}")
+    console.print(f"IMS base URL: {literal(str(settings.ims_base_url))}")
     console.print(f"Log browser page size (TUI): {settings.default_page_size}")
     console.print(f"Default days: {settings.default_days}")
     console.print(f"Monitor interval: {settings.monitor_interval}s")
     console.print(f"OAuth configured: {settings.is_oauth_configured()}")
     org_display = f"{settings.org_id[:8]}..." if settings.org_id else "(not set)"
     client_display = f"{settings.client_id[:8]}..." if settings.client_id else "(not set)"
-    console.print(f"Org ID: {escape(org_display)}")
-    console.print(f"Client ID: {escape(client_display)}")
+    console.print(f"Org ID: {literal(org_display)}")
+    console.print(f"Client ID: {literal(client_display)}")
     console.print(f"Alert rules: {len(settings.alert_rules)}")
 
 
@@ -1112,29 +1195,28 @@ def verify(ctx: click.Context, output_format: str) -> None:
         else:
             if result["connected"] and result["authenticated"]:
                 console.print("[green]✓[/green] Connection successful")
-                console.print(f"  Organization: {escape(str(result['org_id']))}")
-                console.print(f"  API URL: {escape(str(result['api_url']))}")
+                console.print(f"  Organization: {literal(str(result['org_id']))}")
+                console.print(f"  API URL: {literal(str(result['api_url']))}")
                 total_logs = result.get('total_logs_available', 'N/A')
-                console.print(f"  Total logs available: {escape(str(total_logs))}")
+                console.print(f"  Total logs available: {literal(str(total_logs))}")
+            elif not result["authenticated"]:
+                console.print(
+                    f"[red]✗[/red] Authentication failed: {literal(str(result['error']))}"
+                )
             else:
                 console.print("[red]✗[/red] Connection failed")
                 if result["error"]:
-                    console.print(f"  Error: {escape(str(result['error']))}")
+                    console.print(f"  Error: {literal(str(result['error']))}")
 
         if not (result["connected"] and result["authenticated"]):
             sys.exit(1)
 
-    except AuthenticationError as e:
+    except (AuthenticationError, APIError) as e:  # verify_connection reports most itself
         if output_format == "json":
             emit_json({"connected": False, "error": str(e)})
         else:
-            console.print(f"[red]✗[/red] Authentication failed: {escape(str(e))}")
-        sys.exit(1)
-    except APIError as e:
-        if output_format == "json":
-            emit_json({"connected": False, "error": str(e)})
-        else:
-            console.print(f"[red]✗[/red] API error: {escape(str(e))}")
+            label = "Authentication failed" if isinstance(e, AuthenticationError) else "API error"
+            console.print(f"[red]✗[/red] {label}: {literal(str(e))}")
         sys.exit(1)
 
 
@@ -1203,7 +1285,7 @@ def report(
     if output and str(output) != "-":
         with atomic_write(output, overwrite=force) as f:
             f.write(json_output)
-        err_console.print(f"[green]Report saved to {escape(str(output))}[/green]")
+        err_console.print(f"[green]Report saved to {literal(str(output))}[/green]")
     else:
         click.echo(json_output)
 
@@ -1216,13 +1298,13 @@ def report(
     default=5,
     help="Polling interval in seconds (minimum 5)",
 )
-@click.option("--user", "-u", help="Filter by user ID or email")
-@click.option("--component-id", help="Filter by component ID")
+@click.option("--user", "-u", callback=require_text, help="Filter by user ID or email")
+@click.option("--component-id", callback=require_text, help="Filter by component ID")
 @click.option(
     "--action",
     "-a",
     multiple=True,
-    help="Filter by action type (can specify multiple)",
+    help="Filter by action type (can be given more than once)",
 )
 @click.option("--alerts/--no-alerts", default=True, help="Enable alert detection")
 @click.pass_context
@@ -1278,7 +1360,7 @@ def tail(
                 filters_desc.append(f"actions={','.join(action)}")
 
             filter_str = (
-                f" [dim]({escape(', '.join(filters_desc))})[/dim]" if filters_desc else ""
+                f" [dim]({literal(', '.join(filters_desc))})[/dim]" if filters_desc else ""
             )
 
             err_console.print(f"[green]Tailing audit logs{filter_str}[/green]")
@@ -1352,7 +1434,7 @@ def alerts_list(ctx: click.Context, output_format: str) -> None:
 
 
 @alerts.command("test")
-@click.option("--days", "-d", type=POSITIVE_INT, default=1, help="Number of days to analyze")
+@click.option("--days", "-d", type=DAYS, default=1, help="Number of days to analyze")
 @click.pass_context
 @handle_cli_errors
 def alerts_test(ctx: click.Context, days: int) -> None:
@@ -1388,7 +1470,7 @@ def alerts_test(ctx: click.Context, days: int) -> None:
     if anomalies:
         console.print(f"\n[yellow bold]Detected {len(anomalies)} anomalies:[/yellow bold]")
         for anomaly in anomalies:
-            console.print(f"  [yellow]•[/yellow] {escape(str(anomaly['description']))}")
+            console.print(f"  [yellow]•[/yellow] {literal(str(anomaly['description']))}")
 
 
 @cli.command()
@@ -1396,18 +1478,18 @@ def alerts_test(ctx: click.Context, days: int) -> None:
 @click.option("--last-week", is_flag=True, help="Query last 7 days")
 @click.option("--last-month", is_flag=True, help="Query last 30 days")
 @click.option("--today", is_flag=True, help="Query today's logs")
-@click.option("--user", "-u", help="Filter by user ID or email")
+@click.option("--user", "-u", callback=require_text, help="Filter by user ID or email")
 @click.option(
     "--action",
     "-a",
     multiple=True,
-    help="Filter by action type",
+    help="Filter by action type (can be given more than once)",
 )
 @click.option(
     "--component",
     "-C",
     multiple=True,
-    help="Filter by component type",
+    help="Filter by component type (can be given more than once)",
 )
 @click.option("--limit", "-l", type=POSITIVE_INT, default=100, help="Maximum entries to return")
 @output_format_option
@@ -1507,15 +1589,15 @@ def query(
     "--action",
     "-a",
     multiple=True,
-    help="Filter by action type",
+    help="Filter by action type (can be given more than once)",
 )
 @click.option(
     "--component",
     "-C",
     multiple=True,
-    help="Filter by component type",
+    help="Filter by component type (can be given more than once)",
 )
-@click.option("--user", "-u", help="Filter by user")
+@click.option("--user", "-u", callback=require_text, help="Filter by user")
 @output_format_option
 @click.pass_context
 @handle_cli_errors
@@ -1702,7 +1784,7 @@ def show(ctx: click.Context, entry_id: str, max_entries: int) -> None:
                 break
 
     if not found_entry:
-        err_console.print(f"[yellow]Entry not found: {escape(entry_id)}[/yellow]")
+        err_console.print(f"[yellow]Entry not found: {literal(entry_id)}[/yellow]")
         err_console.print(
             f"[dim]Searched {searched:,} entries; "
             "raise --max-entries to look further back.[/dim]"

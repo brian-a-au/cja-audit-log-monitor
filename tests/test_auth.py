@@ -285,3 +285,36 @@ class TestTransientFailures:
         with pytest.raises(AuthenticationError) as info:
             TokenManager(CJASettings(_env_file=None)).get_token()
         assert info.value.transient is False
+
+
+class TestTokenEdges:
+    IMS = "https://ims-na1.adobelogin.com/ims/token/v3"
+
+    def test_short_lived_token_is_reused(self, sample_settings, httpx_mock) -> None:
+        httpx_mock.add_response(url=self.IMS, json={"access_token": "a", "expires_in": 200})
+        manager = TokenManager(sample_settings)
+        manager.get_token()
+        manager.get_token()
+        assert len(httpx_mock.get_requests()) == 1
+
+    def test_huge_expires_in_does_not_raise(self, sample_settings, httpx_mock) -> None:
+        httpx_mock.add_response(
+            url=self.IMS, json={"access_token": "a", "expires_in": 10**20}
+        )
+        assert TokenManager(sample_settings).get_token() == "a"
+
+    def test_empty_token_is_an_error(self, sample_settings, httpx_mock) -> None:
+        httpx_mock.add_response(url=self.IMS, json={"access_token": "", "expires_in": 100})
+        with pytest.raises(AuthenticationError):
+            TokenManager(sample_settings).get_token()
+
+    def test_ims_error_description_is_cut_and_redacted(self, sample_settings, httpx_mock):
+        description = "client_secret=TOPSECRET " + "x" * 1000
+        httpx_mock.add_response(
+            url=self.IMS, status_code=400,
+            json={"error": "invalid_request", "error_description": description},
+        )
+        with pytest.raises(AuthenticationError) as info:
+            TokenManager(sample_settings).get_token()
+        assert "TOPSECRET" not in str(info.value)
+        assert len(str(info.value)) < 400
