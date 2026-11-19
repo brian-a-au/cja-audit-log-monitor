@@ -66,7 +66,11 @@ Some commands have their own output rules:
 
 ### stdout and stderr
 
-Data goes to stdout. Progress lines, notices, warnings, errors and `-v` log lines go to stderr. This means you can redirect the data to a file and still see the messages on your screen.
+Data goes to stdout. Progress lines, warnings, errors and `-v` log lines go to stderr. This means you can redirect the data to a file and still see the messages on your screen. These cases are different:
+
+- `verify` prints its result on stdout, including a failure such as `Connection failed` or `Authentication failed: ...`. It then exits 1. Errors that happen before the check starts, such as a config error, still go to stderr.
+- `monitor` and `tail` print the entries and the status line on stdout. Their warnings about failed Slack or webhook delivery go to stderr.
+- `anomalies` prints the anomalies it finds, and the line `No anomalies found in the last N hours.`, on stdout. Its delivery warnings go to stderr in every output format.
 
 Names and other values from the API are shown exactly as they are. A component named `Q3 [/final] report` prints as `Q3 [/final] report`.
 
@@ -75,10 +79,10 @@ Names and other values from the API are shown exactly as they are. A component n
 | Code | Meaning |
 |---|---|
 | `0` | The command worked. |
-| `1` | The command failed. This covers config errors, login errors, API errors and file errors. It also covers a failed `verify`, a `show` that did not find the entry, and a `monitor` or `tail` run where no poll worked. |
+| `1` | The command failed. This covers config errors, login errors, API errors and file errors. It also covers a failed `verify`, a closed pipe (for example `| head`), a `show` that did not find the entry, and a `monitor` or `tail` run where no poll worked. |
 | `2` | The command line was wrong, e.g. an unknown flag, a value below the minimum, or a start date after the end date. Nothing is sent to the API. |
 
-Each error prints one line to stderr that starts with its kind, e.g. `Configuration error:` or `API error:`. If you pipe the output into a command that stops reading early, e.g. `head -1`, the CLI stops without an error message.
+Each error prints one line to stderr that starts with its kind, e.g. `Configuration error:` or `API error:`. The one exception is `verify`, which prints its failures on stdout as described above. If you pipe the output into a command that stops reading early, e.g. `head -1`, the CLI exits 1 and prints no message.
 
 ### Dates and times
 
@@ -106,7 +110,7 @@ Other rules for flag values:
 
 - Choice values ignore case, so `find-action -a export` and `find-action -a EXPORT` are the same.
 - Action and component names given with `-a` and `-C` also ignore case.
-- Where the help says "can specify multiple", you can repeat the flag, e.g. `-a DELETE -a EXPORT`. The `-a` and `-C` flags of `export`, `query` and `timeline` can be repeated as well.
+- Where the help says "can specify multiple", you can repeat the flag, e.g. `-a DELETE -a EXPORT`. The `-a` and `-C` flags of `search`, `export`, `query` and `timeline` can be repeated as well.
 - Number flags have a minimum, which the help shows as `x>=1` or `x>=5`. A smaller value exits 2.
 - A blank id, e.g. `-i ""`, exits 2.
 
@@ -150,7 +154,7 @@ Searches the audit logs with filters. The API does the filtering.
 | `-a`, `--action` | all | An action type. You can repeat it. |
 | `-s`, `--start-date` | none | The start date. See [Dates and times](#dates-and-times). |
 | `-e`, `--end-date` | none | The end date. |
-| `-C`, `--component` | all | A component type. |
+| `-C`, `--component` | all | A component type. You can repeat it. |
 | `--component-id` | all | One component id. |
 | `--description`, `--desc` | none | Text to look for in the entry description. |
 | `-l`, `--limit` | 100 | The most entries to return. |
@@ -169,7 +173,7 @@ Queries the logs for a preset date range. Pick at most one preset. With no prese
 | `--last-month` | | The last 30 days. |
 | `-u`, `--user` | all | A user id or an email address. |
 | `-a`, `--action` | all | An action type. |
-| `-C`, `--component` | all | A component type. |
+| `-C`, `--component` | all | A component type. You can repeat it. |
 | `-l`, `--limit` | 100 | The most entries to return. |
 | `-F`, `--output-format` | `table` | `table` or `json`. |
 | `-q`, `--quiet` | off | Print less, for scripts. |
@@ -261,7 +265,7 @@ Shows activity by day and by hour of the day, in UTC.
 |---|---|---|
 | `-d`, `--days` | from config (7) | How many days to look at. |
 | `-a`, `--action` | all | An action type. |
-| `-C`, `--component` | all | A component type. |
+| `-C`, `--component` | all | A component type. You can repeat it. |
 | `-u`, `--user` | all | A user. |
 | `-F`, `--output-format` | `table` | `table` or `json`. The JSON always has all 24 hours, even when they are 0. |
 
@@ -297,7 +301,7 @@ How each poll works:
 - Each later poll reads from 5 minutes before the last good poll up to now. The tool skips entries it has already shown. This overlap catches events that the API indexed late.
 - New events are handled oldest first.
 - One poll reads at most 20 pages. If it reaches that limit, the tool logs a warning.
-- A status line shows the time of the last poll and how many entries were new.
+- A status line shows the time of the last poll and how many entries were new. After the first poll, it says `Baseline` and shows how many existing entries it found, because those are not counted as new.
 
 How errors are handled:
 

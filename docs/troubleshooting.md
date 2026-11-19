@@ -21,6 +21,8 @@ Each CLI error prints one line to stderr and exits 1. The line starts with the k
 - `API error:` means Adobe returned an error. The message gives the status code.
 - `File error:` means the tool could not write a file, e.g. the folder does not exist or the file already exists. For an existing file, add `--force` to replace it.
 
+The `verify` command is the exception. It prints failures such as `Connection failed` or `Authentication failed: ...` on stdout, and then exits 1.
+
 A usage error, e.g. an unknown flag or a value below the minimum, exits 2. See [Exit codes](cli.md#exit-codes).
 
 `ORG_ID must end with @AdobeOrg` means the organization ID is incomplete. Copy the whole value from the Developer Console.
