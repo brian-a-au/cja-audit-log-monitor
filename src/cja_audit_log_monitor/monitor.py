@@ -87,6 +87,7 @@ class AuditLogMonitor:
         self,
         client: AuditLogsClient,
         console: Console | None = None,
+        err_console: Console | None = None,
         interval: int = 60,
         alert_engine: AlertEngine | None = None,
         notification_manager: NotificationManager | None = None,
@@ -96,7 +97,8 @@ class AuditLogMonitor:
 
         Args:
             client: Audit logs API client.
-            console: Rich console for output.
+            console: Rich console for entries and the status line.
+            err_console: Rich console for warnings; defaults to one writing to stderr.
             interval: Polling interval in seconds.
             alert_engine: Optional alert engine for suspicious activity detection.
             notification_manager: Optional notification manager for external delivery.
@@ -104,6 +106,8 @@ class AuditLogMonitor:
         """
         self.client = client
         self.console = console or Console()
+        self.err_console = err_console or Console(stderr=True)
+        self._status: Status | None = None
         self.interval = interval
         self.alert_engine = alert_engine
         self.notification_manager = notification_manager
@@ -187,12 +191,27 @@ class AuditLogMonitor:
             if self.notification_manager:
                 warning = self.notification_manager.pop_first_failure()
                 if warning:
-                    self.console.print(f"[yellow]{escape(str(warning))}[/yellow]")
+                    self._print_warning(str(warning))
 
         self._display_entry(entry)
 
         if self._on_new_entry:
             self._on_new_entry(entry)
+
+    def _print_warning(self, text: str) -> None:
+        """Print a warning to stderr without corrupting the live status line.
+
+        Rich does not route the stderr console through the live display on stdout, so the
+        status is paused while the warning prints and then shown again.
+        """
+        status = self._status
+        if status is not None:
+            status.stop()
+        try:
+            self.err_console.print(f"[yellow]{escape(text)}[/yellow]")
+        finally:
+            if status is not None:
+                status.start()
 
     def _display_entry(self, entry: AuditLogEntry) -> None:
         """Display a new audit log entry."""
@@ -237,6 +256,10 @@ class AuditLogMonitor:
                 f"Last poll {clock} failed: {escape(self._poll_error)}. "
                 f"Retrying in {self.interval}s"
             )
+        elif is_baseline:
+            status.update(
+                f"Baseline {clock}: {len(entries)} existing entries. Next in {self.interval}s"
+            )
         else:
             status.update(f"Last poll {clock}: {len(entries)} new. Next in {self.interval}s")
 
@@ -262,6 +285,7 @@ class AuditLogMonitor:
 
             # Initial fetch sets the baseline; show the newest few entries for context.
             with self.console.status("Waiting for first poll...") as status:
+                self._status = status
                 self._run_poll(status)
 
                 start_time = time.monotonic()
@@ -282,6 +306,7 @@ class AuditLogMonitor:
                     time.sleep(1)
 
         finally:
+            self._status = None
             # Restore signal handlers
             signal.signal(signal.SIGINT, original_sigint)
             signal.signal(signal.SIGTERM, original_sigterm)

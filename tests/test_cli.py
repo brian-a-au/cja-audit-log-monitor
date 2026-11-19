@@ -27,10 +27,16 @@ class TestMainGroup:
     """Tests for main CLI group."""
 
     def test_version(self, runner: CliRunner) -> None:
-        """Test --version flag."""
+        """__version__ matches the installed metadata and --version prints it."""
+        from importlib.metadata import version
+
+        import cja_audit_log_monitor
+
+        installed = version("cja-audit-log-monitor")
+        assert cja_audit_log_monitor.__version__ == installed
         result = runner.invoke(main, ["--version"])
         assert result.exit_code == 0
-        assert "0." in result.output or "version" in result.output.lower()
+        assert installed in result.output
 
     def test_help(self, runner: CliRunner) -> None:
         """Test --help flag."""
@@ -1347,6 +1353,8 @@ class TestAnomaliesCommand:
         result = runner.invoke(main, ["cli", "anomalies"])
         assert result.exit_code == 0
         assert "Notification delivery failed (slack)" in result.output
+        assert "Notification delivery failed (slack)" in result.stderr
+        assert "Notification delivery failed (slack)" not in result.stdout
 
     @pytest.mark.parametrize("status_code", [None, 408, 425, 429, 500, 502, 503, 504])
     @patch("cja_audit_log_monitor.cli.NotificationManager")

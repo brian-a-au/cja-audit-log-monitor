@@ -256,19 +256,22 @@ class TestAuditLogMonitor:
         )
 
         fake_console = MagicMock()
+        fake_err_console = MagicMock()
         client = MagicMock()
         monitor = AuditLogMonitor(
             client=client,
             console=fake_console,
+            err_console=fake_err_console,
             alert_engine=fake_engine,
             notification_manager=fake_nm,
         )
 
         monitor._handle_entry(sample_audit_entry)
 
-        # Expect console.print called with a [yellow]...[/yellow] formatted warning
-        warning_calls = [c for c in fake_console.print.call_args_list if "yellow" in str(c)]
-        assert warning_calls, "Expected console.print to emit a yellow-tagged warning"
+        # The warning goes to the error console, never to the entries console.
+        warning_calls = [c for c in fake_err_console.print.call_args_list if "yellow" in str(c)]
+        assert warning_calls, "Expected err_console.print to emit a yellow-tagged warning"
+        assert not [c for c in fake_console.print.call_args_list if "delivery failed" in str(c)]
 
 
 class TestBuildPollQuery:
@@ -539,6 +542,40 @@ class TestPollErrors:
         assert "1 new" in text
         assert "failed" not in text
 
+    def test_baseline_poll_status_does_not_count_entries_as_new(
+        self, mock_client: MagicMock
+    ) -> None:
+        mock_client.get_logs.return_value = AuditLogResponse(
+            content=[_entry("a"), _entry("b")], last=True
+        )
+        monitor = AuditLogMonitor(mock_client, console=MagicMock(), interval=7)
+        status = MagicMock()
+        monitor._run_poll(status)
+        first = status.update.call_args.args[0]
+        assert "new" not in first
+        assert "Baseline" in first
+        assert "2 existing entries" in first
+        monitor._run_poll(status)
+        assert "0 new" in status.update.call_args.args[0]
+
+    def test_warning_pauses_the_live_status_while_printing(self, mock_client: MagicMock) -> None:
+        events: list[str] = []
+        status = MagicMock()
+        status.stop.side_effect = lambda: events.append("stop")
+        status.start.side_effect = lambda: events.append("start")
+        err_console = MagicMock()
+        err_console.print.side_effect = lambda *a, **k: events.append("print")
+        monitor = AuditLogMonitor(mock_client, console=MagicMock(), err_console=err_console)
+        monitor._status = status
+        monitor._print_warning("Slack failed")
+        assert events == ["stop", "print", "start"]
+
+    def test_warning_without_a_status_just_prints(self, mock_client: MagicMock) -> None:
+        err_console = MagicMock()
+        monitor = AuditLogMonitor(mock_client, console=MagicMock(), err_console=err_console)
+        monitor._print_warning("Slack failed")
+        err_console.print.assert_called_once()
+
     def test_stopping_message_prints_once(self, mock_client: MagicMock) -> None:
         console = MagicMock()
         monitor = AuditLogMonitor(mock_client, console=console, interval=1)
@@ -608,6 +645,7 @@ class TestMonitorOutputIsLiteral:
         from rich.console import Console
 
         buf = io.StringIO()
+        err_buf = io.StringIO()
         notifier = MagicMock()
         notifier.is_configured.return_value = False
         notifier.pop_first_failure.return_value = "Slack failed [/oops]"
@@ -616,6 +654,7 @@ class TestMonitorOutputIsLiteral:
         mon = AuditLogMonitor(
             mock_client,
             console=Console(file=buf, width=200),
+            err_console=Console(file=err_buf, width=200),
             alert_engine=engine,
             notification_manager=notifier,
         )
@@ -630,7 +669,8 @@ class TestMonitorOutputIsLiteral:
 
         out = buf.getvalue()
         assert "Q3 [/final] report" in out
-        assert "Slack failed [/oops]" in out
+        assert "Slack failed [/oops]" in err_buf.getvalue()
+        assert "Slack failed" not in out
 
 
 class TestPollOrdering:

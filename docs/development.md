@@ -28,13 +28,13 @@ Tests use `pytest-httpx` to mock HTTP calls. When testing the client, mock both 
 
 ```bash
 # Check
-uv run ruff check src tests
+uv run ruff check src tests scripts
 
 # Auto-fix
-uv run ruff check src tests --fix
+uv run ruff check src tests scripts --fix
 ```
 
-Ruff settings: line-length 100, target Python 3.11+. Selected rules: `E`, `F`, `I`, `N`, `W`, `UP`.
+Ruff checks lines up to 100 characters and targets Python 3.11. It uses the rule sets `E`, `F`, `I`, `N`, `W` and `UP`.
 
 ## Full CI run
 
@@ -59,7 +59,7 @@ The GitHub CI jobs are skipped while the repository is private, because Actions 
 
 The package lives in `src/cja_audit_log_monitor/`. Core modules: `cli.py`, `auth.py`, `client.py`, `config.py`, `models.py`, `alerts.py`, `monitor.py`, `formatters.py`, `stats.py`, `export.py`. The TUI lives under `src/cja_audit_log_monitor/tui/` (app, state, styles, screens, widgets, modals).
 
-Each TUI view (`tui/screens/*.py`) subclasses `ContentView`, a plain widget that the app mounts once, on first visit, into a `ContentSwitcher`. Views are not Textual `Screen` objects: a `Screen` mounted as a child gets a zero-size region and renders nothing.
+Each TUI view (`tui/screens/*.py`) subclasses `ContentView`, a plain widget that the app mounts once, on first visit, into a `ContentSwitcher`. Views are not Textual `Screen` objects. A `Screen` mounted as a child gets no space on the screen and shows nothing.
 
 ## Screenshots
 
