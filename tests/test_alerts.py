@@ -757,3 +757,38 @@ def test_anomalies_command_passes_its_lookback() -> None:
     ):
         CliRunner().invoke(main, ["cli", "anomalies", "--lookback", "2"])
     assert analyze.call_args.kwargs.get("lookback_hours") == 2
+
+
+class TestAlertTexts:
+    """Alert texts name the user once and read correctly (G19, G43)."""
+
+    @staticmethod
+    def _deletes(count, user="mallory@example.com"):
+        now = datetime.now(UTC)
+        return [
+            AuditLogEntry(id=f"{user}{i}", action="DELETE", user_email=user,
+                          timestamp=now - timedelta(seconds=count - i))
+            for i in range(count)
+        ]
+
+    def test_per_user_summary_names_the_user_and_the_rule_once(self) -> None:
+        engine = AlertEngine()  # built-in rules: bulk_delete counts each user
+        fired = engine.check_batch(self._deletes(5))
+        bulk = [a for a in fired if a.rule_name == "bulk_delete"]
+        assert bulk[0].summary == "bulk_delete: 5 events in 60 minutes by mallory@example.com"
+
+    def test_all_users_rule_says_latest_user(self) -> None:
+        rule = AlertRule(name="team", actions=[ActionType.DELETE], threshold_count=2)
+        fired = AlertEngine([rule]).check_batch(self._deletes(2))
+        assert fired[0].summary == "team: 2 events in 60 minutes, latest by mallory@example.com"
+
+    def test_sensitive_delete_message_has_no_count(self) -> None:
+        entry = AuditLogEntry(
+            id="1", action="DELETE", component_type="DATA_VIEW", user_email="u@example.com",
+            timestamp=datetime.now(UTC),
+        )
+        fired = [a for a in AlertEngine().check_entry(entry)
+                 if a.rule_name == "sensitive_component_delete"]
+        assert fired[0].message == "Deletion of sensitive components"
+        assert "1 events" not in fired[0].summary
+        assert "1 minutes" not in fired[0].summary

@@ -38,6 +38,32 @@ class FiredAlert:
     message: str
     entry: AuditLogEntry
     panel: Panel
+    # One line for the TUI and logs: "<rule>: <count> by <user>".
+    summary: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.summary:
+            self.summary = f"{self.rule_name}: {self.message}"
+
+
+def _plural(count: int, word: str) -> str:
+    return f"{count} {word}" if count == 1 else f"{count} {word}s"
+
+
+def alert_texts(rule: AlertRule, event_count: int, entry: AuditLogEntry) -> tuple[str, str]:
+    """The message (panel and notifications) and the one line summary of an alert."""
+    label = rule.description or rule.name
+    user = get_user_identifier(entry)
+    if rule.threshold_count == 1:
+        # One event is the whole story: no count, and the user is that event's user.
+        return label, f"{rule.name}: {label} by {user}"
+    counted = (
+        f"{_plural(event_count, 'event')} in "
+        f"{_plural(rule.threshold_window_minutes, 'minute')}"
+    )
+    who = f"by {user}" if rule.per_user else f"latest by {user}"
+    separator = " " if rule.per_user else ", "
+    return f"{label}: {counted}", f"{rule.name}: {counted}{separator}{who}"
 
 
 # Default alert rules
@@ -266,25 +292,18 @@ class AlertEngine:
             # Check threshold
             event_count = len(self._event_history[key])
             if event_count >= rule.threshold_count:
-                message = (
-                    f"{rule.description or rule.name}: "
-                    f"{event_count} events in {rule.threshold_window_minutes} minutes"
-                )
+                message, summary = alert_texts(rule, event_count, entry)
                 panel = format_alert(entry, rule.name, message)
                 fired.append(FiredAlert(
                     rule_name=rule.name,
                     message=message,
                     entry=entry,
                     panel=panel,
+                    summary=summary,
                 ))
 
                 # Log alert (INFO: the alert panel already shows it; -v adds this line)
-                logger.info(
-                    "Alert triggered: %s - %s events by %s",
-                    rule.name,
-                    event_count,
-                    get_user_identifier(entry),
-                )
+                logger.info("Alert triggered: %s", summary)
 
                 # Clear history to avoid repeated alerts
                 self._event_history[key] = []

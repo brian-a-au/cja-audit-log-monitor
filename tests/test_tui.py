@@ -2,7 +2,7 @@
 
 import io
 import os
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -11,7 +11,7 @@ from textual.widgets import Button, Checkbox, Static
 
 from cja_audit_log_monitor.alerts import FiredAlert
 from cja_audit_log_monitor.config import ConfigError
-from cja_audit_log_monitor.models import AlertRule, AuditLogResponse
+from cja_audit_log_monitor.models import AlertRule, AuditLogEntry, AuditLogResponse
 from cja_audit_log_monitor.notifications import NotificationManager
 from cja_audit_log_monitor.tui.app import CJAAuditApp, HelpScreen
 from cja_audit_log_monitor.tui.state import AppState
@@ -1154,30 +1154,30 @@ class TestMonitorScreen:
             )
             screen._stop_monitoring()
 
-    def test_monitor_show_alert_uses_rule_name(self):
-        """_show_alert renders 'rule_name: message' (not the literal 'Alert triggered')."""
-        from cja_audit_log_monitor.tui.screens.monitor import MonitorScreen
+    async def test_monitor_alert_names_the_user_and_does_not_repeat_the_rule_name(
+        self, mock_app_state, monkeypatch
+    ):
+        from cja_audit_log_monitor.alerts import AlertEngine
+        from cja_audit_log_monitor.models import ActionType
 
-        state = MagicMock()
-        screen = MonitorScreen(state=state)
-        mock_app = MagicMock()
-        alert_summary = MagicMock()
-        screen.query_one = MagicMock(return_value=alert_summary)
-
-        with patch.object(
-            MonitorScreen, "app", new_callable=lambda: property(lambda self: mock_app)
-        ):
-            screen._show_alert("bulk_delete", "Multiple delete operations: 5 events in 60 minutes")
-
-        # Toast text contains both rule_name and message
-        notify_args = mock_app.notify.call_args
-        assert "bulk_delete" in notify_args.args[0]
-        assert "Multiple delete operations" in notify_args.args[0]
-
-        # alert_summary.add_alert() was called with rule_name and message
-        alert_summary.add_alert.assert_called_once_with(
-            "bulk_delete", "Multiple delete operations: 5 events in 60 minutes"
+        rule = AlertRule(name="any delete", actions=[ActionType.DELETE])
+        mock_app_state._alert_engine = AlertEngine([rule])
+        delete = AuditLogEntry(
+            id="d1", action="DELETE", user_email="mallory@example.com",
+            timestamp=datetime.now(UTC),
         )
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40), notifications=True) as pilot:
+            screen = await _start_monitor_without_loop(app, pilot, monkeypatch)
+            await _drive_poll(screen, pilot)  # baseline
+            mock_app_state.client.get_logs.return_value = _logs_response([delete])
+            await _drive_poll(screen, pilot)
+            expected = "any delete: any delete by mallory@example.com"
+            assert await _wait_for(
+                lambda: any(n.message == expected for n in app._notifications), pilot
+            )
+            assert expected in _plain(screen.query_one("#alert-summary", Static))
+            screen._stop_monitoring()
 
 
 # ---------------------------------------------------------------------------
@@ -3078,10 +3078,50 @@ class TestSmallCopyFixes:
             await pilot.press("m")
             await pilot.pause()
             summary = app._screens["monitor"].query_one(AlertSummary)
-            summary.add_alert("bulk_delete", "5 deletes in 60 min")
+            summary.add_alert("bulk_delete: 5 deletes in 60 min")
             text = str(summary.render())
             assert "bulk_delete: 5 deletes in 60 min" in text
             assert "..." not in text and "…" not in text
+
+    async def test_recent_alerts_line_uses_the_available_width(self, mock_app_state):
+        from cja_audit_log_monitor.tui.widgets import AlertSummary
+
+        text = (
+            "bulk_delete: 5 events in 60 minutes by "
+            "someone.with.a.long.name@example.com"
+        )
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.press("m")
+            await pilot.pause()
+            summary = app._screens["monitor"].query_one(AlertSummary)
+            summary.add_alert(text)
+            await pilot.pause()
+            assert text in str(summary.render())
+
+    async def test_test_rules_reports_hidden_alerts_and_the_entry_limit(self, mock_app_state):
+        from cja_audit_log_monitor.alerts import AlertEngine
+        from cja_audit_log_monitor.models import ActionType
+
+        rule = AlertRule(name="any delete", actions=[ActionType.DELETE])
+        mock_app_state._alert_engine = AlertEngine([rule])
+        now = datetime.now(UTC)
+        deletes = [
+            AuditLogEntry(id=str(i), action="DELETE", user_id="u",
+                          timestamp=now - timedelta(seconds=i))
+            for i in range(1000)
+        ]
+        mock_app_state.client.get_all_logs.return_value = deletes
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.press("a")
+            await pilot.pause()
+            app.query_one("#test-rules").press()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            text = _plain(app._screens["alerts"].query_one("#test-results", Static))
+            assert "found 1,000 alerts, showing 10" in text
+            assert "the newest 1,000 entries" in text
 
     async def test_rule_card_uses_singular_event(self, mock_app_state):
         from cja_audit_log_monitor.alerts import AlertEngine
@@ -4239,7 +4279,7 @@ async def test_monitor_toasts_show_markup_literally(mock_app_state):
         await pilot.pause()
         screen = app._screens["monitor"]
         assert isinstance(screen, MonitorScreen)
-        screen._show_alert("[/rule]", "[bold]msg[/")
+        screen._show_alert("[/rule]: [bold]msg[/")
         screen._show_error("[bold red]boom[/] [/oops]")
         screen._show_warning("[/warn]")
         await pilot.pause()

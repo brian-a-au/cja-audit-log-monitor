@@ -11,20 +11,15 @@ class AlertSummary(Static):
     def __init__(self, **kwargs) -> None:
         """Initialize AlertSummary."""
         super().__init__(**kwargs)
-        self._alerts: list[tuple[str, str]] = []
+        self._alerts: list[str] = []
 
     def on_mount(self) -> None:
         """Say there are no alerts until one arrives."""
         self._refresh_display()
 
-    def add_alert(self, name: str, message: str) -> None:
-        """Add an alert to the summary.
-
-        Args:
-            name: Alert rule name.
-            message: Alert message.
-        """
-        self._alerts.append((name, message))
+    def add_alert(self, summary: str) -> None:
+        """Add an alert's one line summary (``FiredAlert.summary``)."""
+        self._alerts.append(summary)
         # Keep only last 10
         self._alerts = self._alerts[-10:]
         self._refresh_display()
@@ -36,9 +31,14 @@ class AlertSummary(Static):
             return
 
         lines = [f"recent alerts ({len(self._alerts)})"]
-        for name, message in reversed(self._alerts):
-            short = message if len(message) <= 60 else message[:59] + "…"
-            lines.append(
-                resolve_tcss_markup(f"[$danger]⚠[/$danger] {literal(name)}: {literal(short)}")
-            )
+        # "⚠ " takes 2 cells; cut each line to the width the widget has.
+        room = max(20, (self.content_region.width or 62) - 2)
+        for summary in reversed(self._alerts):
+            short = summary if len(summary) <= room else summary[: room - 1] + "…"
+            lines.append(resolve_tcss_markup(f"[$danger]⚠[/$danger] {literal(short)}"))
         self.update("\n".join(lines))
+
+    def on_resize(self) -> None:
+        """Cut the lines again for the new width."""
+        if self._alerts:
+            self._refresh_display()

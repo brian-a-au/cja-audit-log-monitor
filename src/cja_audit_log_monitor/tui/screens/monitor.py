@@ -384,7 +384,7 @@ class MonitorScreen(ContentView):
             table = self.query_one("#monitor-log", LogTable)
             table.append_entries(new_entries, MONITOR_MAX_ROWS)
         for fa in fired:
-            self._show_alert(fa.rule_name, fa.message)
+            self._show_alert(fa.summary)
         for warning in warnings:
             self._show_warning(warning)
         self._update_stats_display()
@@ -425,9 +425,8 @@ class MonitorScreen(ContentView):
         """Show warning message."""
         self.app.notify(warning, severity="warning", markup=False)
 
-    def _show_alert(self, rule_name: str, message: str) -> None:
-        """Show alert notification."""
-        text = f"{rule_name}: {message}"
-        self.app.notify(text, severity="warning", markup=False)
+    def _show_alert(self, summary: str) -> None:
+        """Show an alert's one line summary as a toast and in the recent alerts list."""
+        self.app.notify(summary, severity="warning", markup=False)
         alert_summary = self.query_one("#alert-summary", AlertSummary)
-        alert_summary.add_alert(rule_name, message)
+        alert_summary.add_alert(summary)

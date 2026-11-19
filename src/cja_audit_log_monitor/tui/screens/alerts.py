@@ -10,6 +10,10 @@ from ...formatters import literal, resolve_tcss_markup
 from ...stats import build_date_range_query
 from .base import ContentView
 
+# "Test rules" checks at most this many of the last day's entries, and lists this many alerts.
+TEST_RULES_MAX_ENTRIES = 1000
+_SHOWN_ALERTS = 10
+
 
 class AlertsScreen(ContentView):
     """Screen for managing alert rules."""
@@ -168,22 +172,24 @@ class AlertsScreen(ContentView):
     def _test_rules(self) -> str:
         """Test fresh rules against the last day's logs (worker thread); returns the report."""
         query = build_date_range_query(1)
-        entries = self._state.client.get_all_logs(query, max_entries=1000)
+        entries = self._state.client.get_all_logs(query, max_entries=TEST_RULES_MAX_ENTRIES)
         if not entries:
             return "[dim]No audit logs found to test against[/dim]"
 
         fired = self._state.new_test_engine().check_batch(entries)
+        if len(entries) >= TEST_RULES_MAX_ENTRIES:
+            tested = f"tested against the newest {len(entries):,} entries of the last day"
+        else:
+            tested = f"tested against {len(entries):,} entries"
         if not fired:
-            return resolve_tcss_markup(
-                f"[$success]no alerts triggered[/$success] "
-                f"(tested against {len(entries)} entries)"
-            )
-        result_lines = [resolve_tcss_markup(f"[$warning]found {len(fired)} alerts[/$warning]")]
-        for fa in fired[:10]:
+            return resolve_tcss_markup(f"[$success]no alerts triggered[/$success] ({tested})")
+        found = f"found {len(fired):,} alerts"
+        if len(fired) > _SHOWN_ALERTS:
+            found += f", showing {_SHOWN_ALERTS}"
+        result_lines = [resolve_tcss_markup(f"[$warning]{found}[/$warning] ({tested})")]
+        for fa in fired[:_SHOWN_ALERTS]:
             result_lines.append(
-                resolve_tcss_markup(
-                    f"  [$danger]⚠[/$danger] {literal(fa.rule_name)}: {literal(fa.message)}"
-                )
+                resolve_tcss_markup(f"  [$danger]⚠[/$danger] {literal(fa.summary)}")
             )
         return "\n".join(result_lines)
 
