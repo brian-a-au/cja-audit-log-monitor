@@ -3183,3 +3183,17 @@ class TestEmptyAndCutExports:
         assert result.exit_code == 0, result.output
         assert "Exported 3 entries" in result.stderr
         assert "--max-entries" in result.stderr
+
+
+def test_show_prints_changes(runner: CliRunner) -> None:
+    entry = AuditLogEntry(id="c1", action="EDIT", changes={"name": {"old": "a", "new": "b"}})
+    client = MagicMock()
+    client.__enter__ = MagicMock(return_value=client)
+    client.__exit__ = MagicMock(return_value=False)
+    client.get_logs_paginated.side_effect = lambda *a, **k: iter([entry])
+    client.get_all_logs.return_value = [entry]
+    with patch("cja_audit_log_monitor.cli.get_client", return_value=(client, _settings())):
+        result = runner.invoke(main, ["cli", "show", "c1"])
+    assert result.exit_code == 0, result.output
+    assert "Changes" in result.stdout
+    assert '"old": "a"' in result.stdout

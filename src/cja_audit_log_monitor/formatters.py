@@ -1,5 +1,6 @@
 """Rich formatters for CLI output."""
 
+import json
 import re
 from datetime import datetime
 from typing import Any
@@ -251,6 +252,10 @@ def format_single_entry(entry: AuditLogEntry) -> Panel:
     if entry.org_id:
         content.append("Org ID: ", style="bold")
         content.append(f"{entry.org_id}\n")
+
+    if entry.changes:
+        content.append("Changes:\n", style="bold")
+        content.append(json.dumps(entry.changes, indent=2, default=str) + "\n")
 
     title = Text()
     title.append(f"{entry.action}", style=action_color)

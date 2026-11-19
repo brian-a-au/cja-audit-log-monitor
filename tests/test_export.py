@@ -576,3 +576,31 @@ class TestCheckExportPath:
 
         _, problem, _ = check_export_path(str(tmp_path / ("x" * 300 + ".json")))
         assert problem == "the file name is too long"
+
+
+class TestChangesInExports:
+    """The `changes` field is in every format (G26)."""
+
+    ENTRY = AuditLogEntry(
+        id="c1", action="EDIT", timestamp=datetime(2026, 1, 1, tzinfo=UTC),
+        changes={"name": {"old": "a", "new": "=b"}},
+    )
+
+    def test_json_has_changes(self) -> None:
+        out = StringIO()
+        export_entries([self.ENTRY], out, output_format="json")
+        assert json.loads(out.getvalue())["entries"][0]["changes"] == self.ENTRY.changes
+
+    @pytest.mark.parametrize(("fmt", "sep"), [("csv", ","), ("tsv", "\t")])
+    def test_delimited_has_a_changes_column(self, fmt: str, sep: str) -> None:
+        out = StringIO()
+        export_entries([self.ENTRY], out, output_format=fmt)
+        rows = list(csv.reader(StringIO(out.getvalue()), delimiter=sep))
+        assert rows[0][-1] == "changes"
+        assert json.loads(rows[1][-1]) == self.ENTRY.changes
+
+    def test_no_changes_is_an_empty_cell(self) -> None:
+        out = StringIO()
+        export_entries([self.ENTRY.model_copy(update={"changes": None})], out, output_format="csv")
+        rows = list(csv.reader(StringIO(out.getvalue())))
+        assert rows[1][-1] == ""

@@ -121,6 +121,7 @@ def entry_to_dict(entry: AuditLogEntry) -> dict[str, Any]:
         "description": entry.description,
         "org_id": entry.org_id,
         "ip_address": entry.ip_address,
+        "changes": entry.changes,
     }
 
 
@@ -174,6 +175,7 @@ _EXPORT_FIELDS = [
     "description",
     "org_id",
     "ip_address",
+    "changes",
 ]
 
 _FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
@@ -203,6 +205,8 @@ def _write_delimited(
     count = 0
     for entry in entries:
         row = entry_to_dict(entry)
+        if row["changes"] is not None:  # one cell: compact JSON
+            row["changes"] = json.dumps(row["changes"], separators=(",", ":"), default=str)
         writer.writerow([_cell(row[name]) for name in _EXPORT_FIELDS])
         count += 1
     return count
