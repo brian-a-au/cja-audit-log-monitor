@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:  # run CI by hand from the Actions tab
   workflow_call:
 
 permissions:
