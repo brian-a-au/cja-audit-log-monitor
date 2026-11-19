@@ -134,7 +134,8 @@ def handle_cli_errors(func: Callable[P, R]) -> Callable[P, R]:
         except OSError as e:
             label = "File error"
             error = e
-        err_console.print(f"[red]{label}:[/red] {escape(str(error))}")
+        # soft_wrap: one logical line, however long the path, so the terminal wraps it.
+        err_console.print(f"[red]{label}:[/red] {escape(str(error))}", soft_wrap=True)
         sys.exit(1)
 
     return wrapper
@@ -263,7 +264,8 @@ def parse_components(components: tuple[str, ...] | None) -> list[ComponentType] 
 @click.option(
     "--config",
     "-c",
-    type=click.Path(exists=False, path_type=Path),
+    # readable=False: the config loader reports an unreadable file in its own one line form.
+    type=click.Path(exists=False, readable=False, path_type=Path),
     help="Path to config file",
 )
 @click.version_option(version=__version__)

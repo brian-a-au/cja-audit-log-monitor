@@ -2,6 +2,7 @@
 
 import logging
 import os
+import re
 import stat
 import sys
 from contextvars import ContextVar
@@ -17,6 +18,7 @@ from pydantic_settings import (
     PydanticBaseSettingsSource,
     SettingsConfigDict,
 )
+from pydantic_settings.exceptions import SettingsError
 
 from .models import AlertRule, NotificationConfig
 
@@ -179,26 +181,7 @@ def load_config(config_path: Path | None = None, *, use_file: bool = True) -> CJ
 
     # Load from YAML config file if it exists
     if use_file and config_path.exists():
-        _warn_if_not_private(config_path)
-        with open(config_path) as f:
-            try:
-                yaml_config = yaml.safe_load(f)
-            except yaml.YAMLError as e:
-                detail = (str(e).strip().splitlines() or ["unknown error"])[0]
-                raise ConfigError(
-                    f"{config_path}: not valid YAML ({detail})",
-                    f"{config_path.name}: not valid YAML ({detail})",
-                ) from e
-        if yaml_config is not None and not isinstance(yaml_config, dict):
-            raise ConfigError(
-                f"{config_path}: expected a mapping of settings at the top level",
-                f"{config_path.name}: expected a mapping of settings at the top level",
-            )
-        if yaml_config:
-            config_data.update(yaml_config)
-            for key in config_data:
-                if key not in CJASettings.model_fields:
-                    logger.warning("%s: ignoring unknown setting %r", config_path, key)
+        config_data.update(_read_config_file(config_path))
 
     token = _config_file_data.set(config_data)
     try:
@@ -207,8 +190,60 @@ def load_config(config_path: Path | None = None, *, use_file: bool = True) -> CJ
         source = str(config_path) if use_file else "environment"
         short = config_path.name if use_file else "environment"
         raise ConfigError(f"{source}: {e}", _validation_summary(short, e)) from e
+    except SettingsError as e:
+        # A JSON-valued env var or .env line (e.g. NOTIFICATIONS) that does not parse.
+        # The message never holds the value; keep only the field name.
+        field = _settings_error_field(e)
+        text = f"environment or .env: {field}: not valid JSON"
+        raise ConfigError(text, text) from None
     finally:
         _config_file_data.reset(token)
+
+
+def _settings_error_field(error: Exception) -> str:
+    """The field name from pydantic-settings' 'error parsing value for field "x"' text."""
+    match = re.search(r'field "([^"]+)"', str(error))
+    return match.group(1) if match else "a setting"
+
+
+def _read_config_file(config_path: Path) -> dict[str, Any]:
+    """Parse the YAML config file. Every failure is a ConfigError that never shows content.
+
+    Each error is raised ``from None``: a chained exception would carry the parsed data
+    (and the secret) into a traceback.
+    """
+
+    def fail(problem: str) -> ConfigError:
+        return ConfigError(f"{config_path}: {problem}", f"{config_path.name}: {problem}")
+
+    try:
+        _warn_if_not_private(config_path)
+        with open(config_path, encoding="utf-8") as f:
+            yaml_config = yaml.safe_load(f)
+    except yaml.YAMLError as e:
+        detail = (str(e).strip().splitlines() or ["unknown error"])[0]
+        raise fail(f"not valid YAML ({detail})") from None
+    except UnicodeDecodeError:
+        raise fail("not valid UTF-8 text") from None
+    except IsADirectoryError:
+        raise fail("is a folder, not a file") from None
+    except PermissionError:
+        raise fail("cannot be read (permission denied)") from None
+    except OSError as e:
+        raise fail(f"cannot be read ({e.strerror or type(e).__name__})") from None
+    except RecursionError:
+        raise fail("nested too deeply") from None
+    if yaml_config is None:
+        return {}
+    if not isinstance(yaml_config, dict):
+        raise fail("expected a mapping of settings at the top level")
+    bad_keys = [key for key in yaml_config if not isinstance(key, str)]
+    if bad_keys:
+        raise fail(f"setting names must be text (found {type(bad_keys[0]).__name__})")
+    for key in yaml_config:
+        if key not in CJASettings.model_fields:
+            logger.warning("%s: ignoring unknown setting %r", config_path, key)
+    return yaml_config
 
 
 def _warn_if_not_private(config_path: Path) -> None:

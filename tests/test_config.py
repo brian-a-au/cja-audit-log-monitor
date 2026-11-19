@@ -389,3 +389,14 @@ class TestAlertRuleConfig:
         with pytest.raises(ConfigError) as excinfo:
             load_config(path)
         assert "input_value" not in str(excinfo.value)
+
+
+def test_no_config_mistake_crashes_or_leaks(bad_config) -> None:
+    """Review Focus 2: every config mistake is a ConfigError that shows no secret."""
+    from .conftest import SECRET_MARK
+
+    with pytest.raises(ConfigError) as info:
+        load_config(bad_config)
+    assert SECRET_MARK not in str(info.value)
+    assert SECRET_MARK not in info.value.summary
+    assert "\n" not in info.value.summary

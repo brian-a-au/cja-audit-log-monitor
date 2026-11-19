@@ -4221,3 +4221,35 @@ async def test_app_loads_dashboard_on_start(mock_app_state):
         view = app._screens["dashboard"]
         assert isinstance(view, DashboardScreen)
         assert await _wait_for(lambda: "user" in _plain(view.query_one("#top-users")), pilot)
+
+
+async def test_tui_starts_on_any_bad_config(bad_config) -> None:
+    """The TUI starts on any config mistake and shows a one line summary."""
+    from .conftest import SECRET_MARK
+
+    state = AppState(bad_config)
+    app = _make_app(state)
+    async with app.run_test(size=(140, 40)) as pilot:
+        await pilot.pause()
+        assert app.is_running
+        assert state.config_error_summary
+        assert SECRET_MARK not in (state.config_error or "")
+        assert state.config_error_summary.split(":")[0] in _status_text(app)
+
+
+async def test_tui_reload_on_any_bad_config(bad_config, tmp_path) -> None:
+    """Reload settings onto any config mistake keeps the app running and says why."""
+    good = tmp_path / "good.yaml"
+    good.write_text("monitor_interval: 30\n")
+    good.chmod(0o600)
+    state = AppState(good)
+    app = _make_app(state)
+    async with app.run_test(size=(140, 40), notifications=True) as pilot:
+        await pilot.press("c")
+        await pilot.pause()
+        state._config_path = bad_config
+        view = app._screens["settings"]
+        await view._reload_settings()
+        await pilot.pause()
+        assert app.is_running
+        assert state.config_error_summary

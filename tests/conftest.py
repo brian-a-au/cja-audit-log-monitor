@@ -170,3 +170,79 @@ def fake_api():
     assert api.server is not None
     api.server.shutdown()
     api.server.server_close()
+
+
+SECRET_MARK = "FILESECRET-aaaa1111"
+
+
+def _bad_nonstr_bool_key(tmp_path, monkeypatch):
+    path = tmp_path / "config.yaml"
+    path.write_text(f"secret: {SECRET_MARK}\nyes: 1\n")
+    return path
+
+
+def _bad_nonstr_int_key(tmp_path, monkeypatch):
+    path = tmp_path / "config.yaml"
+    path.write_text(f"secret: {SECRET_MARK}\n1: x\n")
+    return path
+
+
+def _bad_not_utf8(tmp_path, monkeypatch):
+    path = tmp_path / "config.yaml"
+    path.write_bytes(f"secret: {SECRET_MARK}\nx: ".encode() + b"\xe9t\xe9\n")
+    return path
+
+
+def _bad_folder(tmp_path, monkeypatch):
+    (tmp_path / ".env").write_text(f"SECRET={SECRET_MARK}\n")
+    path = tmp_path / "config.yaml"
+    path.mkdir()
+    return path
+
+
+def _bad_unreadable(tmp_path, monkeypatch):
+    import os
+
+    if hasattr(os, "geteuid") and os.geteuid() == 0:
+        pytest.skip("root can read anything")
+    path = tmp_path / "config.yaml"
+    path.write_text(f"secret: {SECRET_MARK}\n")
+    path.chmod(0)
+    return path
+
+
+def _bad_env_json(tmp_path, monkeypatch):
+    path = tmp_path / "config.yaml"
+    path.write_text(f"secret: {SECRET_MARK}\n")
+    path.chmod(0o600)
+    monkeypatch.setenv("NOTIFICATIONS", "{")
+    return path
+
+
+def _bad_dotenv_json(tmp_path, monkeypatch):
+    (tmp_path / ".env").write_text(f"SECRET={SECRET_MARK}\nALERT_RULES=[\n")
+    return tmp_path / "config.yaml"
+
+
+def _bad_deep_nesting(tmp_path, monkeypatch):
+    path = tmp_path / "config.yaml"
+    path.write_text(f"secret: {SECRET_MARK}\nx: " + "[" * 5000 + "\n")
+    return path
+
+
+BAD_CONFIGS = {
+    "bool-key": _bad_nonstr_bool_key,
+    "int-key": _bad_nonstr_int_key,
+    "not-utf8": _bad_not_utf8,
+    "folder": _bad_folder,
+    "unreadable": _bad_unreadable,
+    "env-json": _bad_env_json,
+    "dotenv-json": _bad_dotenv_json,
+    "deep-nesting": _bad_deep_nesting,
+}
+
+
+@pytest.fixture(params=list(BAD_CONFIGS), ids=list(BAD_CONFIGS))
+def bad_config(request, tmp_path, monkeypatch):
+    """A config path (plus env) with one kind of mistake; each holds SECRET_MARK."""
+    return BAD_CONFIGS[request.param](tmp_path, monkeypatch)

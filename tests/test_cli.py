@@ -2821,3 +2821,15 @@ def test_delimited_export_does_not_clobber_a_file_created_during_fetch(
         result = runner.invoke(main, ["cli", "export", "-F", fmt, "-o", str(target)])
     assert result.exit_code == 1
     assert target.read_text() == "someone else"
+
+
+def test_cli_bad_config_is_one_line(bad_config) -> None:
+    from .conftest import SECRET_MARK
+
+    result = CliRunner().invoke(main, ["-c", str(bad_config), "cli", "list"])
+    assert result.exit_code == 1
+    assert result.exception is None or isinstance(result.exception, SystemExit)
+    lines = [line for line in result.stderr.splitlines() if line.strip()]
+    assert len(lines) == 1, result.stderr
+    assert lines[0].startswith("Configuration error:")
+    assert SECRET_MARK not in result.output
