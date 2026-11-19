@@ -4,6 +4,7 @@ import random
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from pydantic import ValidationError
 from rich.panel import Panel
 
 from cja_audit_log_monitor.alerts import (
@@ -627,3 +628,167 @@ class TestEngineCopiesRules:
         engine = AlertEngine([original])
         engine.disable_rule("mine")
         assert original.enabled is True
+
+
+class TestRuleDefinitions:
+    """Rule definitions mean what they say (G13, G17, G43)."""
+
+    def test_duplicate_rule_names_are_a_config_error(self, tmp_path) -> None:
+        from cja_audit_log_monitor.config import ConfigError, load_config
+
+        path = tmp_path / "config.yaml"
+        path.write_text(
+            "alert_rules:\n"
+            "  - {name: deletes, actions: [DELETE], threshold_count: 2}\n"
+            "  - {name: deletes, actions: [DELETE], threshold_count: 2}\n"
+        )
+        path.chmod(0o600)
+        with pytest.raises(ConfigError, match="deletes"):
+            load_config(path)
+
+    def test_users_match_ignores_case_and_spaces(self) -> None:
+        rule = AlertRule(name="named", users=[" Someone@Example.com "])
+        engine = AlertEngine(rules=[rule])
+        entry = AuditLogEntry(
+            id="1", action="DELETE", user_email="someone@example.com",
+            timestamp=datetime.now(UTC),
+        )
+        assert [a.rule_name for a in engine.check_entry(entry)] == ["named"]
+
+    def test_window_has_an_upper_limit(self) -> None:
+        with pytest.raises(ValidationError):
+            AlertRule(name="r", threshold_window_minutes=999_999_999_999)
+        assert AlertRule(name="r", threshold_window_minutes=525_600)
+
+    @pytest.mark.parametrize("field", ["actions", "components", "users"])
+    def test_empty_list_is_an_error(self, field) -> None:
+        with pytest.raises(ValidationError, match="leave it out"):
+            AlertRule(name="r", **{field: []})
+
+    def test_empty_alert_rules_means_no_rules(self, tmp_path) -> None:
+        from cja_audit_log_monitor.alerts import engine_rules
+        from cja_audit_log_monitor.config import load_config
+
+        path = tmp_path / "config.yaml"
+        path.write_text("alert_rules: []\n")
+        path.chmod(0o600)
+        assert AlertEngine(engine_rules(load_config(path))).rules == []
+        empty = tmp_path / "empty.yaml"
+        empty.write_text("monitor_interval: 30\n")
+        empty.chmod(0o600)
+        assert len(AlertEngine(engine_rules(load_config(empty))).rules) == 4
+
+    def test_lower_case_delete_counts_for_the_bulk_delete_anomaly(self) -> None:
+        entries = [
+            AuditLogEntry(
+                id=str(i), action="delete", user_email="u@example.com",
+                timestamp=datetime.now(UTC),
+            )
+            for i in range(20)
+        ]
+        kinds = [a["type"] for a in analyze_for_anomalies(entries)]
+        assert "bulk_delete_single_user" in kinds
+
+
+class MovableClock(datetime):
+    """datetime whose now() the test sets."""
+
+    current = datetime(2026, 3, 1, 12, 0, tzinfo=UTC)
+
+    @classmethod
+    def now(cls, tz=None):
+        return cls.current
+
+
+class TestFutureTimestampsAgeOut:
+    """An event stamped in the future is counted at the wall clock time (G18)."""
+
+    T = datetime(2026, 3, 1, 12, 0, tzinfo=UTC)
+
+    @staticmethod
+    def _delete(when: datetime) -> AuditLogEntry:
+        return AuditLogEntry(action="DELETE", timestamp=when, user_id="u1")
+
+    def test_future_event_ages_out_of_the_window(self, monkeypatch) -> None:
+        monkeypatch.setattr("cja_audit_log_monitor.alerts.datetime", MovableClock)
+        rule = AlertRule(name="trio", actions=[ActionType.DELETE], threshold_count=3)
+        engine = AlertEngine(rules=[rule])
+        MovableClock.current = self.T
+        engine.check_entry(self._delete(self.T + timedelta(days=365)))
+        MovableClock.current = self.T + timedelta(hours=2)
+        later = self.T + timedelta(hours=2)
+        fired = [
+            alert
+            for seconds in (10, 20)
+            for alert in engine.check_entry(self._delete(later - timedelta(seconds=seconds)))
+        ]
+        assert fired == []  # two real deletes do not make three
+
+
+def test_short_lookback_steady_night_is_not_flagged() -> None:
+    day = datetime(2026, 3, 1, tzinfo=UTC)
+    entries = [
+        AuditLogEntry(id=f"{h}-{i}", action="EDIT", user_id=f"u{i}",
+                      timestamp=day + timedelta(hours=h, minutes=i))
+        for h in (2, 3)
+        for i in range(10)
+    ]
+    kinds = [a["type"] for a in analyze_for_anomalies(entries, lookback_hours=2)]
+    assert "off_hours_activity" not in kinds
+    # Over a full day the same two busy night hours stand out.
+    kinds = [a["type"] for a in analyze_for_anomalies(entries)]
+    assert "off_hours_activity" in kinds
+
+
+def test_anomalies_command_passes_its_lookback() -> None:
+    from unittest.mock import MagicMock, patch
+
+    from click.testing import CliRunner
+
+    from cja_audit_log_monitor.cli import main
+
+    client = MagicMock()
+    client.get_all_logs.return_value = []
+    client.__enter__ = MagicMock(return_value=client)
+    client.__exit__ = MagicMock(return_value=False)
+    with (
+        patch("cja_audit_log_monitor.cli.get_client", return_value=(client, MagicMock())),
+        patch("cja_audit_log_monitor.cli.analyze_for_anomalies", return_value=[]) as analyze,
+    ):
+        CliRunner().invoke(main, ["cli", "anomalies", "--lookback", "2"])
+    assert analyze.call_args.kwargs.get("lookback_hours") == 2
+
+
+class TestAlertTexts:
+    """Alert texts name the user once and read correctly (G19, G43)."""
+
+    @staticmethod
+    def _deletes(count, user="mallory@example.com"):
+        now = datetime.now(UTC)
+        return [
+            AuditLogEntry(id=f"{user}{i}", action="DELETE", user_email=user,
+                          timestamp=now - timedelta(seconds=count - i))
+            for i in range(count)
+        ]
+
+    def test_per_user_summary_names_the_user_and_the_rule_once(self) -> None:
+        engine = AlertEngine()  # built-in rules: bulk_delete counts each user
+        fired = engine.check_batch(self._deletes(5))
+        bulk = [a for a in fired if a.rule_name == "bulk_delete"]
+        assert bulk[0].summary == "bulk_delete: 5 events in 60 minutes by mallory@example.com"
+
+    def test_all_users_rule_says_latest_user(self) -> None:
+        rule = AlertRule(name="team", actions=[ActionType.DELETE], threshold_count=2)
+        fired = AlertEngine([rule]).check_batch(self._deletes(2))
+        assert fired[0].summary == "team: 2 events in 60 minutes, latest by mallory@example.com"
+
+    def test_sensitive_delete_message_has_no_count(self) -> None:
+        entry = AuditLogEntry(
+            id="1", action="DELETE", component_type="DATA_VIEW", user_email="u@example.com",
+            timestamp=datetime.now(UTC),
+        )
+        fired = [a for a in AlertEngine().check_entry(entry)
+                 if a.rule_name == "sensitive_component_delete"]
+        assert fired[0].message == "Deletion of sensitive components"
+        assert "1 events" not in fired[0].summary
+        assert "1 minutes" not in fired[0].summary

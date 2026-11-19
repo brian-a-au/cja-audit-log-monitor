@@ -38,6 +38,32 @@ class FiredAlert:
     message: str
     entry: AuditLogEntry
     panel: Panel
+    # One line for the TUI and logs: "<rule>: <count> by <user>".
+    summary: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.summary:
+            self.summary = f"{self.rule_name}: {self.message}"
+
+
+def _plural(count: int, word: str) -> str:
+    return f"{count} {word}" if count == 1 else f"{count} {word}s"
+
+
+def alert_texts(rule: AlertRule, event_count: int, entry: AuditLogEntry) -> tuple[str, str]:
+    """The message (panel and notifications) and the one line summary of an alert."""
+    label = rule.description or rule.name
+    user = get_user_identifier(entry)
+    if rule.threshold_count == 1:
+        # One event is the whole story: no count, and the user is that event's user.
+        return label, f"{rule.name}: {label} by {user}"
+    counted = (
+        f"{_plural(event_count, 'event')} in "
+        f"{_plural(rule.threshold_window_minutes, 'minute')}"
+    )
+    who = f"by {user}" if rule.per_user else f"latest by {user}"
+    separator = " " if rule.per_user else ", "
+    return f"{label}: {counted}", f"{rule.name}: {counted}{separator}{who}"
 
 
 # Default alert rules
@@ -84,6 +110,23 @@ DEFAULT_ALERT_RULES = [
         per_user=True,
     ),
 ]
+
+
+# How far ahead of this machine's clock an event time may be before it counts as "now".
+FUTURE_SKEW = timedelta(minutes=5)
+
+
+def engine_rules(settings: Any) -> list[AlertRule] | None:
+    """The rules for an AlertEngine: the configured ones, or None for the built-in rules.
+
+    ``alert_rules: []`` in the config means no rules. Leaving the key out means the
+    built-in rules.
+    """
+    rules = getattr(settings, "alert_rules", None)
+    fields_set = getattr(settings, "model_fields_set", None)
+    if isinstance(fields_set, set) and "alert_rules" in fields_set and isinstance(rules, list):
+        return list(rules)
+    return rules or None
 
 
 def order_oldest_first(entries: list[AuditLogEntry]) -> list[AuditLogEntry]:
@@ -201,8 +244,9 @@ class AlertEngine:
 
         # Check user match
         if rule.users:
-            # A rule may name a user by IMS id, email or display name.
-            if not user_identities(entry) & set(rule.users):
+            # A rule may name a user by IMS id, email or display name, in any case.
+            names = {name.casefold() for name in user_identities(entry)}
+            if not names & {user.casefold() for user in rule.users}:
                 return False
 
         return True
@@ -217,7 +261,12 @@ class AlertEngine:
             List of FiredAlert objects for triggered rules.
         """
         fired: list[FiredAlert] = []
-        timestamp = entry.timestamp or datetime.now(UTC)
+        now = datetime.now(UTC)
+        timestamp = entry.timestamp or now
+        if timestamp > now + FUTURE_SKEW:
+            # A clock far ahead would keep the event in every window for good; count it
+            # as happening now, so it ages out like any other event.
+            timestamp = now
 
         for rule in self.rules:
             if not rule.enabled:
@@ -243,25 +292,18 @@ class AlertEngine:
             # Check threshold
             event_count = len(self._event_history[key])
             if event_count >= rule.threshold_count:
-                message = (
-                    f"{rule.description or rule.name}: "
-                    f"{event_count} events in {rule.threshold_window_minutes} minutes"
-                )
+                message, summary = alert_texts(rule, event_count, entry)
                 panel = format_alert(entry, rule.name, message)
                 fired.append(FiredAlert(
                     rule_name=rule.name,
                     message=message,
                     entry=entry,
                     panel=panel,
+                    summary=summary,
                 ))
 
                 # Log alert (INFO: the alert panel already shows it; -v adds this line)
-                logger.info(
-                    "Alert triggered: %s - %s events by %s",
-                    rule.name,
-                    event_count,
-                    get_user_identifier(entry),
-                )
+                logger.info("Alert triggered: %s", summary)
 
                 # Clear history to avoid repeated alerts
                 self._event_history[key] = []
@@ -313,7 +355,7 @@ class AlertEngine:
 
 
 def analyze_for_anomalies(
-    entries: list[AuditLogEntry], local: bool = False
+    entries: list[AuditLogEntry], local: bool = False, lookback_hours: int = 24
 ) -> list[dict[str, Any]]:
     """Analyze entries for anomalous patterns.
 
@@ -323,6 +365,8 @@ def analyze_for_anomalies(
         entries: List of audit log entries.
         local: Judge off-hours (midnight to 5am) by the local time zone
             instead of UTC. The TUI sets this; the CLI keeps UTC.
+        lookback_hours: How many hours ``entries`` cover. The off-hours check compares
+            an hour with the average hour of that span (at most 24 hours).
 
     Returns:
         List of anomaly reports.
@@ -359,7 +403,9 @@ def analyze_for_anomalies(
                 })
 
     # Check for concentrated delete activity, one report per user
-    delete_entries = [e for e in entries if e.action == ActionType.DELETE.value]
+    delete_entries = [
+        e for e in entries if (e.action or "").upper() == ActionType.DELETE.value
+    ]
     for user, deletes in group_by_user(delete_entries).items():
         if len(deletes) >= BULK_DELETE_MIN_COUNT:
             anomalies.append({
@@ -379,7 +425,7 @@ def analyze_for_anomalies(
             hour_counts[ts.hour] += 1
 
     if hour_counts:
-        avg_per_hour = sum(hour_counts.values()) / 24
+        avg_per_hour = sum(hour_counts.values()) / max(1, min(lookback_hours, 24))
         for hour, count in hour_counts.items():
             # Flag a real burst in off-hours (midnight up to OFF_HOURS_END)
             if (

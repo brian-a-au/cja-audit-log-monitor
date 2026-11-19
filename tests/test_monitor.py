@@ -205,7 +205,7 @@ class TestAuditLogMonitor:
         fake_engine.check_entry.return_value = [fa]
         fake_nm = MagicMock()
         fake_nm.is_configured.return_value = True
-        fake_nm.pop_first_failure.return_value = None
+        fake_nm.pop_failures.return_value = []
 
         client = MagicMock()
         monitor = AuditLogMonitor(
@@ -242,7 +242,7 @@ class TestAuditLogMonitor:
         fake_nm = MagicMock()
         fake_nm.is_configured.return_value = True
         fake_nm.notify_alert.side_effect = RuntimeError("boom")
-        fake_nm.pop_first_failure.return_value = None
+        fake_nm.pop_failures.return_value = []
         client = MagicMock()
         monitor = AuditLogMonitor(
             client=client,
@@ -252,8 +252,8 @@ class TestAuditLogMonitor:
         # Must not raise
         monitor._handle_entry(sample_audit_entry)
 
-    def test_handle_entry_prints_pop_first_failure_warning(self, sample_audit_entry) -> None:
-        """When pop_first_failure returns a string, console.print emits a yellow-tagged warning."""
+    def test_handle_entry_prints_a_delivery_failure_warning(self, sample_audit_entry) -> None:
+        """A queued delivery failure is printed as a yellow-tagged warning."""
         from cja_audit_log_monitor.alerts import FiredAlert
 
         fa = FiredAlert(rule_name="r", message="m", entry=sample_audit_entry, panel=MagicMock())
@@ -261,10 +261,9 @@ class TestAuditLogMonitor:
         fake_engine.check_entry.return_value = [fa]
         fake_nm = MagicMock()
         fake_nm.is_configured.return_value = True
-        fake_nm.pop_first_failure.return_value = (
-            "Notification delivery failed (slack);"
-            " subsequent failures suppressed for this session — check logs."
-        )
+        fake_nm.pop_failures.return_value = [
+            "Notification delivery failed (slack (hooks.slack.com/…))."
+        ]
 
         fake_console = MagicMock()
         fake_err_console = MagicMock()
@@ -680,7 +679,7 @@ class TestMonitorOutputIsLiteral:
         err_buf = io.StringIO()
         notifier = MagicMock()
         notifier.is_configured.return_value = False
-        notifier.pop_first_failure.return_value = "Slack failed [/oops]"
+        notifier.pop_failures.return_value = ["Slack failed [/oops]"]
         engine = MagicMock()
         engine.check_entry.return_value = []
         mon = AuditLogMonitor(
@@ -1005,7 +1004,7 @@ class TestCtrlC:
         ]
         nm = MagicMock()
         nm.is_configured.return_value = True
-        nm.pop_first_failure.return_value = None
+        nm.pop_failures.return_value = []
         monitor = AuditLogMonitor(
             mock_client, console=MagicMock(), interval=5,
             alert_engine=AlertEngine([AlertRule(name="any", actions=[ActionType.DELETE])]),
@@ -1128,3 +1127,21 @@ class TestMonitorDetails:
             fake_dt.now.return_value = datetime.now(UTC) + timedelta(minutes=1)
             monitor._run_poll(MagicMock())
         engine.check_entry.assert_called_once_with(later)
+
+
+def test_cli_monitor_shows_every_channel_failure(mock_client: MagicMock) -> None:
+    from cja_audit_log_monitor.alerts import AlertEngine
+    from cja_audit_log_monitor.models import ActionType, AlertRule
+
+    nm = MagicMock()
+    nm.is_configured.return_value = True
+    nm.pop_failures.return_value = ["webhook 1 failed", "webhook 2 failed"]
+    err_console = MagicMock()
+    monitor = AuditLogMonitor(
+        mock_client, console=MagicMock(), err_console=err_console,
+        alert_engine=AlertEngine([AlertRule(name="any", actions=[ActionType.DELETE])]),
+        notification_manager=nm,
+    )
+    monitor._handle_entry(_entry("d", action="DELETE"))
+    printed = str(err_console.print.call_args_list)
+    assert "webhook 1 failed" in printed and "webhook 2 failed" in printed

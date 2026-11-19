@@ -54,6 +54,8 @@ def redact_url(url: str) -> str:
         return "<invalid url>"
     if not parts.scheme or not host:
         return "<invalid url>"
+    if ":" in host:  # IPv6 literal: keep the brackets the URL needs
+        host = f"[{host}]"
     netloc = f"{host}:{port}" if port else host
     return f"{parts.scheme}://{netloc}/\u2026"
 

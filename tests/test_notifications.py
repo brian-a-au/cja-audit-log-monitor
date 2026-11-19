@@ -188,7 +188,7 @@ class TestNotificationManager:
         manager = NotificationManager(config)
         result = manager.notify_anomaly({"type": "test", "description": "Test"})
 
-        assert result == 0
+        assert result == set()
 
     def test_context_manager(self) -> None:
         """Test context manager properly closes client."""
@@ -410,26 +410,29 @@ class TestAnomalyDedupFilter:
         f.suppress_seen([a1])
         assert f.suppress_seen([a2]) == []
 
-    def test_day_bucket_simulated_via_freezegun_alternative(self, monkeypatch):
-        """Same anomaly on different days fingerprints differently.
-
-        We patch the date helper directly because freezegun isn't a project dep.
-        """
-        from datetime import date
-
-        import cja_audit_log_monitor.notifications as nm_mod
+    def test_same_anomaly_keeps_its_fingerprint_across_days(self):
+        """The fingerprint holds no date, so a running anomaly is not news at midnight."""
         from cja_audit_log_monitor.notifications import AnomalyDedupFilter
 
         f = AnomalyDedupFilter()
         a = {"type": "high_activity_user", "user": "e@x.com", "action_count": 50,
              "average": 10.0, "description": "..."}
+        first = f.fingerprint(a)
+        assert f.fingerprint(dict(a)) == first
 
-        monkeypatch.setattr(nm_mod, "_today_iso", lambda: date(2026, 5, 4).isoformat())
-        f.suppress_seen([a])
+    def test_pending_mark_sent_and_forget(self):
+        from cja_audit_log_monitor.notifications import AnomalyDedupFilter
 
-        monkeypatch.setattr(nm_mod, "_today_iso", lambda: date(2026, 5, 5).isoformat())
-        out = f.suppress_seen([a])
-        assert len(out) == 1
+        f = AnomalyDedupFilter()
+        a = {"type": "bulk_delete_single_user", "user": "m@x.com", "delete_count": 12}
+        channels = {"slack", "webhook:1"}
+        assert f.pending([a], channels) == [(a, channels)]
+        f.mark_sent(a, {"webhook:1"})
+        assert f.pending([a], channels) == [(a, {"slack"})]
+        f.mark_sent(a, {"slack"})
+        assert f.pending([a], channels) == []
+        f.forget_missing([])
+        assert f.pending([a], channels) == [(a, channels)]
 
 
 class TestNoSecretLeaks:
@@ -516,7 +519,8 @@ class TestSlackEscaping:
         )
         httpx_mock.add_response(url=url, status_code=200)
 
-        assert manager.notify_anomaly({"type": "t", "description": "<!channel> & co"}) == 1
+        sent = manager.notify_anomaly({"type": "t", "description": "<!channel> & co"})
+        assert sent == {"slack"}
         text = json.dumps(json.loads(httpx_mock.get_requests()[0].content))
         assert "&lt;!channel&gt; &amp; co" in text
 
@@ -610,3 +614,85 @@ class TestDeliveryDetails:
         manager.close()
         assert http.is_closed
         assert manager._client is None
+
+
+class TestFailureWarnings:
+    """One warning per failing channel, each with its own label (G20, G43)."""
+
+    def test_two_webhooks_on_one_host_give_two_labelled_warnings(self, httpx_mock):
+        hooks = [
+            WebhookConfig(url="https://a.example.com/one?token=x"),
+            WebhookConfig(url="https://a.example.com/two?token=y"),
+        ]
+        manager = NotificationManager(NotificationConfig(webhooks=hooks))
+        for hook in hooks:
+            httpx_mock.add_response(url=hook.url, status_code=500)
+        manager.notify_alert("r", "m")
+        warnings = manager.pop_failures()
+        assert len(warnings) == 2
+        assert warnings[0] != warnings[1]
+        assert "webhook 1 (" in warnings[0] and "webhook 2 (" in warnings[1]
+        assert manager.pop_failures() == []
+
+    def test_failure_warning_text_says_when_it_returns(self, httpx_mock):
+        url = "https://hooks.slack.com/services/T/B/x"
+        manager = NotificationManager(NotificationConfig(slack_webhook_url=url))
+        httpx_mock.add_response(url=url, status_code=500)
+        manager.send_slack("r", "m")
+        (warning,) = manager.pop_failures()
+        assert warning.startswith("Notification delivery failed (slack (")
+        assert "shows again if the channel fails after it works again" in warning
+        assert "suppressed for this session" not in warning
+
+
+class TestSlackLimitsAndChannelFailures:
+    """Slack text stays in its block, and one bad channel never skips the others (G43)."""
+
+    URL = "https://hooks.slack.com/services/T/B/x"
+
+    def test_newline_in_a_name_becomes_a_space(self, httpx_mock):
+        manager = NotificationManager(NotificationConfig(slack_webhook_url=self.URL))
+        entry = AuditLogEntry(
+            id="1", action="DELETE", component_name="x\n*User:* admin@example.com",
+            timestamp=datetime.now(UTC),
+        )
+        httpx_mock.add_response(url=self.URL, status_code=200)
+        manager.send_slack("r", "m", entry)
+        fields = json.loads(httpx_mock.get_requests()[0].content)["blocks"][2]["text"]["text"]
+        lines = fields.splitlines()
+        assert [line for line in lines if line.startswith("*User:*")] == ["*User:* unknown"]
+
+    def test_slack_limits(self, httpx_mock):
+        manager = NotificationManager(NotificationConfig(slack_webhook_url=self.URL))
+        httpx_mock.add_response(url=self.URL, status_code=200)
+        manager.send_slack("r" * 300, "m" * 5000)
+        blocks = json.loads(httpx_mock.get_requests()[0].content)["blocks"]
+        assert len(blocks[0]["text"]["text"]) <= 150
+        assert len(blocks[1]["text"]["text"]) <= 3000
+
+    @pytest.mark.parametrize("timeout", [0, -1, 301])
+    def test_webhook_timeout_is_bounded(self, timeout):
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            WebhookConfig(url="https://example.com/h", timeout=timeout)
+
+    def test_a_channel_that_raises_does_not_skip_the_others(self, httpx_mock):
+        hook = WebhookConfig(url="https://example.com/hook")
+        manager = NotificationManager(
+            NotificationConfig(slack_webhook_url=self.URL, webhooks=[hook])
+        )
+        httpx_mock.add_response(url=self.URL, status_code=200)
+        with patch.object(manager, "send_webhook", side_effect=UnicodeEncodeError(
+            "utf-8", "\ud83d", 0, 1, "surrogates not allowed"
+        )):
+            sent = manager.notify_alert("r", "m")
+        assert sent == 1  # Slack still got it
+        (warning,) = manager.pop_failures()
+        assert "webhook 1" in warning
+
+
+def test_redact_url_keeps_ipv6_brackets():
+    from cja_audit_log_monitor.utils import redact_url
+
+    assert redact_url("http://[::1]:8080/x?token=s") == "http://[::1]:8080/…"

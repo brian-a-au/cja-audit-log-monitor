@@ -22,7 +22,7 @@ from rich.markup import escape
 from rich.text import Text
 
 from . import __version__
-from .alerts import AlertEngine, analyze_for_anomalies
+from .alerts import AlertEngine, analyze_for_anomalies, engine_rules
 from .auth import AuthenticationError, TokenManager
 from .client import MAX_PAGE_SIZE, APIError, AuditLogsClient, RateLimitError
 from .config import (
@@ -162,6 +162,9 @@ def check_output_path(output: Path | None, force: bool) -> None:
 def setup_logging(verbose: bool) -> None:
     """Configure logging based on verbosity."""
     level = logging.DEBUG if verbose else logging.WARNING
+    # httpcore's debug lines dump raw headers (a redirect target can hold a webhook
+    # secret) and fill the screen; -v is for this tool's own lines.
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
     logging.basicConfig(
         level=level,
         format="%(message)s",
@@ -811,7 +814,7 @@ def monitor(
 
         alert_engine = None
         if alerts:
-            alert_engine = AlertEngine(settings.alert_rules or None)
+            alert_engine = AlertEngine(engine_rules(settings))
             rule_count = len(alert_engine.rules)
             err_console.print(f"[dim]Alert detection enabled with {rule_count} rules[/dim]")
 
@@ -972,7 +975,7 @@ def _run_anomalies_cycle(
     # any iterable-of-entries the client/mock returns.
     entries = list(client.get_all_logs(query))
 
-    raw_anomalies = analyze_for_anomalies(entries)
+    raw_anomalies = analyze_for_anomalies(entries, lookback_hours=lookback)
     new_anomalies = dedup.suppress_seen(raw_anomalies)
 
     as_json = output_format == "json"
@@ -990,20 +993,22 @@ def _run_anomalies_cycle(
         description = anomaly.get("description", anomaly.get("type", "anomaly"))
         if not as_json:
             console.print(f"[yellow]•[/yellow] {escape(description)}")
+
+    # Each anomaly goes to each channel until that channel accepts it once.
+    channels = set(nm.channels()) if nm.config.notify_on_anomalies else set()
+    for anomaly, todo in dedup.pending(raw_anomalies, channels):
         try:
-            nm.notify_anomaly(anomaly)
+            dedup.mark_sent(anomaly, nm.notify_anomaly(anomaly, channels=todo))
         except Exception as e:
-            # Network failures are surfaced via pop_first_failure; this catches
+            # Network failures are surfaced via pop_failures; this catches
             # unexpected programming errors so one bad anomaly doesn't kill the cycle.
             # Log only the type: the message and traceback locals could hold a webhook URL.
             logging.getLogger(__name__).error(
                 "notify_anomaly raised %s unexpectedly; continuing", type(e).__name__
             )
+    dedup.forget_missing(raw_anomalies)
 
-    while True:
-        warning = nm.pop_first_failure()
-        if warning is None:
-            break
+    for warning in nm.pop_failures():
         err_console.print(f"[yellow]⚠ {escape(str(warning))}[/yellow]")
 
 
@@ -1224,7 +1229,7 @@ def tail(
 
         alert_engine = None
         if alerts:
-            alert_engine = AlertEngine(settings.alert_rules or None)
+            alert_engine = AlertEngine(engine_rules(settings))
 
         with NotificationManager(settings.notifications) as nm:
             actions_filter = parse_actions(action) if action else None
@@ -1292,7 +1297,7 @@ def alerts_list(ctx: click.Context, output_format: str) -> None:
     config_path = ctx.obj.get("config_path")
 
     settings = load_config(config_path)
-    engine = AlertEngine(settings.alert_rules or None)
+    engine = AlertEngine(engine_rules(settings))
     rules_status = engine.get_rule_status()
 
     if output_format == "json":
@@ -1341,7 +1346,7 @@ def alerts_test(ctx: click.Context, days: int) -> None:
     config_path = ctx.obj.get("config_path")
 
     client, settings = get_client(config_path)
-    engine = AlertEngine(settings.alert_rules or None)
+    engine = AlertEngine(engine_rules(settings))
 
     err_console.print(f"[dim]Testing alert rules against last {days} day(s) of logs...[/dim]\n")
 
