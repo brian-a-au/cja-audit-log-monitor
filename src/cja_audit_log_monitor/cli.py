@@ -48,7 +48,7 @@ from .models import API_EARLIEST, ActionType, AuditLogEntry, AuditLogQuery, Comp
 from .monitor import AuditLogMonitor
 from .notifications import AnomalyDedupFilter, NotificationManager
 from .stats import build_date_range_query, calculate_stats, generate_report
-from .utils import get_user_identifier
+from .utils import user_identities
 
 P = ParamSpec("P")
 R = TypeVar("R")
@@ -1347,12 +1347,12 @@ def tail(
             actions_filter = parse_actions(action) if action else None
             action_values = {item.value for item in actions_filter} if actions_filter else None
 
+            wanted_user = user.casefold() if user else None
+
             def matches(entry: AuditLogEntry) -> bool:
-                if user and user not in (
-                    entry.user_id,
-                    entry.user_email,
-                    get_user_identifier(entry),
-                ):
+                # The same match as a rule's `users`: id, email or name, in any case.
+                names = {name.casefold() for name in user_identities(entry)}
+                if wanted_user and wanted_user not in names:
                     return False
                 if component_id and entry.component_id != component_id:
                     return False

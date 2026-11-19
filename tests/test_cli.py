@@ -3713,3 +3713,39 @@ def test_api_network_failure_is_a_network_error(runner) -> None:
     with patch("cja_audit_log_monitor.cli.get_client", return_value=(client, _settings())):
         result = runner.invoke(main, ["cli", "list"])
     assert result.stderr.startswith("Network error: could not reach cja.adobe.io")
+
+
+@pytest.mark.parametrize("given", ["ALICE@example.com", "Alice Smith", "u-alice"])
+def test_tail_user_matches_like_rule_users(runner: CliRunner, given) -> None:
+    """tail -u matches id, email or name in any case, the same way rule `users` do."""
+    client = MagicMock()
+    client.get_logs.return_value = AuditLogResponse(
+        content=[
+            AuditLogEntry(
+                id="1",
+                action="CREATE",
+                user_id="U-ALICE",
+                user_email="alice@example.com",
+                user_name="alice smith",
+                component_name="mine-comp",
+            ),
+            AuditLogEntry(
+                id="2", action="CREATE", user_email="bob@example.com", component_name="other-comp"
+            ),
+        ],
+        last=True,
+    )
+
+    def fake_start(self, *args, **kwargs):
+        for entry in self._get_new_entries():
+            self._display_entry(entry)
+
+    with (
+        patch("cja_audit_log_monitor.cli.get_client") as gc,
+        patch("cja_audit_log_monitor.cli.AuditLogMonitor.start", fake_start),
+    ):
+        gc.return_value = (client, MagicMock(alert_rules=[]))
+        result = runner.invoke(main, ["cli", "tail", "-u", given, "--no-alerts"])
+    assert result.exit_code == 0, result.output
+    assert "mine-comp" in result.output
+    assert "other-comp" not in result.output
