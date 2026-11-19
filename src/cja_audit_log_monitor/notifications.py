@@ -72,6 +72,7 @@ class NotificationManager:
         """
         self.config = config or NotificationConfig()
         self._client: httpx.Client | None = None
+        self._closed = False
         self._failure_warned: dict[str, bool] = {}
         self._pending_warnings: list[str] = []
 
@@ -86,9 +87,14 @@ class NotificationManager:
             self._client = httpx.Client(timeout=30.0)
         return self._client
 
-    def close(self) -> None:
-        """Close the HTTP client."""
-        if self._client:
+    def close(self, wait: bool = True) -> None:
+        """Close the HTTP client; later sends do nothing.
+
+        With ``wait=False`` (quitting the TUI) a send in progress is left to finish: closing
+        its socket would not wake the thread that waits on it.
+        """
+        self._closed = True
+        if self._client and wait:
             self._client.close()
             self._client = None
 
@@ -248,7 +254,7 @@ class NotificationManager:
         Returns:
             True if successful.
         """
-        if not webhook.enabled:
+        if not webhook.enabled or self._closed:
             return False
 
         try:
@@ -300,7 +306,7 @@ class NotificationManager:
     def _post_slack(self, payload: dict[str, Any]) -> bool:
         """Post a payload to the Slack webhook, tracking failures without leaking the URL."""
         url = self.config.slack_webhook_url
-        if not url:
+        if not url or self._closed:
             return False
         _url_redactor.add(url)
         try:

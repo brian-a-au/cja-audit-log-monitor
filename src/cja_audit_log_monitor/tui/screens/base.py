@@ -140,6 +140,9 @@ class ContentView(Vertical):
         self._state = state
         # Bumped by each run_load; a load whose number is no longer current is stale.
         self._load_generation = 0
+        # One fetch thread per view; the newest request waiting for it (see run_load).
+        self._fetch_running = False
+        self._pending_fetch: Callable[[], None] | None = None
 
     def compose(self) -> ComposeResult:
         """Compose the view: header, an (initially hidden) empty state, then the body."""
@@ -197,6 +200,10 @@ class ContentView(Vertical):
         on the UI thread. Each call supersedes the previous one: a superseded load's
         result or error is dropped, and only the newest load hides the loading
         indicator.
+
+        A view runs one fetch at a time. A call made while a fetch runs waits as the
+        pending load (replacing an older pending one) and starts when the running fetch
+        ends. So a hung request ties up one thread, however often the user refreshes.
         """
         self._load_generation += 1
         generation = self._load_generation
@@ -210,21 +217,52 @@ class ContentView(Vertical):
                 callback(value)
             except Exception as error:  # a failure while showing data is shown too
                 if callback is handle_error:
-                    raise
+                    # Showing the error failed (e.g. the view is being rebuilt). Raising
+                    # here would end the app, so log it and leave the view as it is.
+                    logger.exception("Showing a load error failed")
+                    return
                 logger.exception("Applying loaded data failed")
-                handle_error(error)
+                try:
+                    handle_error(error)
+                except Exception:
+                    logger.exception("Showing a load error failed")
             finally:
                 self.set_loading(False)
 
         def work() -> None:
             try:
-                result = fetch()
-            except Exception as error:
-                self.app.call_from_thread(deliver, handle_error, error)
-            else:
-                self.app.call_from_thread(deliver, apply, result)
+                try:
+                    result = fetch()
+                except Exception as error:
+                    self.app.call_from_thread(deliver, handle_error, error)
+                else:
+                    self.app.call_from_thread(deliver, apply, result)
+            finally:
+                try:
+                    self.app.call_from_thread(self._fetch_ended)
+                except Exception:  # the app has ended; nothing is left to start
+                    pass
 
-        self.run_worker(work, group="load", exclusive=True, thread=True)
+        if self._fetch_running:
+            self._pending_fetch = work
+            return
+        self._start_fetch(work)
+
+    def _start_fetch(self, work: Callable[[], None]) -> None:
+        self._fetch_running = True
+        self.run_worker(work, group="load", thread=True)
+
+    def _fetch_ended(self) -> None:
+        """The running fetch ended (UI thread): start the pending one, if any."""
+        self._fetch_running = False
+        work, self._pending_fetch = self._pending_fetch, None
+        if work is not None:
+            self._start_fetch(work)
+
+    def cancel_loads(self) -> None:
+        """Drop the result of any load in progress (e.g. one sent before a settings reload)."""
+        self._load_generation += 1
+        self.set_loading(False)
 
     def show_load_error(self, error: Exception) -> None:
         """Show why a load failed in place of the view body, and in the header."""

@@ -1,11 +1,13 @@
 """CLI commands for CJA Audit Log Monitor."""
 
+import asyncio
 import functools
 import json
 import logging
 import os
 import re
 import sys
+import threading
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
@@ -283,10 +285,43 @@ def main(ctx: click.Context, verbose: bool, config: Path | None) -> None:
 
     # If no subcommand is given, launch the TUI
     if ctx.invoked_subcommand is None:
-        from .tui import CJAAuditApp
+        run_tui(config)
 
-        app = CJAAuditApp(config)
-        app.run()
+
+def run_tui(config_path: Path | None) -> None:
+    """Run the TUI, then end the process without waiting for abandoned worker threads."""
+    from .tui import CJAAuditApp
+
+    app = CJAAuditApp(config_path)
+    # A loop of our own: asyncio.run() would wait for every worker thread at the end,
+    # including one still waiting on the network after the user quit.
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        app.run(loop=loop)
+    finally:
+        asyncio.set_event_loop(None)
+        loop.close()
+    exit_without_waiting_for_workers(app.return_code)
+
+
+def exit_without_waiting_for_workers(code: int | None) -> None:
+    """End the process now if a worker thread is still running.
+
+    After quit, a worker can still wait on the network, e.g. a webhook the user quit
+    during. Python would wait for that thread before the process ends, so quitting would
+    look hung. Nothing is left to save at this point, so the process ends at once.
+    """
+    others = [
+        t for t in threading.enumerate()
+        if t is not threading.main_thread() and t.is_alive() and not t.daemon
+    ]
+    if not others:
+        return
+    sys.stdout.flush()
+    sys.stderr.flush()
+    logging.shutdown()
+    os._exit(code or 0)
 
 
 # CLI subcommand group for traditional CLI commands
@@ -1664,11 +1699,7 @@ def show(ctx: click.Context, entry_id: str, max_entries: int) -> None:
 @click.pass_context
 def tui(ctx: click.Context) -> None:
     """Launch the TUI interface (same as running without arguments)."""
-    from .tui import CJAAuditApp
-
-    config_path = ctx.obj.get("config_path")
-    app = CJAAuditApp(config_path)
-    app.run()
+    run_tui(ctx.obj.get("config_path"))
 
 
 if __name__ == "__main__":

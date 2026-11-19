@@ -8,7 +8,7 @@ from pathlib import Path
 
 from ..alerts import AlertEngine, FiredAlert
 from ..auth import TokenManager
-from ..client import AuditLogsClient
+from ..client import AuditLogsClient, ClientClosedError
 from ..config import CJASettings, ConfigError, get_config_path, load_config
 from ..models import ActionType, AuditLogEntry, AuditLogQuery, ComponentType
 from ..notifications import NotificationManager
@@ -103,6 +103,8 @@ class AppState:
         self.connection_error: str | None = None
         self.config_error: str | None = None
         self.config_error_summary: str | None = None
+        # Set by close(): no client is built after that.
+        self._closed = False
         # Names of rules turned off this session; kept across a settings reload.
         self._disabled_rules: set[str] = set()
         self.last_refresh: datetime | None = None
@@ -136,6 +138,8 @@ class AppState:
     def client(self) -> AuditLogsClient:
         """Get API client, creating if necessary."""
         with self._client_lock:
+            if self._closed:
+                raise ClientClosedError()
             if self._client is None:
                 self._token_manager = TokenManager(self.settings)
                 self._client = AuditLogsClient(self.settings, self._token_manager)
@@ -288,12 +292,14 @@ class AppState:
                     )
         return fired
 
-    def close(self) -> None:
-        """Clean up resources."""
+    def close(self, wait: bool = True) -> None:
+        """Clean up resources. Nothing is sent after this, not even a retry.
+
+        ``wait=False`` returns at once (quitting): a request in progress is left to end.
+        """
         with self._client_lock:
+            self._closed = True
             if self._client:
-                self._client.close()
-                self._client = None
+                self._client.close(wait=wait)
         if self._notification_manager:
-            self._notification_manager.close()
-            self._notification_manager = None
+            self._notification_manager.close(wait=wait)

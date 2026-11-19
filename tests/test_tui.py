@@ -2822,11 +2822,11 @@ class TestStaleLoads:
             table.focus()
             await pilot.press("n")
             assert await _wait_for(started.is_set, pilot)
-            await pilot.press("p")
-            assert await _wait_for(reload_started.is_set, pilot)
-            # The superseded page 1 fails while the page 0 reload is still running.
+            await pilot.press("p")  # waits as the pending load: one fetch at a time
+            # The superseded page 1 fails; the page 0 reload then starts and is slow.
             release.set()
             assert await _wait_for(delivered.is_set, pilot)
+            assert await _wait_for(reload_started.is_set, pilot)
             await pilot.pause()
             assert indicator.display, "a superseded load hid the loading indicator"
             assert table.row_count == 50
@@ -4406,3 +4406,209 @@ class TestReloadKeepsWhatWorks:
                 "keeping the current settings" in n.message for n in app._notifications
             )
             assert state.settings.client_id == "from-file"
+
+
+# ---------------------------------------------------------------------------
+# Quit is immediate, even with a request in progress (G5)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.real_mount
+async def test_quit_during_hung_request_exits_fast(fake_api, tmp_path, monkeypatch) -> None:
+    """q during a request exits at once, and the request is never retried after quit."""
+    import asyncio
+    import threading
+    import time
+
+    import httpx
+
+    from .fakeapi import raw_entry
+
+    fake_api.entries = [raw_entry(1)]
+    for key, value in fake_api.env(tmp_path / "missing.yaml").items():
+        monkeypatch.setenv(key, value)
+    built: list[float] = []
+    real_client = httpx.Client
+
+    def counting_client(*args, **kwargs):
+        built.append(time.monotonic())
+        return real_client(*args, **kwargs)
+
+    monkeypatch.setattr("cja_audit_log_monitor.client.httpx.Client", counting_client)
+    fake_api.block.set()
+    # Release the server after 10 seconds, so a regression fails instead of hanging.
+    threading.Timer(10, fake_api.block.clear).start()
+    from cja_audit_log_monitor.tui.screens.dashboard import DashboardScreen
+
+    fetch_done = threading.Event()
+    real_fetch = DashboardScreen._fetch
+
+    def tracked_fetch(self):
+        try:
+            return real_fetch(self)
+        finally:
+            fetch_done.set()
+
+    monkeypatch.setattr(DashboardScreen, "_fetch", tracked_fetch)
+    app = CJAAuditApp()
+    async with app.run_test(size=(100, 30)) as pilot:
+        assert await asyncio.to_thread(fake_api.blocked.wait, 10)
+        requests_before = len(fake_api.requests)
+        pressed = time.monotonic()
+        await pilot.press("q")
+        fake_api.block.clear()  # the server answers right away, as in the review's repro
+    elapsed = time.monotonic() - pressed
+    # Wait until the abandoned fetch thread has ended, however it ends.
+    assert await asyncio.to_thread(fetch_done.wait, 15)
+    assert elapsed < 2, f"quit took {elapsed:.1f}s"
+    assert [t for t in built if t > pressed] == [], "a new HTTP client was built after quit"
+    assert len(fake_api.requests) == requests_before, "a request was sent after quit"
+
+
+# ---------------------------------------------------------------------------
+# A late or failing load never ends the app (G32, G34)
+# ---------------------------------------------------------------------------
+
+
+async def test_on_error_that_raises_does_not_end_the_app(mock_app_state) -> None:
+    app = _make_app(mock_app_state)
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        view = app._screens["dashboard"]
+
+        def fetch():
+            raise RuntimeError("fetch failed")
+
+        def on_error(error):
+            raise ValueError("the error handler failed too")
+
+        view.run_load(fetch, lambda result: None, on_error=on_error)
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert app._exception is None
+        assert app.is_running
+
+
+async def test_verify_result_during_reload_is_dropped(mock_app_state, monkeypatch) -> None:
+    """The config view's verify that ends while the view is rebuilt is dropped, no crash."""
+    import asyncio
+    import threading
+
+    started, release, queued = threading.Event(), threading.Event(), threading.Event()
+    ok = dict(mock_app_state.client.verify_connection.return_value)
+    slow: list[int] = []
+
+    def verify():
+        if slow:
+            slow.pop()
+            started.set()
+            release.wait(10)
+        return ok
+
+    mock_app_state.client.verify_connection.side_effect = verify
+    monkeypatch.setattr(mock_app_state, "reload_settings", lambda: None)
+    app = _make_app(mock_app_state)
+    async with app.run_test(size=(140, 40), notifications=True) as pilot:
+        await pilot.press("c")
+        await pilot.pause()
+        view = app._screens["settings"]
+        slow.append(1)
+        view.refresh_data()
+        assert await asyncio.to_thread(started.wait, 10)
+        original = app.call_from_thread
+
+        def spy(callback, *args, **kwargs):
+            queued.set()
+            return original(callback, *args, **kwargs)
+
+        app.call_from_thread = spy
+        real_mount_all = view.mount_all
+
+        def mount_all(widgets, **kwargs):
+            # recompose() removed the old children; the old request ends right now.
+            release.set()
+            assert queued.wait(5)
+            return real_mount_all(widgets, **kwargs)
+
+        monkeypatch.setattr(view, "mount_all", mount_all)
+        await view._reload_settings()
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert app._exception is None
+        assert app.is_running
+
+
+@pytest.mark.parametrize("outcome", ["fails", "succeeds"])
+async def test_alert_test_run_across_reload_is_dropped(mock_app_state, outcome) -> None:
+    """A "test rules" run that started before a reload does not land after it (G34)."""
+    import asyncio
+    import threading
+
+    started, release = threading.Event(), threading.Event()
+
+    def get_all_logs(*args, **kwargs):
+        started.set()
+        release.wait(10)
+        if outcome == "fails":
+            raise RuntimeError("Request failed: client has been closed")
+        return mock_app_state.client.get_logs_sample.return_value[0]
+
+    mock_app_state.client.get_all_logs.side_effect = get_all_logs
+    app = _make_app(mock_app_state)
+    async with app.run_test(size=(140, 40), notifications=True) as pilot:
+        await pilot.press("a")
+        await pilot.pause()
+        view = app._screens["alerts"]
+        app.query_one("#test-rules").press()
+        assert await asyncio.to_thread(started.wait, 10)
+        before = _plain(view.query_one("#test-results", Static))
+        app.settings_reloaded()
+        release.set()
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert _plain(view.query_one("#test-results", Static)) == before
+        assert "disconnected" not in _status_text(app)
+
+
+# ---------------------------------------------------------------------------
+# Hung requests do not use up the threads (G33)
+# ---------------------------------------------------------------------------
+
+
+async def test_hung_refreshes_use_one_thread_and_other_views_still_load(mock_app_state) -> None:
+    import asyncio
+    import threading
+
+    release = threading.Event()
+    verify_calls: list[int] = []
+    ok = dict(mock_app_state.client.verify_connection.return_value)
+
+    def hung_verify():
+        verify_calls.append(1)
+        release.wait(15)
+        return ok
+
+    mock_app_state.client.verify_connection.side_effect = hung_verify
+    app = _make_app(mock_app_state)
+    try:
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.pause()
+            dashboard = app._screens["dashboard"]
+            for _ in range(40):  # more presses of r than the thread pool has threads
+                dashboard.refresh_data()
+                await pilot.pause()
+            assert await _wait_for(lambda: len(verify_calls) >= 1, pilot)
+            assert len(verify_calls) == 1  # one fetch at a time for the view
+
+            mock_app_state.client.get_logs_sample.reset_mock()
+            await pilot.press("s")
+            await pilot.pause()
+            app._screens["stats"].refresh_data()
+            assert await _wait_for(lambda: mock_app_state.client.get_logs_sample.called, pilot)
+
+            release.set()  # the hung fetch ends; the newest pending one runs next
+            assert await _wait_for(lambda: len(verify_calls) == 2, pilot)
+            await app.workers.wait_for_complete()
+    finally:
+        release.set()
+        await asyncio.sleep(0)

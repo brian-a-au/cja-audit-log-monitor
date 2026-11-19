@@ -59,6 +59,13 @@ class APIError(Exception):
         self.response = response
 
 
+class ClientClosedError(APIError):
+    """Raised for a request made after ``close()``; nothing is sent."""
+
+    def __init__(self) -> None:
+        super().__init__("the API client is closed")
+
+
 class RateLimitError(APIError):
     """Raised when rate limited by API."""
 
@@ -81,11 +88,17 @@ class AuditLogsClient:
         self.token_manager = token_manager or TokenManager(settings)
         self._client: httpx.Client | None = None
         self._client_lock = threading.Lock()
+        self._closed = False
+        # Requests in progress. A close without waiting leaves the connection to the last
+        # one: closing a socket under a thread that reads it does not wake that thread.
+        self._in_flight = 0
 
     @property
     def client(self) -> httpx.Client:
         """Get or create HTTP client."""
         with self._client_lock:
+            if self._closed:
+                raise ClientClosedError()
             if self._client is None:
                 self._client = httpx.Client(
                     base_url=self.settings.api_base_url,
@@ -93,12 +106,29 @@ class AuditLogsClient:
                 )
             return self._client
 
-    def close(self) -> None:
-        """Close the HTTP client."""
+    def close(self, wait: bool = True) -> None:
+        """Close the client. Later requests raise ClientClosedError and are never sent.
+
+        With ``wait=False`` (quitting the TUI) this returns at once: a request in progress
+        is left to finish, is not retried, and the last one to end closes the connection.
+        """
         with self._client_lock:
-            if self._client:
-                self._client.close()
+            self._closed = True
+            http = self._client
+            if http is None or (not wait and self._in_flight):
+                return
+            self._client = None
+        http.close()
+
+    def _request_done(self) -> None:
+        """Count a request as ended; after a close without waiting, the last one cleans up."""
+        with self._client_lock:
+            self._in_flight -= 1
+            http = self._client if self._closed and self._in_flight == 0 else None
+            if http is not None:
                 self._client = None
+        if http is not None:
+            http.close()
 
     def __enter__(self) -> "AuditLogsClient":
         return self
@@ -115,11 +145,31 @@ class AuditLogsClient:
         retry_count: int = 3,
     ) -> dict[str, Any]:
         """Make authenticated request with retry logic."""
+        with self._client_lock:
+            if self._closed:
+                raise ClientClosedError()
+            self._in_flight += 1
+        try:
+            return self._request_with_retries(method, path, params, json, retry_count)
+        finally:
+            self._request_done()
+
+    def _request_with_retries(
+        self,
+        method: str,
+        path: str,
+        params: dict[str, Any] | None,
+        json: dict[str, Any] | None,
+        retry_count: int,
+    ) -> dict[str, Any]:
+        """The body of ``_request``."""
         headers = self.token_manager.get_auth_headers()
         # A token refresh after a 401 happens once and does not use up a retry attempt.
         refreshed = False
         attempt = 0
         while attempt < retry_count:
+            if self._closed:
+                raise ClientClosedError()  # closed during a retry wait: send nothing more
             try:
                 response = self.client.request(
                     method=method,
@@ -189,7 +239,15 @@ class AuditLogsClient:
                     response=error_detail,
                 ) from e
 
+            except RuntimeError as e:
+                # httpx refuses a client closed between the lookup and the send.
+                if self._closed or "closed" in str(e):
+                    raise ClientClosedError() from None
+                raise
+
             except httpx.RequestError as e:
+                if self._closed:
+                    raise ClientClosedError() from None
                 if attempt < retry_count - 1:
                     logger.warning(
                         "Request failed, retrying (attempt %d/%d): %s",
