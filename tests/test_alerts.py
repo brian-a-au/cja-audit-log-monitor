@@ -688,3 +688,38 @@ class TestRuleDefinitions:
         ]
         kinds = [a["type"] for a in analyze_for_anomalies(entries)]
         assert "bulk_delete_single_user" in kinds
+
+
+class MovableClock(datetime):
+    """datetime whose now() the test sets."""
+
+    current = datetime(2026, 3, 1, 12, 0, tzinfo=UTC)
+
+    @classmethod
+    def now(cls, tz=None):
+        return cls.current
+
+
+class TestFutureTimestampsAgeOut:
+    """An event stamped in the future is counted at the wall clock time (G18)."""
+
+    T = datetime(2026, 3, 1, 12, 0, tzinfo=UTC)
+
+    @staticmethod
+    def _delete(when: datetime) -> AuditLogEntry:
+        return AuditLogEntry(action="DELETE", timestamp=when, user_id="u1")
+
+    def test_future_event_ages_out_of_the_window(self, monkeypatch) -> None:
+        monkeypatch.setattr("cja_audit_log_monitor.alerts.datetime", MovableClock)
+        rule = AlertRule(name="trio", actions=[ActionType.DELETE], threshold_count=3)
+        engine = AlertEngine(rules=[rule])
+        MovableClock.current = self.T
+        engine.check_entry(self._delete(self.T + timedelta(days=365)))
+        MovableClock.current = self.T + timedelta(hours=2)
+        later = self.T + timedelta(hours=2)
+        fired = [
+            alert
+            for seconds in (10, 20)
+            for alert in engine.check_entry(self._delete(later - timedelta(seconds=seconds)))
+        ]
+        assert fired == []  # two real deletes do not make three

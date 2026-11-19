@@ -86,6 +86,10 @@ DEFAULT_ALERT_RULES = [
 ]
 
 
+# How far ahead of this machine's clock an event time may be before it counts as "now".
+FUTURE_SKEW = timedelta(minutes=5)
+
+
 def engine_rules(settings: Any) -> list[AlertRule] | None:
     """The rules for an AlertEngine: the configured ones, or None for the built-in rules.
 
@@ -231,7 +235,12 @@ class AlertEngine:
             List of FiredAlert objects for triggered rules.
         """
         fired: list[FiredAlert] = []
-        timestamp = entry.timestamp or datetime.now(UTC)
+        now = datetime.now(UTC)
+        timestamp = entry.timestamp or now
+        if timestamp > now + FUTURE_SKEW:
+            # A clock far ahead would keep the event in every window for good; count it
+            # as happening now, so it ages out like any other event.
+            timestamp = now
 
         for rule in self.rules:
             if not rule.enabled:
