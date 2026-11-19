@@ -9,9 +9,9 @@ import re
 import sys
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
-from itertools import chain, islice
+from itertools import islice
 from pathlib import Path
 from typing import Any, ParamSpec, TypeVar
 
@@ -687,36 +687,40 @@ def export(
 
     err_console.print("[dim]Fetching audit logs...[/dim]")
 
+    # One entry past --max-entries is read, to tell whether the limit cut the export.
+    cut = {"value": False}
+
+    def up_to_limit(entries: Iterator[AuditLogEntry]) -> Iterator[AuditLogEntry]:
+        for index, entry in enumerate(entries):
+            if max_entries is not None and index == max_entries:
+                cut["value"] = True
+                return
+            yield entry
+
     with client:
         if format in {"csv", "tsv"}:
             query.page_size = MAX_PAGE_SIZE  # fewer requests for a long export
-            entries_iter = client.get_logs_paginated(query)
-            if max_entries is not None:
-                entries_iter = islice(entries_iter, max_entries)
-
-            first_entry = next(entries_iter, None)
-            if first_entry is None:
-                err_console.print("[yellow]No audit logs found to export.[/yellow]")
-                return
-
-            count = export_entries(
-                chain([first_entry], entries_iter),
-                destination,
-                output_format=format,
-                pretty=pretty,
-                overwrite=force,
-            )
+            source: Any = up_to_limit(client.get_logs_paginated(query))
         else:
-            entries = client.get_all_logs(query, max_entries=max_entries)
-            if not entries:
-                err_console.print("[yellow]No audit logs found to export.[/yellow]")
-                return
-            count = export_entries(
-                entries, destination, output_format=format, pretty=pretty, overwrite=force
-            )
+            limit = None if max_entries is None else max_entries + 1
+            source = list(up_to_limit(iter(client.get_all_logs(query, max_entries=limit))))
+        # An empty result still writes an empty document, so a scheduled export never
+        # leaves yesterday's file in place.
+        count = export_entries(
+            source, destination, output_format=format, pretty=pretty, overwrite=force
+        )
 
     target = "stdout" if to_stdout else escape(str(output))
-    err_console.print(f"[green]Exported {count} entries to {target}[/green]")
+    if count == 0:
+        err_console.print(
+            f"[yellow]No audit logs matched; wrote an empty file to {target}.[/yellow]"
+        )
+    else:
+        err_console.print(f"[green]Exported {count} entries to {target}[/green]")
+    if cut["value"]:
+        err_console.print(
+            f"[yellow]Stopped at --max-entries {max_entries}; more entries matched.[/yellow]"
+        )
 
 
 @cli.command()

@@ -3135,3 +3135,51 @@ class TestExportPathChecks:
         assert result.exit_code == 1
         assert "already exists" in result.stderr
         client.get_all_logs.assert_not_called()
+
+
+class TestEmptyAndCutExports:
+    """An empty export writes an empty document; a cut export says so (G23, G44)."""
+
+    @staticmethod
+    def _run(args, entries):
+        client = MagicMock()
+        client.__enter__ = MagicMock(return_value=client)
+        client.__exit__ = MagicMock(return_value=False)
+        client.get_all_logs.side_effect = lambda q, max_entries=None: entries[:max_entries]
+        client.get_logs_paginated.side_effect = lambda q: iter(entries)
+        with patch("cja_audit_log_monitor.cli.get_client", return_value=(client, _settings())):
+            return CliRunner().invoke(main, ["cli", "export", *args])
+
+    @pytest.mark.parametrize("fmt", ["json", "csv", "tsv"])
+    @pytest.mark.parametrize("where", ["new", "force", "stdout"])
+    def test_empty_export_writes_an_empty_document(self, tmp_path, fmt, where) -> None:
+        target = tmp_path / f"out.{fmt}"
+        args = ["-F", fmt]
+        if where == "stdout":
+            args += ["-o", "-"]
+        else:
+            if where == "force":
+                target.write_text("yesterday")
+                args.append("--force")
+            args += ["-o", str(target)]
+        result = self._run(args, [])
+        assert result.exit_code == 0, result.output
+        assert "No audit logs matched" in result.stderr
+        text = result.stdout if where == "stdout" else target.read_text()
+        if fmt == "json":
+            data = json.loads(text)
+            assert data["count"] == 0 and data["entries"] == []
+        else:
+            sep = "," if fmt == "csv" else "\t"
+            lines = text.strip().splitlines()
+            assert len(lines) == 1 and lines[0].startswith(f"id{sep}timestamp")
+
+    @pytest.mark.parametrize("fmt", ["json", "csv"])
+    def test_max_entries_cut_is_reported(self, tmp_path, sample_audit_entries, fmt) -> None:
+        result = self._run(
+            ["-F", fmt, "--max-entries", "3", "-o", str(tmp_path / f"o.{fmt}")],
+            sample_audit_entries,
+        )
+        assert result.exit_code == 0, result.output
+        assert "Exported 3 entries" in result.stderr
+        assert "--max-entries" in result.stderr
