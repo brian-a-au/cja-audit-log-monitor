@@ -152,3 +152,14 @@ class TestTopN:
         assert len(calculate_stats(entries, top_n=15)["top_users"]) == 15
         assert len(calculate_stats(entries, top_n=3)["top_users"]) == 3
         assert len(calculate_stats(entries)["top_users"]) == 10
+
+
+def test_stats_use_utc() -> None:
+    from cja_audit_log_monitor.models import AuditLogEntry
+    from cja_audit_log_monitor.stats import calculate_stats
+
+    entry = AuditLogEntry.model_validate(
+        {"id": "1", "action": "EDIT", "dateCreated": "2026-11-18T23:30:00-07:00"}
+    )
+    stats = calculate_stats([entry])
+    assert stats["date_range"]["start"] == "2026-11-19 06:30:00"

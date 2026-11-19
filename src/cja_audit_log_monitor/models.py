@@ -113,10 +113,12 @@ class AuditLogEntry(BaseModel):
     @field_validator("timestamp")
     @classmethod
     def _assume_utc(cls, value: datetime | None) -> datetime | None:
-        """Read a timestamp with no timezone as UTC."""
-        if value is not None and value.tzinfo is None:
+        """Store every timestamp in UTC; one with no timezone is read as UTC."""
+        if value is None:
+            return None
+        if value.tzinfo is None:
             return value.replace(tzinfo=UTC)
-        return value
+        return value.astimezone(UTC)
 
     @model_validator(mode="before")
     @classmethod
