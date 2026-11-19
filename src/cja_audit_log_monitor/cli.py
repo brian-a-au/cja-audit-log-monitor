@@ -90,6 +90,15 @@ def require_text(ctx: click.Context, param: click.Parameter, value: str | None) 
     return value.strip() if value is not None else None
 
 
+def plural(count: int, noun: str) -> str:
+    """``count`` with ``noun`` in the right number, e.g. "1 entry" or "1,200 entries"."""
+    if count == 1:
+        return f"1 {noun}"
+    last = noun.rsplit(" ", 1)[-1]
+    plural_last = last[:-1] + "ies" if last.endswith("y") else last + "s"
+    return f"{count:,} {noun[: len(noun) - len(last)]}{plural_last}"
+
+
 def days_or_default(days: int | None, settings: CJASettings) -> int:
     """The --days value, or the configured default_days when the flag was not given."""
     return settings.default_days if days is None else days
@@ -459,7 +468,7 @@ def cli_list(
     else:
         table = format_logs_table(entries, show_details=details)
         console.print(table)
-        console.print(f"\n[dim]Showing {len(entries)} entries[/dim]")
+        console.print(f"\n[dim]Showing {plural(len(entries), 'entry')}[/dim]")
 
 
 @cli.command()
@@ -530,7 +539,7 @@ def search(
         if output_format == "json":
             emit_json({"entries": [], "count": 0})
         else:
-            console.print("[dim]No matching audit logs found.[/dim]")
+            console.print("[dim]No audit logs found.[/dim]")
         return
 
     if output_format == "json":
@@ -541,7 +550,7 @@ def search(
     else:
         table = format_logs_table(entries, show_details=details)
         console.print(table)
-        console.print(f"\n[dim]Found {len(entries)} matching entries[/dim]")
+        console.print(f"\n[dim]Found {plural(len(entries), 'matching entry')}[/dim]")
 
 
 @cli.command()
@@ -580,7 +589,7 @@ def dashboard(ctx: click.Context, dashboard_id: str, limit: int, output_format: 
     console.print(f"[bold]Audit history for dashboard:[/bold] {literal(dashboard_id)}\n")
     table = format_logs_table(entries, show_details=True)
     console.print(table)
-    console.print(f"\n[dim]Found {len(entries)} entries[/dim]")
+    console.print(f"\n[dim]Found {plural(len(entries), 'entry')}[/dim]")
 
 
 @cli.command()
@@ -627,7 +636,7 @@ def user(
         console.print(f"[bold]Audit history for user:[/bold] {literal(user_id)}\n")
         table = format_logs_table(entries, show_details=True)
         console.print(table)
-        console.print(f"\n[dim]Found {len(entries)} entries[/dim]")
+        console.print(f"\n[dim]Found {plural(len(entries), 'entry')}[/dim]")
 
 
 @cli.command()
@@ -690,7 +699,7 @@ def component(
         console.print(f"{header}\n")
         table = format_logs_table(entries, show_details=True)
         console.print(table)
-        console.print(f"\n[dim]Found {len(entries)} entries[/dim]")
+        console.print(f"\n[dim]Found {plural(len(entries), 'entry')}[/dim]")
 
 
 @cli.command()
@@ -820,7 +829,7 @@ def export(
             f"[yellow]No audit logs matched; wrote an empty file to {target}.[/yellow]"
         )
     else:
-        err_console.print(f"[green]Exported {count} entries to {target}[/green]")
+        err_console.print(f"[green]Exported {plural(count, 'entry')} to {target}[/green]")
     if cut["value"]:
         err_console.print(
             f"[yellow]Stopped at --max-entries {max_entries}; more entries matched.[/yellow]"
@@ -1269,7 +1278,7 @@ def report(
         entries = client.get_all_logs(query, max_entries=max_entries + 1)
 
     if not entries:
-        err_console.print("[yellow]No audit logs found for the specified period.[/yellow]")
+        err_console.print("[dim]No audit logs found for the specified period.[/dim]")
 
     truncated = len(entries) > max_entries
     entries = entries[:max_entries]
@@ -1456,7 +1465,7 @@ def alerts_test(ctx: click.Context, days: int) -> None:
         entries = client.get_all_logs(query)
 
     if not entries:
-        console.print("[yellow]No audit logs found.[/yellow]")
+        console.print("[dim]No audit logs found.[/dim]")
         return
 
     # Check all entries
@@ -1584,7 +1593,7 @@ def query(
         table = format_logs_table(entries, show_details=False)
         console.print(table)
         if not quiet:
-            console.print(f"\n[dim]Found {len(entries)} entries ({label})[/dim]")
+            console.print(f"\n[dim]Found {plural(len(entries), 'entry')} ({label})[/dim]")
 
 
 @cli.command()

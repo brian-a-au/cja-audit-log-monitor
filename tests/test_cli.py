@@ -1,6 +1,7 @@
 """Tests for CLI commands."""
 
 import json
+import re
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -3769,3 +3770,60 @@ def test_anomalies_watch_uses_the_shared_retry_policy(runner, status, retried) -
         result = runner.invoke(main, ["cli", "anomalies", "--watch", "--interval", "5"])
     assert (cycle.call_count == 2) is retried
     assert (result.exit_code == 0) is retried
+
+
+class TestCountWording:
+    """Counts read "1 entry", and empty results use one wording (G47)."""
+
+    @staticmethod
+    def _run(args, entries):
+        client = MagicMock()
+        client.__enter__ = MagicMock(return_value=client)
+        client.__exit__ = MagicMock(return_value=False)
+        client.get_all_logs.return_value = entries
+        client.get_component_logs.return_value = entries
+        client.get_logs_paginated.side_effect = lambda *a, **k: iter(entries)
+        with patch("cja_audit_log_monitor.cli.get_client", return_value=(client, _settings())):
+            return CliRunner().invoke(main, ["cli", *args])
+
+    @pytest.mark.parametrize(
+        "args",
+        [
+            ["list"],
+            ["search"],
+            ["user", "-u", "a@example.com"],
+            ["component", "-i", "c"],
+            ["dashboard", "-i", "d"],
+            ["query", "--today"],
+        ],
+        ids=lambda a: a[0],
+    )
+    def test_one_entry_is_singular(self, sample_audit_entry, args) -> None:
+        result = self._run(args, [sample_audit_entry])
+        assert result.exit_code == 0, result.output
+        assert "1 entries" not in result.output
+        assert re.search(r"\b1 (matching )?entry\b", result.output)
+
+    @pytest.mark.parametrize(
+        "args",
+        [
+            ["list"],
+            ["search"],
+            ["user", "-u", "a@example.com"],
+            ["component", "-i", "c"],
+            ["dashboard", "-i", "d"],
+            ["query", "--today"],
+            ["stats"],
+            ["timeline"],
+            ["top-users"],
+        ],
+        ids=lambda a: a[0],
+    )
+    def test_empty_results_use_one_wording(self, args) -> None:
+        result = self._run(args, [])
+        assert result.exit_code == 0, result.output
+        assert "No audit logs found" in result.output
+
+    def test_export_of_one_entry(self, tmp_path, sample_audit_entry) -> None:
+        result = self._run(["export", "-o", str(tmp_path / "o.json")], [sample_audit_entry])
+        assert "Exported 1 entry " in result.stderr
