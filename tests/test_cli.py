@@ -1560,7 +1560,7 @@ class TestAnomaliesCommand:
         assert result.exit_code == 0
         sleep.assert_called_once_with(60)
 
-    @pytest.mark.parametrize("status_code", [400, 401, 403, 501, 505])
+    @pytest.mark.parametrize("status_code", [400, 401, 403, 404])
     @patch("cja_audit_log_monitor.cli.NotificationManager")
     @patch("cja_audit_log_monitor.cli._run_anomalies_cycle")
     @patch("cja_audit_log_monitor.cli.get_client")
@@ -3749,3 +3749,23 @@ def test_tail_user_matches_like_rule_users(runner: CliRunner, given) -> None:
     assert result.exit_code == 0, result.output
     assert "mine-comp" in result.output
     assert "other-comp" not in result.output
+
+
+@pytest.mark.parametrize(("status", "retried"), [(418, True), (400, False)])
+def test_anomalies_watch_uses_the_shared_retry_policy(runner, status, retried) -> None:
+    from cja_audit_log_monitor.client import APIError
+
+    client = MagicMock()
+    client.__enter__ = MagicMock(return_value=client)
+    client.__exit__ = MagicMock(return_value=False)
+    with (
+        patch("cja_audit_log_monitor.cli.get_client", return_value=(client, _settings())),
+        patch(
+            "cja_audit_log_monitor.cli._run_anomalies_cycle",
+            side_effect=[APIError("x", status_code=status), None],
+        ) as cycle,
+        patch("cja_audit_log_monitor.cli.time.sleep", side_effect=[None, KeyboardInterrupt]),
+    ):
+        result = runner.invoke(main, ["cli", "anomalies", "--watch", "--interval", "5"])
+    assert (cycle.call_count == 2) is retried
+    assert (result.exit_code == 0) is retried

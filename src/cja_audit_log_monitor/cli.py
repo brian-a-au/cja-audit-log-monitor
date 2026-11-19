@@ -45,7 +45,7 @@ from .formatters import (
     literal,
 )
 from .models import API_EARLIEST, ActionType, AuditLogEntry, AuditLogQuery, ComponentType
-from .monitor import AuditLogMonitor
+from .monitor import AuditLogMonitor, is_retryable
 from .notifications import AnomalyDedupFilter, NotificationManager
 from .stats import build_date_range_query, calculate_stats, generate_report
 from .utils import user_identities
@@ -1021,7 +1021,7 @@ def anomalies(
                 try:
                     _run_anomalies_cycle(client, nm, dedup, lookback, output_format, watch)
                 except (APIError, AuthenticationError) as e:
-                    if not watch or not _is_retryable_anomalies_error(e):
+                    if not watch or not is_retryable(e):
                         raise
                     if isinstance(e, RateLimitError):
                         cycle_delay = max(interval, e.retry_after)
@@ -1036,16 +1036,6 @@ def anomalies(
         err_console.print("\n[yellow]Anomaly scan stopped.[/yellow]")
         if not watch:
             sys.exit(1)  # an interrupted one-off scan did not finish, as for other commands
-
-
-_RETRYABLE_ANOMALY_STATUSES = frozenset({408, 425, 429, 500, 502, 503, 504})
-
-
-def _is_retryable_anomalies_error(error: APIError | AuthenticationError) -> bool:
-    """Return whether a watch cycle should retry an API or token failure."""
-    if isinstance(error, AuthenticationError):
-        return error.transient
-    return error.status_code is None or error.status_code in _RETRYABLE_ANOMALY_STATUSES
 
 
 def _install_anomalies_signal_handlers() -> None:

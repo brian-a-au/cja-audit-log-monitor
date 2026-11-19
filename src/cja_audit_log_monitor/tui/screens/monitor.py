@@ -21,6 +21,7 @@ from ...monitor import (
     SEEN_IDS_MAX,
     build_poll_query,
     fetch_unseen,
+    is_retryable,
     skipped_message,
 )
 from ...utils import RecentIds, entry_key, to_local
@@ -413,6 +414,12 @@ class MonitorScreen(ContentView):
             if classify_error(error) == "access":
                 # The connection works but this account may not read the logs.
                 self.app.set_connection_status("disconnected", f"no access: {error}")
+        if from_api and not is_retryable(error):
+            # Retrying cannot fix this (bad credentials, 400, 401, 403, 404): stop, as
+            # the CLI monitor does, instead of failing every interval.
+            self._stop_monitoring()
+            self._show_error(f"{error} · monitor stopped")
+            return
         self._set_status("error", str(error))
         if new_error:
             self._show_error(str(error))
