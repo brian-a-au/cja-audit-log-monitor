@@ -1,9 +1,13 @@
 # CJA Audit Log Monitor
 
 [![CI](https://github.com/brian-a-au/cja-audit-log-monitor/actions/workflows/ci.yml/badge.svg)](https://github.com/brian-a-au/cja-audit-log-monitor/actions/workflows/ci.yml)
-[![PyPI](https://img.shields.io/pypi/v/cja-audit-log-monitor)](https://pypi.org/project/cja-audit-log-monitor/)
-[![Python](https://img.shields.io/pypi/pyversions/cja-audit-log-monitor)](https://pypi.org/project/cja-audit-log-monitor/)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/brian-a-au/cja-audit-log-monitor/blob/main/LICENSE)
+[![Release](https://github.com/brian-a-au/cja-audit-log-monitor/actions/workflows/release.yml/badge.svg)](https://github.com/brian-a-au/cja-audit-log-monitor/actions/workflows/release.yml)
+[![PyPI](https://img.shields.io/pypi/v/cja-audit-log-monitor.svg)](https://pypi.org/project/cja-audit-log-monitor/)
+[![Python 3.11 to 3.14](https://img.shields.io/pypi/pyversions/cja-audit-log-monitor.svg)](https://pypi.org/project/cja-audit-log-monitor/)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+[![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
+[![Textual 7.3+](https://img.shields.io/badge/Textual-7.3%2B-5a4fcf.svg)](https://textual.textualize.io/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/brian-a-au/cja-audit-log-monitor/blob/main/LICENSE)
 
 [![Slideshow of the terminal app: the dashboard, the log browser, entry details, the live monitor, statistics, the alerts view and the keyboard shortcuts](https://raw.githubusercontent.com/brian-a-au/cja-audit-log-monitor/main/docs/showcase.gif)](https://github.com/brian-a-au/cja-audit-log-monitor/blob/main/docs/showcase.png)
 
@@ -159,7 +163,7 @@ Setup, scripting, and reference material live under [`docs/`](https://github.com
 
 ## Contributing
 
-Bug reports and pull requests are welcome. See [CONTRIBUTING.md](https://github.com/brian-a-au/cja-audit-log-monitor/blob/main/CONTRIBUTING.md). To report a security problem, see [SECURITY.md](https://github.com/brian-a-au/cja-audit-log-monitor/blob/main/SECURITY.md).
+Bug reports and pull requests are welcome. See [CONTRIBUTING.md](https://github.com/brian-a-au/cja-audit-log-monitor/blob/main/CONTRIBUTING.md). Everyone who takes part follows the [code of conduct](https://github.com/brian-a-au/cja-audit-log-monitor/blob/main/CODE_OF_CONDUCT.md). To report a security problem, see [SECURITY.md](https://github.com/brian-a-au/cja-audit-log-monitor/blob/main/SECURITY.md).
 
 ## License
 
