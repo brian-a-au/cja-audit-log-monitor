@@ -4,6 +4,7 @@ import csv
 import errno
 import json
 import os
+import re
 import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager, suppress
@@ -29,7 +30,8 @@ def atomic_write(
     that appears while the block runs: ``FileExistsError`` is raised instead.
     """
     try:
-        fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+        # A short temp name, so a file name near the 255 byte limit still works.
+        fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=".cja-", suffix=".tmp")
     except OSError as e:
         raise type(e)(e.errno, e.strerror, str(path)) from e
     try:
@@ -63,6 +65,42 @@ def _publish_without_overwrite(tmp_name: str, path: Path) -> None:
         os.replace(tmp_name, path)
 
 
+# Most file systems allow 255 bytes in one file name.
+_MAX_NAME_BYTES = 255
+
+
+def check_export_path(raw: str) -> tuple[Path | None, str | None, bool]:
+    """Check an export path typed by a user. Never raises.
+
+    Returns:
+        The path with ``~`` expanded (None when it cannot be used), the reason it
+        cannot be used (None when it can), and whether something already exists
+        there (a dangling symlink counts, since writing would replace it).
+    """
+    raw = raw.strip()
+    if not raw:
+        return None, "enter a file path", False
+    if raw.endswith(("/", os.sep)):
+        return None, "that path is a folder, not a file", False
+    try:
+        path = Path(raw).expanduser()
+    except RuntimeError:  # "~name" for a user that does not exist, or no home folder
+        return None, f"cannot find the home folder in {raw.split('/')[0]!r}", False
+    if len(os.fsencode(path.name)) > _MAX_NAME_BYTES:
+        return None, "the file name is too long", False
+    try:
+        if path.is_dir():
+            return None, "that path is a folder, not a file", False
+        if not path.parent.is_dir():
+            return None, f"folder does not exist: {path.parent}", False
+        if not os.access(path.parent, os.W_OK | os.X_OK):
+            return None, f"cannot write to folder {path.parent}", False
+        exists = os.path.lexists(path)
+    except OSError as e:
+        return None, f"cannot use that path ({e.strerror or type(e).__name__})", False
+    return path, None, exists
+
+
 def entry_to_dict(entry: AuditLogEntry) -> dict[str, Any]:
     """Convert audit log entry to dictionary for export.
 
@@ -85,6 +123,7 @@ def entry_to_dict(entry: AuditLogEntry) -> dict[str, Any]:
         "description": entry.description,
         "org_id": entry.org_id,
         "ip_address": entry.ip_address,
+        "changes": entry.changes,
     }
 
 
@@ -115,11 +154,13 @@ def export_to_json(
         "entries": [entry_to_dict(e) for e in entries],
     }
 
+    indent = 2 if pretty else None
     if isinstance(output, Path):
         with atomic_write(output, overwrite=overwrite) as f:
-            json.dump(data, f, indent=2 if pretty else None, default=str)
+            json.dump(data, f, indent=indent, default=str, ensure_ascii=False)
+            f.write("\n")
     else:
-        json.dump(data, output, indent=2 if pretty else None, default=str)
+        json.dump(data, output, indent=indent, default=str, ensure_ascii=False)
         output.write("\n")
 
     return len(entries)
@@ -138,6 +179,7 @@ _EXPORT_FIELDS = [
     "description",
     "org_id",
     "ip_address",
+    "changes",
 ]
 
 _FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
@@ -161,15 +203,30 @@ def _cell(value: object) -> str:
 def _write_delimited(
     entries: list[AuditLogEntry] | Iterator[AuditLogEntry], f: TextIO, delimiter: str
 ) -> int:
-    """Write entries as delimited text with a header row; return the entry count."""
-    writer = csv.writer(f, delimiter=delimiter)
-    writer.writerow(_EXPORT_FIELDS)
+    """Write entries as delimited text with a header row; return the entry count.
+
+    CSV uses standard quoting. TSV is plain, with no quoting, so ``cut`` and ``awk`` can
+    read it: tabs and line breaks inside a cell become spaces.
+    """
+    if delimiter == "\t":
+        def write_row(cells: list[str]) -> None:
+            f.write("\t".join(_TSV_UNSAFE.sub(" ", cell) for cell in cells) + "\n")
+    else:
+        write_row = csv.writer(f, delimiter=delimiter).writerow
+    write_row(_EXPORT_FIELDS)
     count = 0
     for entry in entries:
         row = entry_to_dict(entry)
-        writer.writerow([_cell(row[name]) for name in _EXPORT_FIELDS])
+        if row["changes"] is not None:  # one cell: compact JSON
+            row["changes"] = json.dumps(
+                row["changes"], separators=(",", ":"), default=str, ensure_ascii=False
+            )
+        write_row([_cell(row[name]) for name in _EXPORT_FIELDS])
         count += 1
     return count
+
+
+_TSV_UNSAFE = re.compile(r"[\t\r\n]")
 
 
 def _export_delimited(

@@ -2,14 +2,14 @@
 
 from pathlib import Path, PurePath
 
-from textual.app import ComposeResult
+from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.content import Content
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Label, RadioButton, RadioSet, Static
 from textual.worker import get_current_worker
 
-from ...export import export_entries
+from ...export import check_export_path, export_entries
 from ...formatters import TCSS_TOKEN_HEX
 from ...models import AuditLogEntry
 from ..state import AppState
@@ -157,20 +157,17 @@ class ExportDialog(ModalScreen):
         if not raw_path:
             self._set_status("enter a file path", "$warning")
             return
-        output_path = Path(raw_path).expanduser()
-        if output_path.is_dir():
-            self._set_status("that path is a folder, not a file", "$danger")
-            return
-        if not output_path.parent.is_dir():
-            self._set_status(f"folder does not exist: {output_path.parent}", "$danger")
+        output_path, problem, exists = check_export_path(raw_path)
+        if problem is not None or output_path is None:
+            self._set_status(problem or "cannot use that path", "$danger")
             return
         key = (raw_path, export_format)
-        if output_path.exists() and self._overwrite_pending != key:
+        if exists and self._overwrite_pending != key:
             self._overwrite_pending = key
             self._set_status("file exists · press export again to overwrite", "$warning")
             return
         # A pending confirmation is spent by this press: it is the one allowed to replace.
-        replace = output_path.exists()
+        replace = exists
         self._overwrite_pending = None
 
         if not fetch_all and not self._state.entries:
@@ -228,8 +225,8 @@ class ExportDialog(ModalScreen):
         except Exception as e:
             app.call_from_thread(self._fail, f"export failed: {_one_line(e)}")
             return
-        if not worker.is_cancelled:
-            app.call_from_thread(self._done, count, total, output_path)
+        # The file is written: report it even if the dialog was closed meanwhile.
+        app.call_from_thread(self._done, app, count, total, output_path)
 
     def _is_live(self) -> bool:
         """True while this dialog is still the open screen (the user has not closed it)."""
@@ -248,17 +245,19 @@ class ExportDialog(ModalScreen):
         self.query_one("#export-button", Button).disabled = False
         self._set_status(message, "$danger")
 
-    def _done(self, count: int, total: int | None, output_path: Path) -> None:
-        """Report a finished export and close the dialog shortly after."""
-        if not self._is_live():
-            return
+    def _done(self, app: App, count: int, total: int | None, output_path: Path) -> None:
+        """Report a finished export (also after the dialog closed) and close it shortly after."""
         where = output_path.resolve()
-        if total is not None and total > count:
+        if total is not None and total > count and count >= EXPORT_MAX:
             summary = f"exported {count:,} of {total:,} (limit reached) to {where}"
+        elif total is not None and total > count:
+            summary = f"exported {count:,} of {total:,} matching entries to {where}"
         else:
             summary = f"exported {count:,} entries to {where}"
+        app.notify(summary, markup=False)
+        if not self._is_live():
+            return
         self._set_status(summary, "$success")
-        self.app.notify(summary, markup=False)
         self.set_timer(self.AUTO_CLOSE_SECONDS, self._close_if_open)
 
     def _close_if_open(self) -> None:

@@ -524,3 +524,115 @@ class TestStreamOutput:
         count = export_entries([sample_audit_entry], out, "tsv")
         assert count == 1
         assert out.getvalue().splitlines()[0].startswith("id\ttimestamp")
+
+
+class TestCheckExportPath:
+    """One path check for the CLI and the dialog; it never raises (G22, G25, G44)."""
+
+    def test_good_path(self, tmp_path: Path) -> None:
+        from cja_audit_log_monitor.export import check_export_path
+
+        path, problem, exists = check_export_path(str(tmp_path / "out.json"))
+        assert (path, problem, exists) == (tmp_path / "out.json", None, False)
+
+    @pytest.mark.parametrize("raw", ["~backup.json", "~no-such-user-zz/x.json", "~.json"])
+    def test_unknown_home_folder(self, raw: str) -> None:
+        from cja_audit_log_monitor.export import check_export_path
+
+        path, problem, _ = check_export_path(raw)
+        assert path is None and problem
+
+    def test_trailing_slash_is_a_folder(self, tmp_path: Path) -> None:
+        from cja_audit_log_monitor.export import check_export_path
+
+        _, problem, _ = check_export_path(str(tmp_path / "newfolder") + "/")
+        assert problem == "that path is a folder, not a file"
+
+    def test_dangling_symlink_counts_as_existing(self, tmp_path: Path) -> None:
+        from cja_audit_log_monitor.export import check_export_path
+
+        link = tmp_path / "out.json"
+        link.symlink_to(tmp_path / "gone.json")
+        _, problem, exists = check_export_path(str(link))
+        assert problem is None and exists is True
+
+    @pytest.mark.skipif(
+        hasattr(os, "geteuid") and os.geteuid() == 0, reason="root can write anywhere"
+    )
+    def test_unwritable_folder(self, tmp_path: Path) -> None:
+        from cja_audit_log_monitor.export import check_export_path
+
+        folder = tmp_path / "locked"
+        folder.mkdir()
+        folder.chmod(0o500)
+        try:
+            _, problem, _ = check_export_path(str(folder / "out.json"))
+        finally:
+            folder.chmod(0o700)
+        assert problem and "cannot write" in problem
+
+    def test_name_too_long(self, tmp_path: Path) -> None:
+        from cja_audit_log_monitor.export import check_export_path
+
+        _, problem, _ = check_export_path(str(tmp_path / ("x" * 300 + ".json")))
+        assert problem == "the file name is too long"
+
+
+class TestChangesInExports:
+    """The `changes` field is in every format (G26)."""
+
+    ENTRY = AuditLogEntry(
+        id="c1", action="EDIT", timestamp=datetime(2026, 1, 1, tzinfo=UTC),
+        changes={"name": {"old": "a", "new": "=b"}},
+    )
+
+    def test_json_has_changes(self) -> None:
+        out = StringIO()
+        export_entries([self.ENTRY], out, output_format="json")
+        assert json.loads(out.getvalue())["entries"][0]["changes"] == self.ENTRY.changes
+
+    @pytest.mark.parametrize(("fmt", "sep"), [("csv", ","), ("tsv", "\t")])
+    def test_delimited_has_a_changes_column(self, fmt: str, sep: str) -> None:
+        out = StringIO()
+        export_entries([self.ENTRY], out, output_format=fmt)
+        rows = list(csv.reader(StringIO(out.getvalue()), delimiter=sep))
+        assert rows[0][-1] == "changes"
+        assert json.loads(rows[1][-1]) == self.ENTRY.changes
+
+    def test_no_changes_is_an_empty_cell(self) -> None:
+        out = StringIO()
+        export_entries([self.ENTRY.model_copy(update={"changes": None})], out, output_format="csv")
+        rows = list(csv.reader(StringIO(out.getvalue())))
+        assert rows[1][-1] == ""
+
+
+class TestExportDetails:
+    """Plain TSV, UTF-8 JSON, long names (G44)."""
+
+    ENTRY = AuditLogEntry(
+        id="d1", action="EDIT", timestamp=datetime(2026, 1, 1, tzinfo=UTC),
+        component_name='日本 "quoted"\tname\nline two', user_email="u@example.com",
+    )
+
+    def test_tsv_is_plain(self) -> None:
+        out = StringIO()
+        export_entries([self.ENTRY], out, output_format="tsv")
+        lines = out.getvalue().splitlines()
+        assert len(lines) == 2  # no line break inside a cell
+        cells = lines[1].split("\t")
+        assert len(cells) == len(lines[0].split("\t"))
+        assert '日本 "quoted" name line two' in cells
+
+    def test_json_file_keeps_utf8_and_ends_with_a_newline(self, tmp_path: Path) -> None:
+        target = tmp_path / "out.json"
+        export_entries([self.ENTRY], target, output_format="json")
+        text = target.read_text(encoding="utf-8")
+        assert "日本" in text
+        assert text.endswith("\n")
+
+    @pytest.mark.parametrize("length", [242, 255])
+    def test_long_file_name(self, tmp_path: Path, length: int) -> None:
+        target = tmp_path / ("x" * (length - 5) + ".json")
+        export_entries([self.ENTRY], target, output_format="json")
+        assert target.exists()
+        assert [p.name for p in tmp_path.iterdir()] == [target.name]

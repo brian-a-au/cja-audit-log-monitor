@@ -9,9 +9,9 @@ import re
 import sys
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
-from itertools import chain, islice
+from itertools import islice
 from pathlib import Path
 from typing import Any, ParamSpec, TypeVar
 
@@ -32,7 +32,7 @@ from .config import (
     get_config_path,
     load_config,
 )
-from .export import atomic_write, export_entries
+from .export import atomic_write, check_export_path, export_entries
 from .formatters import (
     format_action_stats_table,
     format_logs_table,
@@ -143,20 +143,21 @@ def handle_cli_errors(func: Callable[P, R]) -> Callable[P, R]:
     return wrapper
 
 
-def check_output_path(output: Path | None, force: bool) -> None:
-    """Fail fast (before any API call) on an unusable output path.
+def check_output_path(output: Path | None, force: bool) -> Path | None:
+    """Fail fast (before any API call) on an unusable output path; return it with ``~`` expanded.
 
-    Refuses an existing file unless ``--force`` was given, and a missing parent
-    directory. ``-`` means stdout and is never a file, so it is always allowed.
+    Refuses an existing file (a dangling symlink counts) unless ``--force`` was given, a
+    folder, a missing or unwritable folder, and a name that is too long. ``-`` means stdout
+    and is always allowed.
     """
     if output is None or str(output) == "-":
-        return
-    if output.is_dir():
-        raise IsADirectoryError(f"{output} is a folder, not a file; give a file name")
-    if not output.parent.is_dir():
-        raise FileNotFoundError(f"directory {output.parent} does not exist")
-    if output.exists() and not force:
-        raise FileExistsError(f"{output} already exists; use --force to overwrite")
+        return output
+    path, problem, exists = check_export_path(str(output))
+    if problem is not None or path is None:
+        raise OSError(problem)
+    if exists and not force:
+        raise FileExistsError(f"{path} already exists; use --force to overwrite")
+    return path
 
 
 def setup_logging(verbose: bool) -> None:
@@ -615,7 +616,7 @@ def component(
     "-F",
     type=click.Choice(["json", "csv", "tsv"], case_sensitive=False),
     default="json",
-    help="Export format",
+    help="Export format (default: from the file suffix .json, .csv or .tsv, else json)",
 )
 @click.option(
     "--output",
@@ -663,8 +664,12 @@ def export(
 ) -> None:
     """Export audit logs to a file, or to stdout with -o -."""
     config_path = ctx.obj.get("config_path")
-    check_output_path(output, force)
+    output = check_output_path(output, force)
     to_stdout = str(output) == "-"
+    if ctx.get_parameter_source("format") is click.core.ParameterSource.DEFAULT:
+        suffix = Path(str(output)).suffix.lower().lstrip(".")
+        if suffix in {"json", "csv", "tsv"}:
+            format = suffix
     destination: Any = sys.stdout if to_stdout else output
 
     start, end = parse_date_range(start_date, end_date)
@@ -686,36 +691,45 @@ def export(
 
     err_console.print("[dim]Fetching audit logs...[/dim]")
 
+    # One entry past --max-entries is read, to tell whether the limit cut the export.
+    cut = {"value": False}
+
+    def up_to_limit(entries: Iterator[AuditLogEntry]) -> Iterator[AuditLogEntry]:
+        for index, entry in enumerate(entries):
+            if max_entries is not None and index == max_entries:
+                cut["value"] = True
+                return
+            yield entry
+
     with client:
         if format in {"csv", "tsv"}:
             query.page_size = MAX_PAGE_SIZE  # fewer requests for a long export
-            entries_iter = client.get_logs_paginated(query)
-            if max_entries is not None:
-                entries_iter = islice(entries_iter, max_entries)
-
-            first_entry = next(entries_iter, None)
-            if first_entry is None:
-                err_console.print("[yellow]No audit logs found to export.[/yellow]")
-                return
-
-            count = export_entries(
-                chain([first_entry], entries_iter),
-                destination,
-                output_format=format,
-                pretty=pretty,
-                overwrite=force,
-            )
+            source: Any = up_to_limit(client.get_logs_paginated(query))
         else:
-            entries = client.get_all_logs(query, max_entries=max_entries)
-            if not entries:
-                err_console.print("[yellow]No audit logs found to export.[/yellow]")
-                return
+            limit = None if max_entries is None else max_entries + 1
+            source = list(up_to_limit(iter(client.get_all_logs(query, max_entries=limit))))
+        # An empty result still writes an empty document, so a scheduled export never
+        # leaves yesterday's file in place.
+        try:
             count = export_entries(
-                entries, destination, output_format=format, pretty=pretty, overwrite=force
+                source, destination, output_format=format, pretty=pretty, overwrite=force
             )
+        except FileExistsError:
+            raise FileExistsError(
+                f"{output} appeared during the export; use --force to overwrite"
+            ) from None
 
     target = "stdout" if to_stdout else escape(str(output))
-    err_console.print(f"[green]Exported {count} entries to {target}[/green]")
+    if count == 0:
+        err_console.print(
+            f"[yellow]No audit logs matched; wrote an empty file to {target}.[/yellow]"
+        )
+    else:
+        err_console.print(f"[green]Exported {count} entries to {target}[/green]")
+    if cut["value"]:
+        err_console.print(
+            f"[yellow]Stopped at --max-entries {max_entries}; more entries matched.[/yellow]"
+        )
 
 
 @cli.command()
@@ -1153,7 +1167,7 @@ def report(
 ) -> None:
     """Generate a comprehensive audit log report."""
     config_path = ctx.obj.get("config_path")
-    check_output_path(output, force)
+    output = check_output_path(output, force)
 
     client, settings = get_client(config_path)
     days = days_or_default(days, settings)

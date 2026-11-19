@@ -3090,3 +3090,153 @@ def test_verbose_does_not_log_httpcore_internals(fake_api, tmp_path) -> None:
     assert result.returncode == 0, result.stderr
     assert "receive_response_headers" not in result.stderr
     assert "send_request_headers" not in result.stderr
+
+
+class TestExportPathChecks:
+    """The CLI export path check runs before any request (G25, G44)."""
+
+    @staticmethod
+    def _run(args):
+        client = MagicMock()
+        client.__enter__ = MagicMock(return_value=client)
+        client.__exit__ = MagicMock(return_value=False)
+        with patch("cja_audit_log_monitor.cli.get_client", return_value=(client, _settings())):
+            result = CliRunner().invoke(main, ["cli", "export", *args])
+        return result, client
+
+    def test_dangling_symlink_needs_force(self, tmp_path) -> None:
+        link = tmp_path / "out.json"
+        link.symlink_to(tmp_path / "gone.json")
+        result, client = self._run(["-o", str(link)])
+        assert result.exit_code == 1
+        assert "--force" in result.stderr
+        client.get_all_logs.assert_not_called()
+
+    def test_unwritable_folder_fails_before_fetch(self, tmp_path) -> None:
+        import os
+
+        if hasattr(os, "geteuid") and os.geteuid() == 0:
+            pytest.skip("root can write anywhere")
+        folder = tmp_path / "locked"
+        folder.mkdir()
+        folder.chmod(0o500)
+        try:
+            result, client = self._run(["-o", str(folder / "out.json")])
+        finally:
+            folder.chmod(0o700)
+        assert result.exit_code == 1
+        assert "cannot write" in result.stderr
+        client.get_all_logs.assert_not_called()
+
+    def test_cli_expands_tilde(self, tmp_path, monkeypatch) -> None:
+        monkeypatch.setenv("HOME", str(tmp_path))
+        (tmp_path / "out.json").write_text("old")
+        result, client = self._run(["-o", "~/out.json"])
+        assert result.exit_code == 1
+        assert "already exists" in result.stderr
+        client.get_all_logs.assert_not_called()
+
+
+class TestEmptyAndCutExports:
+    """An empty export writes an empty document; a cut export says so (G23, G44)."""
+
+    @staticmethod
+    def _run(args, entries):
+        client = MagicMock()
+        client.__enter__ = MagicMock(return_value=client)
+        client.__exit__ = MagicMock(return_value=False)
+        client.get_all_logs.side_effect = lambda q, max_entries=None: entries[:max_entries]
+        client.get_logs_paginated.side_effect = lambda q: iter(entries)
+        with patch("cja_audit_log_monitor.cli.get_client", return_value=(client, _settings())):
+            return CliRunner().invoke(main, ["cli", "export", *args])
+
+    @pytest.mark.parametrize("fmt", ["json", "csv", "tsv"])
+    @pytest.mark.parametrize("where", ["new", "force", "stdout"])
+    def test_empty_export_writes_an_empty_document(self, tmp_path, fmt, where) -> None:
+        target = tmp_path / f"out.{fmt}"
+        args = ["-F", fmt]
+        if where == "stdout":
+            args += ["-o", "-"]
+        else:
+            if where == "force":
+                target.write_text("yesterday")
+                args.append("--force")
+            args += ["-o", str(target)]
+        result = self._run(args, [])
+        assert result.exit_code == 0, result.output
+        assert "No audit logs matched" in result.stderr
+        text = result.stdout if where == "stdout" else target.read_text()
+        if fmt == "json":
+            data = json.loads(text)
+            assert data["count"] == 0 and data["entries"] == []
+        else:
+            sep = "," if fmt == "csv" else "\t"
+            lines = text.strip().splitlines()
+            assert len(lines) == 1 and lines[0].startswith(f"id{sep}timestamp")
+
+    @pytest.mark.parametrize("fmt", ["json", "csv"])
+    def test_max_entries_cut_is_reported(self, tmp_path, sample_audit_entries, fmt) -> None:
+        result = self._run(
+            ["-F", fmt, "--max-entries", "3", "-o", str(tmp_path / f"o.{fmt}")],
+            sample_audit_entries,
+        )
+        assert result.exit_code == 0, result.output
+        assert "Exported 3 entries" in result.stderr
+        assert "--max-entries" in result.stderr
+
+
+def test_show_prints_changes(runner: CliRunner) -> None:
+    entry = AuditLogEntry(id="c1", action="EDIT", changes={"name": {"old": "a", "new": "b"}})
+    client = MagicMock()
+    client.__enter__ = MagicMock(return_value=client)
+    client.__exit__ = MagicMock(return_value=False)
+    client.get_logs_paginated.side_effect = lambda *a, **k: iter([entry])
+    client.get_all_logs.return_value = [entry]
+    with patch("cja_audit_log_monitor.cli.get_client", return_value=(client, _settings())):
+        result = runner.invoke(main, ["cli", "show", "c1"])
+    assert result.exit_code == 0, result.output
+    assert "Changes" in result.stdout
+    assert '"old": "a"' in result.stdout
+
+
+class TestExportFormatAndMessages:
+    @staticmethod
+    def _run(args, entries, during=None):
+        client = MagicMock()
+        client.__enter__ = MagicMock(return_value=client)
+        client.__exit__ = MagicMock(return_value=False)
+
+        def fetch(*a, **k):
+            if during:
+                during()
+            return entries
+
+        client.get_all_logs.side_effect = fetch
+        client.get_logs_paginated.side_effect = lambda q: iter(fetch())
+        with patch("cja_audit_log_monitor.cli.get_client", return_value=(client, _settings())):
+            return CliRunner().invoke(main, ["cli", "export", *args])
+
+    @pytest.mark.parametrize(("suffix", "first"), [("csv", "id,"), ("tsv", "id\t")])
+    def test_format_from_suffix(self, tmp_path, sample_audit_entries, suffix, first) -> None:
+        target = tmp_path / f"audit.{suffix}"
+        result = self._run(["-o", str(target)], sample_audit_entries)
+        assert result.exit_code == 0, result.output
+        assert target.read_text().startswith(first)
+
+    def test_explicit_format_wins_over_suffix(self, tmp_path, sample_audit_entries) -> None:
+        target = tmp_path / "audit.csv"
+        result = self._run(["-F", "json", "-o", str(target)], sample_audit_entries)
+        assert result.exit_code == 0
+        assert json.loads(target.read_text())["count"] == len(sample_audit_entries)
+
+    def test_late_file_message_names_the_target_and_force(
+        self, tmp_path, sample_audit_entries
+    ) -> None:
+        target = tmp_path / "out.json"
+        result = self._run(
+            ["-o", str(target)], sample_audit_entries, during=lambda: target.write_text("x")
+        )
+        assert result.exit_code == 1
+        assert str(target) in result.stderr.replace("\n", "")
+        assert "--force" in result.stderr
+        assert ".tmp" not in result.stderr
