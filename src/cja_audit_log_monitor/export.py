@@ -209,6 +209,7 @@ def _write_delimited(
     read it: tabs and line breaks inside a cell become spaces.
     """
     if delimiter == "\t":
+
         def write_row(cells: list[str]) -> None:
             f.write("\t".join(_TSV_UNSAFE.sub(" ", cell) for cell in cells) + "\n")
     else:

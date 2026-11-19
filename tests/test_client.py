@@ -610,7 +610,8 @@ class TestRetryAndRefresh:
     ) -> None:
         monkeypatch.setattr("cja_audit_log_monitor.client.time.sleep", lambda s: None)
         httpx_mock.add_response(
-            url=re.compile(re.escape(self.URL) + r"\?.*"), status_code=403,
+            url=re.compile(re.escape(self.URL) + r"\?.*"),
+            status_code=403,
             json={"error": "no access"},
         )
         with client:
@@ -704,7 +705,8 @@ class TestOddResponses:
     URL = "https://cja.adobe.io/auditlogs/api/v1/auditlogs"
 
     @pytest.mark.parametrize(
-        "bad", [{"id": 5, "action": "CREATE"}, {"id": "x", "dateCreated": "not a date"}, None],
+        "bad",
+        [{"id": 5, "action": "CREATE"}, {"id": "x", "dateCreated": "not a date"}, None],
         ids=["int-id", "bad-date", "null"],
     )
     def test_bad_entry_is_skipped(self, client, httpx_mock, caplog, bad) -> None:
@@ -756,7 +758,8 @@ def test_page_size_is_bounded(size) -> None:
 def test_network_failure_names_the_host(client, httpx_mock, monkeypatch) -> None:
     monkeypatch.setattr("cja_audit_log_monitor.client.time.sleep", lambda s: None)
     httpx_mock.add_exception(
-        httpx.ConnectError("dns"), url="https://cja.adobe.io/auditlogs/api/v1/auditlogs",
+        httpx.ConnectError("dns"),
+        url="https://cja.adobe.io/auditlogs/api/v1/auditlogs",
         is_reusable=True,
     )
     with client, pytest.raises(APIError) as info:

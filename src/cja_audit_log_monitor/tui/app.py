@@ -194,15 +194,11 @@ class CJAAuditApp(App):
             # Compact sidebar: just the key letter (the marker is the active style).
             return resolve_tcss_markup(f"[$primary]{key}[/$primary]")
         prefix = "▸ " if active else "  "
-        return prefix + resolve_tcss_markup(
-            f"[$primary]{key}[/$primary] {self.NAV_LABELS[nav_id]}"
-        )
+        return prefix + resolve_tcss_markup(f"[$primary]{key}[/$primary] {self.NAV_LABELS[nav_id]}")
 
     _STATUS_DOT = {"connecting": "$warning", "connected": "$success", "disconnected": "$error"}
 
-    def _status_row_text(
-        self, status: ConnectionStatus = "connecting", detail: str = ""
-    ) -> str:
+    def _status_row_text(self, status: ConnectionStatus = "connecting", detail: str = "") -> str:
         """Build the top status row content."""
         org = self.state.settings.org_id  # loads config; may set config_error
         color = self._STATUS_DOT[status]
@@ -395,4 +391,3 @@ class RefreshData(Message):
     """Message to trigger data refresh."""
 
     pass
-

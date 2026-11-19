@@ -48,17 +48,20 @@ class TestActionColors:
 
     def test_action_colors_has_four_distinct_values(self) -> None:
         from cja_audit_log_monitor.formatters import ACTION_COLORS
+
         assert len(set(ACTION_COLORS.values())) == 4
 
     # --- token accessor ---
 
     def test_destructive_actions_use_cross(self) -> None:
         from cja_audit_log_monitor.formatters import get_action_icon
+
         assert get_action_icon("DELETE") == "✕"
         assert get_action_icon("EMBARGO") == "✕"
 
     def test_sensitive_actions_use_warning_glyph(self) -> None:
         from cja_audit_log_monitor.formatters import get_action_icon
+
         assert get_action_icon("EXPORT") == "⚠"
         assert get_action_icon("SHARE") == "⚠"
         assert get_action_icon("UNSHARE") == "⚠"
@@ -66,17 +69,20 @@ class TestActionColors:
 
     def test_safe_actions_use_check(self) -> None:
         from cja_audit_log_monitor.formatters import get_action_icon
+
         assert get_action_icon("CREATE") == "✓"
         assert get_action_icon("APPROVE") == "✓"
 
     def test_neutral_actions_use_dot(self) -> None:
         from cja_audit_log_monitor.formatters import get_action_icon
+
         assert get_action_icon("EDIT") == "·"
         assert get_action_icon("REFRESH") == "·"
         assert get_action_icon("API_REQUEST") == "·"
 
     def test_unknown_defaults_to_dot(self) -> None:
         from cja_audit_log_monitor.formatters import get_action_icon
+
         assert get_action_icon("UNKNOWN") == "·"
 
 

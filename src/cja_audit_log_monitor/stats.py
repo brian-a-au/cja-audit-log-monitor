@@ -65,9 +65,7 @@ def calculate_stats(entries: list[AuditLogEntry], top_n: int = 10) -> dict:
     }
 
 
-def get_hourly_distribution(
-    entries: list[AuditLogEntry], local: bool = False
-) -> dict[int, int]:
+def get_hourly_distribution(entries: list[AuditLogEntry], local: bool = False) -> dict[int, int]:
     """Get distribution of events by hour of day.
 
     Args:
@@ -86,9 +84,7 @@ def get_hourly_distribution(
     return {hour: hourly.get(hour, 0) for hour in range(24)}
 
 
-def get_daily_distribution(
-    entries: list[AuditLogEntry], local: bool = False
-) -> dict[str, int]:
+def get_daily_distribution(entries: list[AuditLogEntry], local: bool = False) -> dict[str, int]:
     """Get distribution of events by day.
 
     Args:

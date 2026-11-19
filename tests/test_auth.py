@@ -298,9 +298,7 @@ class TestTokenEdges:
         assert len(httpx_mock.get_requests()) == 1
 
     def test_huge_expires_in_does_not_raise(self, sample_settings, httpx_mock) -> None:
-        httpx_mock.add_response(
-            url=self.IMS, json={"access_token": "a", "expires_in": 10**20}
-        )
+        httpx_mock.add_response(url=self.IMS, json={"access_token": "a", "expires_in": 10**20})
         assert TokenManager(sample_settings).get_token() == "a"
 
     def test_empty_token_is_an_error(self, sample_settings, httpx_mock) -> None:
@@ -311,7 +309,8 @@ class TestTokenEdges:
     def test_ims_error_description_is_cut_and_redacted(self, sample_settings, httpx_mock):
         description = "client_secret=TOPSECRET " + "x" * 1000
         httpx_mock.add_response(
-            url=self.IMS, status_code=400,
+            url=self.IMS,
+            status_code=400,
             json={"error": "invalid_request", "error_description": description},
         )
         with pytest.raises(AuthenticationError) as info:

@@ -206,25 +206,29 @@ class NotificationManager:
                 f"*Component:* {slack_escape(str(entry.component_type or 'N/A'))}",
                 f"*Name:* {slack_escape(str(name))}",
             ]
-            blocks.append({
-                "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": "\n".join(fields),
-                },
-            })
+            blocks.append(
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": "\n".join(fields),
+                    },
+                }
+            )
 
             if entry.timestamp:
-                ts_str = entry.timestamp.astimezone(UTC).strftime('%Y-%m-%d %H:%M:%S UTC')
-                blocks.append({
-                    "type": "context",
-                    "elements": [
-                        {
-                            "type": "mrkdwn",
-                            "text": f"Occurred at {ts_str}",
-                        }
-                    ],
-                })
+                ts_str = entry.timestamp.astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
+                blocks.append(
+                    {
+                        "type": "context",
+                        "elements": [
+                            {
+                                "type": "mrkdwn",
+                                "text": f"Occurred at {ts_str}",
+                            }
+                        ],
+                    }
+                )
 
         return {"blocks": blocks}
 
@@ -357,6 +361,7 @@ class NotificationManager:
 
         # Send to webhooks
         for webhook in self.config.webhooks:
+
             def send(webhook: WebhookConfig = webhook) -> bool:
                 payload = self._build_alert_payload(
                     rule_name,
@@ -400,9 +405,7 @@ class NotificationManager:
             keys.append("slack")
         return keys
 
-    def notify_anomaly(
-        self, anomaly: dict[str, Any], channels: set[str] | None = None
-    ) -> set[str]:
+    def notify_anomaly(self, anomaly: dict[str, Any], channels: set[str] | None = None) -> set[str]:
         """Send an anomaly to the active channels, or only to ``channels`` when given.
 
         Args:
@@ -427,6 +430,7 @@ class NotificationManager:
 
         url = self.config.slack_webhook_url
         if url and (channels is None or "slack" in channels):
+
             def send_slack() -> bool:
                 return self._post_slack(self._build_slack_anomaly_payload(anomaly))
 
@@ -486,9 +490,14 @@ class AnomalyDedupFilter:
     longer reports it, so an anomaly that clears and comes back is sent again.
     """
 
-    _EXCLUDED_FIELDS = frozenset({
-        "description", "action_count", "delete_count", "average",
-    })
+    _EXCLUDED_FIELDS = frozenset(
+        {
+            "description",
+            "action_count",
+            "delete_count",
+            "average",
+        }
+    )
 
     def __init__(self) -> None:
         self._seen: set[str] = set()
@@ -497,16 +506,12 @@ class AnomalyDedupFilter:
     def fingerprint(self, anomaly: dict[str, Any]) -> str:
         """Return a stable 16-char hex fingerprint for the anomaly."""
         items = sorted(
-            (str(k), str(v))
-            for k, v in anomaly.items()
-            if k not in self._EXCLUDED_FIELDS
+            (str(k), str(v)) for k, v in anomaly.items() if k not in self._EXCLUDED_FIELDS
         )
         serialized = "|".join(f"{k}={v}" for k, v in items)
         return hashlib.sha256(serialized.encode("utf-8")).hexdigest()[:16]
 
-    def suppress_seen(
-        self, anomalies: list[dict[str, Any]]
-    ) -> list[dict[str, Any]]:
+    def suppress_seen(self, anomalies: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Return only anomalies whose fingerprint is new this session.
 
         Adds returned items' fingerprints to the seen set as a side effect.

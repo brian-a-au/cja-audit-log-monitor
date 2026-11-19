@@ -114,9 +114,7 @@ class TestNotificationManager:
         assert "entry" in payload
         assert payload["entry"]["action"] == "DELETE"
 
-    def test_build_alert_payload_without_details(
-        self, sample_entry: AuditLogEntry
-    ) -> None:
+    def test_build_alert_payload_without_details(self, sample_entry: AuditLogEntry) -> None:
         """Test building alert payload without entry details."""
         manager = NotificationManager()
         payload = manager._build_alert_payload(
@@ -177,9 +175,7 @@ class TestNotificationManager:
 
         assert result is False
 
-    def test_notify_alert_disabled(
-        self, sample_entry: AuditLogEntry
-    ) -> None:
+    def test_notify_alert_disabled(self, sample_entry: AuditLogEntry) -> None:
         """Test notifications are skipped when disabled."""
         config = NotificationConfig(notify_on_alerts=False)
         manager = NotificationManager(config)
@@ -323,11 +319,13 @@ class TestAnomalyDedupFilter:
 
     def test_empty_input_returns_empty(self):
         from cja_audit_log_monitor.notifications import AnomalyDedupFilter
+
         f = AnomalyDedupFilter()
         assert f.suppress_seen([]) == []
 
     def test_single_anomaly_passes_through_first_time(self):
         from cja_audit_log_monitor.notifications import AnomalyDedupFilter
+
         f = AnomalyDedupFilter()
         anomaly = {
             "type": "high_activity_user",
@@ -341,6 +339,7 @@ class TestAnomalyDedupFilter:
 
     def test_same_anomaly_suppressed_on_repeat(self):
         from cja_audit_log_monitor.notifications import AnomalyDedupFilter
+
         f = AnomalyDedupFilter()
         anomaly = {
             "type": "bulk_delete_single_user",
@@ -354,6 +353,7 @@ class TestAnomalyDedupFilter:
     def test_count_change_does_not_change_fingerprint(self):
         """Recurring anomaly whose count grew between cycles still dedupes."""
         from cja_audit_log_monitor.notifications import AnomalyDedupFilter
+
         f = AnomalyDedupFilter()
         first = {
             "type": "bulk_delete_single_user",
@@ -367,37 +367,53 @@ class TestAnomalyDedupFilter:
 
     def test_different_users_pass_through(self):
         from cja_audit_log_monitor.notifications import AnomalyDedupFilter
+
         f = AnomalyDedupFilter()
-        a1 = {"type": "high_activity_user", "user": "a@x.com", "action_count": 50,
-              "average": 10.0, "description": "..."}
-        a2 = {"type": "high_activity_user", "user": "b@x.com", "action_count": 60,
-              "average": 10.0, "description": "..."}
+        a1 = {
+            "type": "high_activity_user",
+            "user": "a@x.com",
+            "action_count": 50,
+            "average": 10.0,
+            "description": "...",
+        }
+        a2 = {
+            "type": "high_activity_user",
+            "user": "b@x.com",
+            "action_count": 60,
+            "average": 10.0,
+            "description": "...",
+        }
         out = f.suppress_seen([a1, a2])
         assert len(out) == 2
 
     def test_different_anomaly_types_pass_through(self):
         from cja_audit_log_monitor.notifications import AnomalyDedupFilter
+
         f = AnomalyDedupFilter()
-        a1 = {"type": "high_activity_user", "user": "a@x.com", "action_count": 50,
-              "average": 10.0, "description": "..."}
-        a2 = {"type": "off_hours_activity", "hour": 3, "action_count": 25,
-              "description": "..."}
+        a1 = {
+            "type": "high_activity_user",
+            "user": "a@x.com",
+            "action_count": 50,
+            "average": 10.0,
+            "description": "...",
+        }
+        a2 = {"type": "off_hours_activity", "hour": 3, "action_count": 25, "description": "..."}
         out = f.suppress_seen([a1, a2])
         assert len(out) == 2
 
     def test_off_hours_different_hours_pass_through(self):
         from cja_audit_log_monitor.notifications import AnomalyDedupFilter
+
         f = AnomalyDedupFilter()
-        a1 = {"type": "off_hours_activity", "hour": 2, "action_count": 25,
-              "description": "..."}
-        a2 = {"type": "off_hours_activity", "hour": 4, "action_count": 30,
-              "description": "..."}
+        a1 = {"type": "off_hours_activity", "hour": 2, "action_count": 25, "description": "..."}
+        a2 = {"type": "off_hours_activity", "hour": 4, "action_count": 30, "description": "..."}
         out = f.suppress_seen([a1, a2])
         assert len(out) == 2
 
     def test_missing_fields_fingerprint_stably(self):
         """Anomaly dict shape with missing optional keys still fingerprints; no exception."""
         from cja_audit_log_monitor.notifications import AnomalyDedupFilter
+
         f = AnomalyDedupFilter()
         a = {"type": "unknown_type"}
         out1 = f.suppress_seen([a])
@@ -408,9 +424,14 @@ class TestAnomalyDedupFilter:
     def test_description_only_difference_dedupes(self):
         """Same identity fields, different free-text description → suppressed."""
         from cja_audit_log_monitor.notifications import AnomalyDedupFilter
+
         f = AnomalyDedupFilter()
-        a1 = {"type": "bulk_delete_single_user", "user": "d@x.com", "delete_count": 10,
-              "description": "Single user performed 10 deletes"}
+        a1 = {
+            "type": "bulk_delete_single_user",
+            "user": "d@x.com",
+            "delete_count": 10,
+            "description": "Single user performed 10 deletes",
+        }
         a2 = {**a1, "description": "totally different wording"}
         f.suppress_seen([a1])
         assert f.suppress_seen([a2]) == []
@@ -420,8 +441,13 @@ class TestAnomalyDedupFilter:
         from cja_audit_log_monitor.notifications import AnomalyDedupFilter
 
         f = AnomalyDedupFilter()
-        a = {"type": "high_activity_user", "user": "e@x.com", "action_count": 50,
-             "average": 10.0, "description": "..."}
+        a = {
+            "type": "high_activity_user",
+            "user": "e@x.com",
+            "action_count": 50,
+            "average": 10.0,
+            "description": "...",
+        }
         first = f.fingerprint(a)
         assert f.fingerprint(dict(a)) == first
 
@@ -489,7 +515,9 @@ class TestSlackEscaping:
         url = "https://hooks.slack.com/x"
         manager = NotificationManager(NotificationConfig(slack_webhook_url=url))
         entry = AuditLogEntry(
-            id="1", action="DELETE", component_name="<!channel> <https://evil|x>",
+            id="1",
+            action="DELETE",
+            component_name="<!channel> <https://evil|x>",
             timestamp=datetime.now(UTC),
         )
         httpx_mock.add_response(url=url, status_code=200)
@@ -503,7 +531,9 @@ class TestSlackEscaping:
         url = "https://hooks.slack.com/x"
         manager = NotificationManager(NotificationConfig(slack_webhook_url=url))
         entry = AuditLogEntry(
-            id="1", action="DELETE", user_name="<!channel> <https://evil|x>",
+            id="1",
+            action="DELETE",
+            user_name="<!channel> <https://evil|x>",
             timestamp=datetime.now(UTC),
         )
         httpx_mock.add_response(url=url, status_code=200)
@@ -536,7 +566,8 @@ class TestSlackEscaping:
 
     def test_slack_timestamp_is_utc(self):
         entry = AuditLogEntry(
-            id="1", action="DELETE",
+            id="1",
+            action="DELETE",
             timestamp=datetime(2026, 1, 1, 12, 0, tzinfo=timezone(timedelta(hours=5))),
         )
         payload = NotificationManager()._build_slack_payload("r", "m", entry)
@@ -658,7 +689,9 @@ class TestSlackLimitsAndChannelFailures:
     def test_newline_in_a_name_becomes_a_space(self, httpx_mock):
         manager = NotificationManager(NotificationConfig(slack_webhook_url=self.URL))
         entry = AuditLogEntry(
-            id="1", action="DELETE", component_name="x\n*User:* admin@example.com",
+            id="1",
+            action="DELETE",
+            component_name="x\n*User:* admin@example.com",
             timestamp=datetime.now(UTC),
         )
         httpx_mock.add_response(url=self.URL, status_code=200)
@@ -688,9 +721,11 @@ class TestSlackLimitsAndChannelFailures:
             NotificationConfig(slack_webhook_url=self.URL, webhooks=[hook])
         )
         httpx_mock.add_response(url=self.URL, status_code=200)
-        with patch.object(manager, "send_webhook", side_effect=UnicodeEncodeError(
-            "utf-8", "\ud83d", 0, 1, "surrogates not allowed"
-        )):
+        with patch.object(
+            manager,
+            "send_webhook",
+            side_effect=UnicodeEncodeError("utf-8", "\ud83d", 0, 1, "surrogates not allowed"),
+        ):
             sent = manager.notify_alert("r", "m")
         assert sent == 1  # Slack still got it
         (warning,) = manager.pop_failures()

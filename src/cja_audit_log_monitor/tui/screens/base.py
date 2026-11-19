@@ -86,8 +86,7 @@ def sample_note_text(shown: int, total: int) -> str | None:
     if total <= shown:
         return None
     return resolve_tcss_markup(
-        f"[$text-muted]charts and lists use the newest {shown:,} of {total:,} entries"
-        "[/$text-muted]"
+        f"[$text-muted]charts and lists use the newest {shown:,} of {total:,} entries[/$text-muted]"
     )
 
 

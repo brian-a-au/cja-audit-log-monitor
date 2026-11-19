@@ -278,9 +278,7 @@ class AuditLogsClient:
                     attempt += 1
                     continue
                 host = self.client.base_url.host or self.settings.api_base_url
-                raise APIError(
-                    f"could not reach {host} ({type(e).__name__})", network=True
-                ) from e
+                raise APIError(f"could not reach {host} ({type(e).__name__})", network=True) from e
 
         raise APIError("Max retries exceeded")
 
@@ -351,7 +349,6 @@ class AuditLogsClient:
                     seen_ids.add(entry.id)
                 new_entries += 1
                 yield entry
-
 
             # A page of entries already seen ends paging only when the API gives no page
             # count; otherwise late entries can still follow on later pages.

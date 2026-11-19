@@ -205,9 +205,7 @@ class AuditLogMonitor:
                 self.console.print(fa.panel)
                 if self.notification_manager and self.notification_manager.is_configured():
                     try:
-                        self.notification_manager.notify_alert(
-                            fa.rule_name, fa.message, fa.entry
-                        )
+                        self.notification_manager.notify_alert(fa.rule_name, fa.message, fa.entry)
                     except Exception as e:
                         logger.error(
                             "Notification dispatch failed for rule %s: %s",
@@ -369,9 +367,11 @@ class AuditLogMonitor:
             self.console.print()
 
             # Initial fetch sets the baseline; show the newest few entries for context.
-            with suppress(KeyboardInterrupt), self.console.status(
-                "Waiting for first poll..."
-            ) as status, self._logs_around_status():
+            with (
+                suppress(KeyboardInterrupt),
+                self.console.status("Waiting for first poll...") as status,
+                self._logs_around_status(),
+            ):
                 self._status = status
                 # The duration counts from before the first poll, which can be slow.
                 start_time = time.monotonic()

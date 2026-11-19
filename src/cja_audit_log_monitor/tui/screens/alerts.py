@@ -45,9 +45,7 @@ class AlertsScreen(ContentView):
                     "[$text-muted]toggle rules on/off or test against recent data[/$text-muted]"
                 )
             ),
-            Static(
-                resolve_tcss_markup("[$text-muted]changes last until you quit[/$text-muted]")
-            ),
+            Static(resolve_tcss_markup("[$text-muted]changes last until you quit[/$text-muted]")),
             rules_list,
             buttons,
             Static("TEST RESULTS", classes="section-label"),
@@ -105,14 +103,8 @@ class AlertsScreen(ContentView):
             Container with rule card content.
         """
         enabled_class = "rule-enabled" if rule.enabled else "rule-disabled"
-        actions = (
-            ", ".join(rule.actions).lower() if rule.actions else "all actions"
-        )
-        components = (
-            ", ".join(rule.components).lower()
-            if rule.components
-            else "all components"
-        )
+        actions = ", ".join(rule.actions).lower() if rule.actions else "all actions"
+        components = ", ".join(rule.components).lower() if rule.components else "all components"
         if len(components) > 40:
             components = components[:39] + "…"
         name = literal(rule.name)

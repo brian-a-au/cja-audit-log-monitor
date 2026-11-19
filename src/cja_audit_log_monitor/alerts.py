@@ -58,8 +58,7 @@ def alert_texts(rule: AlertRule, event_count: int, entry: AuditLogEntry) -> tupl
         # One event is the whole story: no count, and the user is that event's user.
         return label, f"{rule.name}: {label} by {user}"
     counted = (
-        f"{_plural(event_count, 'event')} in "
-        f"{_plural(rule.threshold_window_minutes, 'minute')}"
+        f"{_plural(event_count, 'event')} in {_plural(rule.threshold_window_minutes, 'minute')}"
     )
     who = f"by {user}" if rule.per_user else f"latest by {user}"
     separator = " " if rule.per_user else ", "
@@ -241,13 +240,15 @@ class AlertEngine:
             if event_count >= rule.threshold_count:
                 message, summary = alert_texts(rule, event_count, entry)
                 panel = format_alert(entry, rule.name, message)
-                fired.append(FiredAlert(
-                    rule_name=rule.name,
-                    message=message,
-                    entry=entry,
-                    panel=panel,
-                    summary=summary,
-                ))
+                fired.append(
+                    FiredAlert(
+                        rule_name=rule.name,
+                        message=message,
+                        entry=entry,
+                        panel=panel,
+                        summary=summary,
+                    )
+                )
 
                 # Log alert (INFO: the alert panel already shows it; -v adds this line)
                 logger.info("Alert triggered: %s", summary)
@@ -338,29 +339,31 @@ def analyze_for_anomalies(
         for user, actions in user_actions.items():
             others_mean = (total_actions - len(actions)) / (len(user_actions) - 1)
             if len(actions) >= HIGH_ACTIVITY_MIN_COUNT and len(actions) > others_mean * 3:
-                anomalies.append({
-                    "type": "high_activity_user",
-                    "user": user,
-                    "action_count": len(actions),
-                    "average": others_mean,
-                    "description": (
-                        f"User {user} has {len(actions)} actions "
-                        f"({others_mean:.1f} avg for other users)"
-                    ),
-                })
+                anomalies.append(
+                    {
+                        "type": "high_activity_user",
+                        "user": user,
+                        "action_count": len(actions),
+                        "average": others_mean,
+                        "description": (
+                            f"User {user} has {len(actions)} actions "
+                            f"({others_mean:.1f} avg for other users)"
+                        ),
+                    }
+                )
 
     # Check for concentrated delete activity, one report per user
-    delete_entries = [
-        e for e in entries if (e.action or "").upper() == ActionType.DELETE.value
-    ]
+    delete_entries = [e for e in entries if (e.action or "").upper() == ActionType.DELETE.value]
     for user, deletes in group_by_user(delete_entries).items():
         if len(deletes) >= BULK_DELETE_MIN_COUNT:
-            anomalies.append({
-                "type": "bulk_delete_single_user",
-                "user": user,
-                "delete_count": len(deletes),
-                "description": f"User {user} performed {len(deletes)} deletes",
-            })
+            anomalies.append(
+                {
+                    "type": "bulk_delete_single_user",
+                    "user": user,
+                    "delete_count": len(deletes),
+                    "description": f"User {user} performed {len(deletes)} deletes",
+                }
+            )
 
     # Check for unusual time patterns (if timestamps available)
     # Hours are UTC unless ``local`` is set; the description names the zone either way.
@@ -380,13 +383,15 @@ def analyze_for_anomalies(
                 and count >= OFF_HOURS_MIN_COUNT
                 and count > avg_per_hour * 2
             ):
-                anomalies.append({
-                    "type": "off_hours_activity",
-                    "hour": hour,
-                    "action_count": count,
-                    "description": (
-                        f"Unusual activity at {hour:02d}:00 {zone} ({count} actions)"
-                    ),
-                })
+                anomalies.append(
+                    {
+                        "type": "off_hours_activity",
+                        "hour": hour,
+                        "action_count": count,
+                        "description": (
+                            f"Unusual activity at {hour:02d}:00 {zone} ({count} actions)"
+                        ),
+                    }
+                )
 
     return anomalies

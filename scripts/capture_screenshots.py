@@ -59,24 +59,40 @@ def generate_mock_entries(count: int = 150) -> list[AuditLogEntry]:
 
     component_names = {
         ComponentType.PROJECT: [
-            "Q4 Sales Report", "Marketing Overview", "Customer Journey Analysis",
-            "Revenue Dashboard", "User Engagement Report", "Conversion Funnel",
+            "Q4 Sales Report",
+            "Marketing Overview",
+            "Customer Journey Analysis",
+            "Revenue Dashboard",
+            "User Engagement Report",
+            "Conversion Funnel",
         ],
         ComponentType.FILTER: [
-            "Returning Visitors", "Mobile Users", "High Value Customers",
-            "New Signups", "Enterprise Segment",
+            "Returning Visitors",
+            "Mobile Users",
+            "High Value Customers",
+            "New Signups",
+            "Enterprise Segment",
         ],
         ComponentType.CALCULATED_METRIC: [
-            "Conversion Rate", "Customer LTV", "Bounce Rate", "Session Duration",
+            "Conversion Rate",
+            "Customer LTV",
+            "Bounce Rate",
+            "Session Duration",
         ],
         ComponentType.DATA_VIEW: [
-            "Production View", "Staging View", "Analytics Sandbox",
+            "Production View",
+            "Staging View",
+            "Analytics Sandbox",
         ],
         ComponentType.ANNOTATION: [
-            "Black Friday Sale", "Site Outage", "New Feature Launch",
+            "Black Friday Sale",
+            "Site Outage",
+            "New Feature Launch",
         ],
         ComponentType.AUDIENCE: [
-            "Engaged Users", "At-Risk Customers", "VIP Segment",
+            "Engaged Users",
+            "At-Risk Customers",
+            "VIP Segment",
         ],
     }
 
@@ -221,13 +237,15 @@ def setup_mock_state(app, entries: list[AuditLogEntry]) -> None:
     mock_client.get_logs = mock_get_logs
     mock_client.get_all_logs = mock_get_all_logs
     mock_client.get_logs_sample = mock_get_logs_sample
-    mock_client.verify_connection = MagicMock(return_value={
-        "connected": True,
-        "authenticated": True,
-        "org_id": "ABC123DEF@AdobeOrg",
-        "api_url": "https://cja.adobe.io",
-        "total_logs_available": len(entries),
-    })
+    mock_client.verify_connection = MagicMock(
+        return_value={
+            "connected": True,
+            "authenticated": True,
+            "org_id": "ABC123DEF@AdobeOrg",
+            "api_url": "https://cja.adobe.io",
+            "total_logs_available": len(entries),
+        }
+    )
     mock_client.close = MagicMock()
 
     app.state._settings = mock_settings

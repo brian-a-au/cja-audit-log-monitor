@@ -286,9 +286,7 @@ class TestAtomicWrites:
         assert json.loads(link.read_text(encoding="utf-8"))["count"] == 1
 
     @pytest.mark.skipif(sys.platform == "win32", reason="POSIX permissions only")
-    def test_new_file_is_private(
-        self, tmp_path: Path, sample_audit_entry: AuditLogEntry
-    ) -> None:
+    def test_new_file_is_private(self, tmp_path: Path, sample_audit_entry: AuditLogEntry) -> None:
         target = tmp_path / "out.csv"
         export_to_csv([sample_audit_entry], target)
         assert target.stat().st_mode & 0o777 == 0o600
@@ -324,18 +322,14 @@ class TestFormulaInjection:
             description=description,
         )
 
-    @pytest.mark.parametrize(
-        ("fn", "delimiter"), [(export_to_csv, ","), (export_to_tsv, "\t")]
-    )
+    @pytest.mark.parametrize(("fn", "delimiter"), [(export_to_csv, ","), (export_to_tsv, "\t")])
     def test_formula_cell_is_prefixed(self, fn, delimiter) -> None:
         out = StringIO()
         fn([self._entry('=HYPERLINK("http://x")')], out)
         rows = list(csv.DictReader(StringIO(out.getvalue()), delimiter=delimiter))
         assert rows[0]["component_name"] == '\'=HYPERLINK("http://x")'
 
-    @pytest.mark.parametrize(
-        ("fn", "delimiter"), [(export_to_csv, ","), (export_to_tsv, "\t")]
-    )
+    @pytest.mark.parametrize(("fn", "delimiter"), [(export_to_csv, ","), (export_to_tsv, "\t")])
     def test_negative_looking_value_is_prefixed(self, fn, delimiter) -> None:
         out = StringIO()
         fn([self._entry("-5", "@cmd")], out)
@@ -582,7 +576,9 @@ class TestChangesInExports:
     """The `changes` field is in every format (G26)."""
 
     ENTRY = AuditLogEntry(
-        id="c1", action="EDIT", timestamp=datetime(2026, 1, 1, tzinfo=UTC),
+        id="c1",
+        action="EDIT",
+        timestamp=datetime(2026, 1, 1, tzinfo=UTC),
         changes={"name": {"old": "a", "new": "=b"}},
     )
 
@@ -610,8 +606,11 @@ class TestExportDetails:
     """Plain TSV, UTF-8 JSON, long names (G44)."""
 
     ENTRY = AuditLogEntry(
-        id="d1", action="EDIT", timestamp=datetime(2026, 1, 1, tzinfo=UTC),
-        component_name='日本 "quoted"\tname\nline two', user_email="u@example.com",
+        id="d1",
+        action="EDIT",
+        timestamp=datetime(2026, 1, 1, tzinfo=UTC),
+        component_name='日本 "quoted"\tname\nline two',
+        user_email="u@example.com",
     )
 
     def test_tsv_is_plain(self) -> None:

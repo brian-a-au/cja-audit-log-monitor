@@ -174,9 +174,7 @@ class SettingsScreen(ContentView):
         self.run_load(
             self._state.verify_connection,
             self._update_connection_status,
-            lambda error: self._update_connection_status(
-                {"connected": False, "error": str(error)}
-            ),
+            lambda error: self._update_connection_status({"connected": False, "error": str(error)}),
         )
 
     async def on_button_pressed(self, event: Button.Pressed) -> None:
@@ -229,4 +227,3 @@ class SettingsScreen(ContentView):
                     f"[$danger]●[/$danger] disconnected\n  error: {literal(str(error))}"
                 )
             )
-

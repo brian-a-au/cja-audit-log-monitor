@@ -119,7 +119,8 @@ class TokenManager:
             error_data = e.response.json()
             error_code = str(error_data.get("error", ""))[:100]
             error_desc = re.sub(
-                r"client_secret=[^&\s]+", "client_secret=***",
+                r"client_secret=[^&\s]+",
+                "client_secret=***",
                 str(error_data.get("error_description", "")),
             )[:200]
 
@@ -144,9 +145,7 @@ class TokenManager:
         except Exception:
             status = e.response.status_code
             if status == 401:
-                return (
-                    "401 Unauthorized: Check that credentials are current and not regenerated."
-                )
+                return "401 Unauthorized: Check that credentials are current and not regenerated."
             elif status == 403:
                 return (
                     "403 Forbidden: Ensure both CJA API and Experience Platform API are added "

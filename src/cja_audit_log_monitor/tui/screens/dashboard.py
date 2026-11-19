@@ -119,9 +119,7 @@ class DashboardScreen(ContentView):
             return _DashboardLoad(connection)
         try:
             query = build_date_range_query(self._days)
-            entries, total = self._state.client.get_logs_sample(
-                query, max_entries=DASHBOARD_SAMPLE
-            )
+            entries, total = self._state.client.get_logs_sample(query, max_entries=DASHBOARD_SAMPLE)
             if not entries:
                 return _DashboardLoad(connection)
             return _DashboardLoad(
@@ -141,9 +139,7 @@ class DashboardScreen(ContentView):
         if not connection.get("connected"):
             self._show_disconnected(str(connection.get("error", "connection failed")))
             return
-        self.app.set_connection_status(
-            "connected", f"org {connection.get('org_id', 'unknown')}"
-        )
+        self.app.set_connection_status("connected", f"org {connection.get('org_id', 'unknown')}")
         if load.error is not None:
             self.show_load_error(load.error)
         elif load.stats is None:

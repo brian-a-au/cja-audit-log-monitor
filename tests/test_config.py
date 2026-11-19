@@ -75,7 +75,6 @@ class TestCJASettings:
             CJASettings(org_id="invalid_org_id")
 
 
-
 class TestLoadConfig:
     """Tests for load_config function."""
 
@@ -300,6 +299,7 @@ class TestCreateDefaultConfigAnomalies:
 
     def test_template_mentions_anomalies_command(self, tmp_path):
         from cja_audit_log_monitor.config import create_default_config
+
         out = create_default_config(tmp_path / "config.yaml")
         content = out.read_text()
         assert "cja-audit-log-monitor cli anomalies" in content
@@ -374,9 +374,7 @@ class TestAlertRuleConfig:
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
         path = tmp_path / "config.yaml"
-        path.write_text(
-            "alert_rules:\n  - name: r\n    actions: [DELETE, ARCHIVE]\n"
-        )
+        path.write_text("alert_rules:\n  - name: r\n    actions: [DELETE, ARCHIVE]\n")
         with caplog.at_level("WARNING"):
             settings = load_config(path)
         assert settings.alert_rules[0].actions == ["DELETE", "ARCHIVE"]
@@ -407,10 +405,16 @@ def test_no_config_mistake_crashes_or_leaks(bad_config) -> None:
     [
         ("alert_rules:\n  - name: r\n    treshold_count: 5\n", "alert_rules[0]", "treshold_count"),
         ("alert_rules:\n  - name: r\n    per-user: true\n", "alert_rules[0]", "per-user"),
-        ("notifications:\n  slack_webhook: https://x.example.com\n", "notifications",
-         "slack_webhook"),
-        ("notifications:\n  webhooks:\n    - url: https://x.example.com\n      time_out: 5\n",
-         "notifications.webhooks[0]", "time_out"),
+        (
+            "notifications:\n  slack_webhook: https://x.example.com\n",
+            "notifications",
+            "slack_webhook",
+        ),
+        (
+            "notifications:\n  webhooks:\n    - url: https://x.example.com\n      time_out: 5\n",
+            "notifications.webhooks[0]",
+            "time_out",
+        ),
     ],
     ids=["rule-typo", "rule-dash", "slack-typo", "webhook-typo"],
 )

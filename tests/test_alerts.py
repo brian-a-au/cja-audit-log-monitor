@@ -222,8 +222,7 @@ class TestAnalyzeForAnomalies:
     def test_bulk_delete_single_user(self) -> None:
         """Test detection of bulk deletes by single user."""
         entries = [
-            AuditLogEntry(action="DELETE", user_email="deleter@example.com")
-            for _ in range(15)
+            AuditLogEntry(action="DELETE", user_email="deleter@example.com") for _ in range(15)
         ]
 
         anomalies = analyze_for_anomalies(entries)
@@ -235,9 +234,7 @@ class TestAnalyzeForAnomalies:
         """Test that bulk deletes by multiple users is not flagged."""
         entries = []
         for i in range(15):
-            entries.append(
-                AuditLogEntry(action="DELETE", user_email=f"user{i}@example.com")
-            )
+            entries.append(AuditLogEntry(action="DELETE", user_email=f"user{i}@example.com"))
 
         anomalies = analyze_for_anomalies(entries)
         bulk_delete = [a for a in anomalies if a["type"] == "bulk_delete_single_user"]
@@ -288,10 +285,10 @@ class TestAnomalyThresholds:
         assert self._types(entries, "off_hours_activity") == []
 
     def test_high_activity_compares_with_other_users(self):
-        entries = (
-            [self._at(i, 9, "a") for i in range(98)]
-            + [self._at(0, 9, "b"), self._at(1, 9, "c")]
-        )
+        entries = [self._at(i, 9, "a") for i in range(98)] + [
+            self._at(0, 9, "b"),
+            self._at(1, 9, "c"),
+        ]
         high = self._types(entries, "high_activity_user")
         assert [a["user"] for a in high] == ["a"]
         assert high[0]["action_count"] == 98
@@ -302,9 +299,9 @@ class TestAnomalyThresholds:
         assert self._types(entries, "high_activity_user") == []
 
     def test_bulk_delete_is_reported_per_user(self):
-        entries = [
-            AuditLogEntry(id=f"d{i}", action="DELETE", user_id="a") for i in range(100)
-        ] + [AuditLogEntry(id="x", action="DELETE", user_id="b")]
+        entries = [AuditLogEntry(id=f"d{i}", action="DELETE", user_id="a") for i in range(100)] + [
+            AuditLogEntry(id="x", action="DELETE", user_id="b")
+        ]
         bulk = self._types(entries, "bulk_delete_single_user")
         assert [a["user"] for a in bulk] == ["a"]
         assert bulk[0]["delete_count"] == 100
@@ -342,12 +339,8 @@ class TestOffHoursZone:
 
     def _entries(self):
         # 30 actions at 10:00 UTC (02:00 in Los Angeles), plus a spread of daytime ones.
-        busy = [
-            self._at(f"b{i}", 10, i) for i in range(30)
-        ]
-        spread = [
-            self._at(f"s{h}", h, 0) for h in range(16, 23)
-        ]
+        busy = [self._at(f"b{i}", 10, i) for i in range(30)]
+        spread = [self._at(f"s{h}", h, 0) for h in range(16, 23)]
         return busy + spread
 
     def test_utc_by_default(self, los_angeles_tz):
@@ -361,9 +354,7 @@ class TestOffHoursZone:
         assert off[0]["description"].startswith("Unusual activity at 02:00 PST")
 
     def test_utc_description_names_utc(self):
-        entries = [
-            self._at(f"b{i}", 3, i) for i in range(30)
-        ]
+        entries = [self._at(f"b{i}", 3, i) for i in range(30)]
         off = [a for a in analyze_for_anomalies(entries) if a["type"] == "off_hours_activity"]
         assert off[0]["description"].startswith("Unusual activity at 03:00 UTC")
 
@@ -371,13 +362,15 @@ class TestOffHoursZone:
 class TestAccountMatching:
     def _rule(self, users):
         return AlertRule(
-            name="r", description="d", actions=[ActionType.DELETE], users=users,
-            threshold_count=1, threshold_window_minutes=60,
+            name="r",
+            description="d",
+            actions=[ActionType.DELETE],
+            users=users,
+            threshold_count=1,
+            threshold_window_minutes=60,
         )
 
-    @pytest.mark.parametrize(
-        "listed", ["ABC@techacct.adobe.com", "My Integration"]
-    )
+    @pytest.mark.parametrize("listed", ["ABC@techacct.adobe.com", "My Integration"])
     def test_rule_matches_ims_id_or_name(self, listed):
         engine = AlertEngine(rules=[])
         entry = AuditLogEntry(
@@ -394,16 +387,20 @@ class TestAccountMatching:
         assert engine._matches_rule(entry, self._rule(["X@abc.e"]))
 
     def test_anomalies_do_not_merge_accounts_with_same_name(self):
-        entries = [
-            AuditLogEntry(id=f"a{i}", user_id="A@techacct.adobe.com", user_name="Integration")
-            for i in range(5)
-        ] + [
-            AuditLogEntry(id=f"b{i}", user_id="B@techacct.adobe.com", user_name="Integration")
-            for i in range(5)
-        ] + [
-            AuditLogEntry(id=f"c{i}", user_id=f"C{i}@x.e", user_email=f"c{i}@example.com")
-            for i in range(4)
-        ]
+        entries = (
+            [
+                AuditLogEntry(id=f"a{i}", user_id="A@techacct.adobe.com", user_name="Integration")
+                for i in range(5)
+            ]
+            + [
+                AuditLogEntry(id=f"b{i}", user_id="B@techacct.adobe.com", user_name="Integration")
+                for i in range(5)
+            ]
+            + [
+                AuditLogEntry(id=f"c{i}", user_id=f"C{i}@x.e", user_email=f"c{i}@example.com")
+                for i in range(4)
+            ]
+        )
         high = [a for a in analyze_for_anomalies(entries) if a["type"] == "high_activity_user"]
         # 14 actions over 6 accounts: average 2.3, so no account has 3x the average.
         assert high == []
@@ -442,8 +439,10 @@ class TestEventTimeWindows:
     def test_newest_first_batch_gives_the_sorted_result(self):
         """Pages come newest first; the result must not depend on that order."""
         rule = AlertRule(
-            name="three", actions=[ActionType.DELETE],
-            threshold_count=3, threshold_window_minutes=10,
+            name="three",
+            actions=[ActionType.DELETE],
+            threshold_count=3,
+            threshold_window_minutes=10,
         )
         early = self._deletes(3, self.BASE - timedelta(hours=2), step_minutes=1)
         late = self._deletes(2, self.BASE - timedelta(minutes=30), step_minutes=1)
@@ -464,8 +463,10 @@ class TestEventTimeWindows:
 
     def test_events_outside_window_never_count_together(self):
         rule = AlertRule(
-            name="pair", actions=[ActionType.DELETE],
-            threshold_count=2, threshold_window_minutes=60,
+            name="pair",
+            actions=[ActionType.DELETE],
+            threshold_count=2,
+            threshold_window_minutes=60,
         )
         engine = AlertEngine(rules=[rule])
         assert engine.check_batch(self._deletes(2, self.BASE, step_minutes=90)) == []
@@ -486,8 +487,10 @@ class TestFutureTimestamps:
 
     def _engine(self):
         rule = AlertRule(
-            name="trio", actions=[ActionType.DELETE],
-            threshold_count=3, threshold_window_minutes=60,
+            name="trio",
+            actions=[ActionType.DELETE],
+            threshold_count=3,
+            threshold_window_minutes=60,
         )
         return AlertEngine(rules=[rule])
 
@@ -612,7 +615,9 @@ class TestRuleDefinitions:
         rule = AlertRule(name="named", users=[" Someone@Example.com "])
         engine = AlertEngine(rules=[rule])
         entry = AuditLogEntry(
-            id="1", action="DELETE", user_email="someone@example.com",
+            id="1",
+            action="DELETE",
+            user_email="someone@example.com",
             timestamp=datetime.now(UTC),
         )
         assert [a.rule_name for a in engine.check_entry(entry)] == ["named"]
@@ -643,7 +648,9 @@ class TestRuleDefinitions:
     def test_lower_case_delete_counts_for_the_bulk_delete_anomaly(self) -> None:
         entries = [
             AuditLogEntry(
-                id=str(i), action="delete", user_email="u@example.com",
+                id=str(i),
+                action="delete",
+                user_email="u@example.com",
                 timestamp=datetime.now(UTC),
             )
             for i in range(20)
@@ -690,8 +697,12 @@ class TestFutureTimestampsAgeOut:
 def test_short_lookback_steady_night_is_not_flagged() -> None:
     day = datetime(2026, 3, 1, tzinfo=UTC)
     entries = [
-        AuditLogEntry(id=f"{h}-{i}", action="EDIT", user_id=f"u{i}",
-                      timestamp=day + timedelta(hours=h, minutes=i))
+        AuditLogEntry(
+            id=f"{h}-{i}",
+            action="EDIT",
+            user_id=f"u{i}",
+            timestamp=day + timedelta(hours=h, minutes=i),
+        )
         for h in (2, 3)
         for i in range(10)
     ]
@@ -728,8 +739,12 @@ class TestAlertTexts:
     def _deletes(count, user="mallory@example.com"):
         now = datetime.now(UTC)
         return [
-            AuditLogEntry(id=f"{user}{i}", action="DELETE", user_email=user,
-                          timestamp=now - timedelta(seconds=count - i))
+            AuditLogEntry(
+                id=f"{user}{i}",
+                action="DELETE",
+                user_email=user,
+                timestamp=now - timedelta(seconds=count - i),
+            )
             for i in range(count)
         ]
 
@@ -746,11 +761,17 @@ class TestAlertTexts:
 
     def test_sensitive_delete_message_has_no_count(self) -> None:
         entry = AuditLogEntry(
-            id="1", action="DELETE", component_type="DATA_VIEW", user_email="u@example.com",
+            id="1",
+            action="DELETE",
+            component_type="DATA_VIEW",
+            user_email="u@example.com",
             timestamp=datetime.now(UTC),
         )
-        fired = [a for a in AlertEngine().check_entry(entry)
-                 if a.rule_name == "sensitive_component_delete"]
+        fired = [
+            a
+            for a in AlertEngine().check_entry(entry)
+            if a.rule_name == "sensitive_component_delete"
+        ]
         assert fired[0].message == "Deletion of sensitive components"
         assert "1 events" not in fired[0].summary
         assert "1 minutes" not in fired[0].summary
