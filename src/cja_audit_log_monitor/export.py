@@ -63,6 +63,42 @@ def _publish_without_overwrite(tmp_name: str, path: Path) -> None:
         os.replace(tmp_name, path)
 
 
+# Most file systems allow 255 bytes in one file name.
+_MAX_NAME_BYTES = 255
+
+
+def check_export_path(raw: str) -> tuple[Path | None, str | None, bool]:
+    """Check an export path typed by a user. Never raises.
+
+    Returns:
+        The path with ``~`` expanded (None when it cannot be used), the reason it
+        cannot be used (None when it can), and whether something already exists
+        there (a dangling symlink counts, since writing would replace it).
+    """
+    raw = raw.strip()
+    if not raw:
+        return None, "enter a file path", False
+    if raw.endswith(("/", os.sep)):
+        return None, "that path is a folder, not a file", False
+    try:
+        path = Path(raw).expanduser()
+    except RuntimeError:  # "~name" for a user that does not exist, or no home folder
+        return None, f"cannot find the home folder in {raw.split('/')[0]!r}", False
+    if len(os.fsencode(path.name)) > _MAX_NAME_BYTES:
+        return None, "the file name is too long", False
+    try:
+        if path.is_dir():
+            return None, "that path is a folder, not a file", False
+        if not path.parent.is_dir():
+            return None, f"folder does not exist: {path.parent}", False
+        if not os.access(path.parent, os.W_OK | os.X_OK):
+            return None, f"cannot write to folder {path.parent}", False
+        exists = os.path.lexists(path)
+    except OSError as e:
+        return None, f"cannot use that path ({e.strerror or type(e).__name__})", False
+    return path, None, exists
+
+
 def entry_to_dict(entry: AuditLogEntry) -> dict[str, Any]:
     """Convert audit log entry to dictionary for export.
 

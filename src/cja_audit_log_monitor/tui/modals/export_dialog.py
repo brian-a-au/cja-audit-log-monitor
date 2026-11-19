@@ -9,7 +9,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Label, RadioButton, RadioSet, Static
 from textual.worker import get_current_worker
 
-from ...export import export_entries
+from ...export import check_export_path, export_entries
 from ...formatters import TCSS_TOKEN_HEX
 from ...models import AuditLogEntry
 from ..state import AppState
@@ -157,20 +157,17 @@ class ExportDialog(ModalScreen):
         if not raw_path:
             self._set_status("enter a file path", "$warning")
             return
-        output_path = Path(raw_path).expanduser()
-        if output_path.is_dir():
-            self._set_status("that path is a folder, not a file", "$danger")
-            return
-        if not output_path.parent.is_dir():
-            self._set_status(f"folder does not exist: {output_path.parent}", "$danger")
+        output_path, problem, exists = check_export_path(raw_path)
+        if problem is not None or output_path is None:
+            self._set_status(problem or "cannot use that path", "$danger")
             return
         key = (raw_path, export_format)
-        if output_path.exists() and self._overwrite_pending != key:
+        if exists and self._overwrite_pending != key:
             self._overwrite_pending = key
             self._set_status("file exists · press export again to overwrite", "$warning")
             return
         # A pending confirmation is spent by this press: it is the one allowed to replace.
-        replace = output_path.exists()
+        replace = exists
         self._overwrite_pending = None
 
         if not fetch_all and not self._state.entries:

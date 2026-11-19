@@ -3090,3 +3090,48 @@ def test_verbose_does_not_log_httpcore_internals(fake_api, tmp_path) -> None:
     assert result.returncode == 0, result.stderr
     assert "receive_response_headers" not in result.stderr
     assert "send_request_headers" not in result.stderr
+
+
+class TestExportPathChecks:
+    """The CLI export path check runs before any request (G25, G44)."""
+
+    @staticmethod
+    def _run(args):
+        client = MagicMock()
+        client.__enter__ = MagicMock(return_value=client)
+        client.__exit__ = MagicMock(return_value=False)
+        with patch("cja_audit_log_monitor.cli.get_client", return_value=(client, _settings())):
+            result = CliRunner().invoke(main, ["cli", "export", *args])
+        return result, client
+
+    def test_dangling_symlink_needs_force(self, tmp_path) -> None:
+        link = tmp_path / "out.json"
+        link.symlink_to(tmp_path / "gone.json")
+        result, client = self._run(["-o", str(link)])
+        assert result.exit_code == 1
+        assert "--force" in result.stderr
+        client.get_all_logs.assert_not_called()
+
+    def test_unwritable_folder_fails_before_fetch(self, tmp_path) -> None:
+        import os
+
+        if hasattr(os, "geteuid") and os.geteuid() == 0:
+            pytest.skip("root can write anywhere")
+        folder = tmp_path / "locked"
+        folder.mkdir()
+        folder.chmod(0o500)
+        try:
+            result, client = self._run(["-o", str(folder / "out.json")])
+        finally:
+            folder.chmod(0o700)
+        assert result.exit_code == 1
+        assert "cannot write" in result.stderr
+        client.get_all_logs.assert_not_called()
+
+    def test_cli_expands_tilde(self, tmp_path, monkeypatch) -> None:
+        monkeypatch.setenv("HOME", str(tmp_path))
+        (tmp_path / "out.json").write_text("old")
+        result, client = self._run(["-o", "~/out.json"])
+        assert result.exit_code == 1
+        assert "already exists" in result.stderr
+        client.get_all_logs.assert_not_called()

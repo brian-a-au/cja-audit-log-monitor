@@ -524,3 +524,55 @@ class TestStreamOutput:
         count = export_entries([sample_audit_entry], out, "tsv")
         assert count == 1
         assert out.getvalue().splitlines()[0].startswith("id\ttimestamp")
+
+
+class TestCheckExportPath:
+    """One path check for the CLI and the dialog; it never raises (G22, G25, G44)."""
+
+    def test_good_path(self, tmp_path: Path) -> None:
+        from cja_audit_log_monitor.export import check_export_path
+
+        path, problem, exists = check_export_path(str(tmp_path / "out.json"))
+        assert (path, problem, exists) == (tmp_path / "out.json", None, False)
+
+    @pytest.mark.parametrize("raw", ["~backup.json", "~no-such-user-zz/x.json", "~.json"])
+    def test_unknown_home_folder(self, raw: str) -> None:
+        from cja_audit_log_monitor.export import check_export_path
+
+        path, problem, _ = check_export_path(raw)
+        assert path is None and problem
+
+    def test_trailing_slash_is_a_folder(self, tmp_path: Path) -> None:
+        from cja_audit_log_monitor.export import check_export_path
+
+        _, problem, _ = check_export_path(str(tmp_path / "newfolder") + "/")
+        assert problem == "that path is a folder, not a file"
+
+    def test_dangling_symlink_counts_as_existing(self, tmp_path: Path) -> None:
+        from cja_audit_log_monitor.export import check_export_path
+
+        link = tmp_path / "out.json"
+        link.symlink_to(tmp_path / "gone.json")
+        _, problem, exists = check_export_path(str(link))
+        assert problem is None and exists is True
+
+    @pytest.mark.skipif(
+        hasattr(os, "geteuid") and os.geteuid() == 0, reason="root can write anywhere"
+    )
+    def test_unwritable_folder(self, tmp_path: Path) -> None:
+        from cja_audit_log_monitor.export import check_export_path
+
+        folder = tmp_path / "locked"
+        folder.mkdir()
+        folder.chmod(0o500)
+        try:
+            _, problem, _ = check_export_path(str(folder / "out.json"))
+        finally:
+            folder.chmod(0o700)
+        assert problem and "cannot write" in problem
+
+    def test_name_too_long(self, tmp_path: Path) -> None:
+        from cja_audit_log_monitor.export import check_export_path
+
+        _, problem, _ = check_export_path(str(tmp_path / ("x" * 300 + ".json")))
+        assert problem == "the file name is too long"

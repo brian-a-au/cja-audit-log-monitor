@@ -32,7 +32,7 @@ from .config import (
     get_config_path,
     load_config,
 )
-from .export import atomic_write, export_entries
+from .export import atomic_write, check_export_path, export_entries
 from .formatters import (
     format_action_stats_table,
     format_logs_table,
@@ -143,20 +143,21 @@ def handle_cli_errors(func: Callable[P, R]) -> Callable[P, R]:
     return wrapper
 
 
-def check_output_path(output: Path | None, force: bool) -> None:
-    """Fail fast (before any API call) on an unusable output path.
+def check_output_path(output: Path | None, force: bool) -> Path | None:
+    """Fail fast (before any API call) on an unusable output path; return it with ``~`` expanded.
 
-    Refuses an existing file unless ``--force`` was given, and a missing parent
-    directory. ``-`` means stdout and is never a file, so it is always allowed.
+    Refuses an existing file (a dangling symlink counts) unless ``--force`` was given, a
+    folder, a missing or unwritable folder, and a name that is too long. ``-`` means stdout
+    and is always allowed.
     """
     if output is None or str(output) == "-":
-        return
-    if output.is_dir():
-        raise IsADirectoryError(f"{output} is a folder, not a file; give a file name")
-    if not output.parent.is_dir():
-        raise FileNotFoundError(f"directory {output.parent} does not exist")
-    if output.exists() and not force:
-        raise FileExistsError(f"{output} already exists; use --force to overwrite")
+        return output
+    path, problem, exists = check_export_path(str(output))
+    if problem is not None or path is None:
+        raise OSError(problem)
+    if exists and not force:
+        raise FileExistsError(f"{path} already exists; use --force to overwrite")
+    return path
 
 
 def setup_logging(verbose: bool) -> None:
@@ -663,7 +664,7 @@ def export(
 ) -> None:
     """Export audit logs to a file, or to stdout with -o -."""
     config_path = ctx.obj.get("config_path")
-    check_output_path(output, force)
+    output = check_output_path(output, force)
     to_stdout = str(output) == "-"
     destination: Any = sys.stdout if to_stdout else output
 
@@ -1153,7 +1154,7 @@ def report(
 ) -> None:
     """Generate a comprehensive audit log report."""
     config_path = ctx.obj.get("config_path")
-    check_output_path(output, force)
+    output = check_output_path(output, force)
 
     client, settings = get_client(config_path)
     days = days_or_default(days, settings)

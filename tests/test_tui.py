@@ -2563,6 +2563,64 @@ class TestExportScope:
             assert "up to 10,000" in str(every.label)
 
 
+class TestExportPathsNeverCrash:
+    """A typo in the path box never ends the app (G22, G25)."""
+
+    async def _open(self, app, pilot):
+        await pilot.pause()
+        await pilot.press("e")
+        await pilot.pause()
+        return app.screen
+
+    @pytest.mark.parametrize(
+        "raw", ["~backup.json", "~no-such-user-zz/x.json", "x" * 300 + ".json"]
+    )
+    async def test_typed_path_never_crashes(self, mock_app_state, sample_audit_entries, raw):
+        mock_app_state.page_loaded = True
+        mock_app_state.entries = sample_audit_entries
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(120, 40)) as pilot:
+            dialog = await self._open(app, pilot)
+            dialog.query_one("#output-path").value = raw
+            await pilot.click("#export-button")
+            await pilot.pause()
+            assert app.is_running
+            assert _plain(dialog.query_one("#export-status", Static)).strip()
+
+    async def test_lone_tilde_then_format_change(self, mock_app_state, sample_audit_entries):
+        mock_app_state.page_loaded = True
+        mock_app_state.entries = sample_audit_entries
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(120, 40)) as pilot:
+            dialog = await self._open(app, pilot)
+            dialog.query_one("#output-path").value = "~"
+            dialog.query_one("#format-csv").value = True
+            await pilot.pause()
+            await pilot.click("#export-button")
+            await pilot.pause()
+            assert app.is_running
+
+    async def test_dangling_symlink_needs_one_confirm(
+        self, mock_app_state, sample_audit_entries, tmp_path
+    ):
+        mock_app_state.page_loaded = True
+        mock_app_state.entries = sample_audit_entries
+        link = tmp_path / "out.json"
+        link.symlink_to(tmp_path / "gone.json")
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(120, 40)) as pilot:
+            dialog = await self._open(app, pilot)
+            dialog.query_one("#output-path").value = str(link)
+            await pilot.pause()  # let the input's Changed event pass first
+            await pilot.click("#export-button")
+            await pilot.pause()
+            assert "press export again" in _plain(dialog.query_one("#export-status", Static))
+            # A click within the button's 0.2 s "active" flash is ignored; press directly.
+            dialog.query_one("#export-button").press()
+            assert await _wait_for(lambda: link.exists() and not link.is_symlink(), pilot)
+            await app.workers.wait_for_complete()
+
+
 class TestExportRobustness:
     """The dialog survives being closed mid-export and never clobbers a late file."""
 
