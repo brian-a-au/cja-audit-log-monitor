@@ -632,6 +632,26 @@ Screen.-wide #hourly-chart {
     min-height: 7;
 }
 
+/* On a wide screen the stats charts row takes the free height, so the hourly chart grows
+ * into it instead of leaving the lower half of the view empty. */
+Screen.-wide #view-stats #view-body {
+    height: 1fr;
+}
+
+Screen.-wide #stats-charts-row {
+    height: 1fr;
+    min-height: 9;
+}
+
+Screen.-wide #stats-charts-row .stats-column {
+    height: 100%;
+}
+
+Screen.-wide #stats-hourly-chart {
+    height: 1fr;
+    min-height: 7;
+}
+
 /* Shown under the stat cards when charts use only the newest entries */
 .sample-note {
     height: auto;

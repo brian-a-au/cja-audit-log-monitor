@@ -5073,3 +5073,14 @@ async def test_tui_monitor_stops_on_an_error_retrying_cannot_fix(mock_app_state,
         assert await _wait_for(lambda: not mock_app_state.monitor.is_running, pilot)
         assert "stopped" in _status_indicator(screen)
         assert any("forbidden" in n.message for n in app._notifications)
+
+
+@pytest.mark.parametrize(("size", "taller"), [((200, 60), True), ((100, 30), False)])
+async def test_stats_hourly_chart_uses_the_height_on_wide_screens(mock_app_state, size, taller):
+    """G40: at 160 columns and more the stats view fills the screen instead of half of it."""
+    app = _make_app(mock_app_state)
+    async with app.run_test(size=size) as pilot:
+        view = await _show_and_load(app, pilot, "s")
+        await pilot.pause()
+        chart = view.query_one("#stats-hourly-chart")
+        assert (chart.region.height >= 15) is taller

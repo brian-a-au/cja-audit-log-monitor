@@ -93,6 +93,7 @@ class StatsView(ContentView):
                 HourlyChart(id="stats-hourly-chart"),
                 classes="stats-column",
             ),
+            id="stats-charts-row",
             classes="stats-row",
         )
         yield Horizontal(
