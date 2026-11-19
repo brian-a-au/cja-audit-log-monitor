@@ -990,8 +990,12 @@ def _run_anomalies_cycle(
         description = anomaly.get("description", anomaly.get("type", "anomaly"))
         if not as_json:
             console.print(f"[yellow]•[/yellow] {escape(description)}")
+
+    # Each anomaly goes to each channel until that channel accepts it once.
+    channels = set(nm.channels()) if nm.config.notify_on_anomalies else set()
+    for anomaly, todo in dedup.pending(raw_anomalies, channels):
         try:
-            nm.notify_anomaly(anomaly)
+            dedup.mark_sent(anomaly, nm.notify_anomaly(anomaly, channels=todo))
         except Exception as e:
             # Network failures are surfaced via pop_first_failure; this catches
             # unexpected programming errors so one bad anomaly doesn't kill the cycle.
@@ -999,6 +1003,7 @@ def _run_anomalies_cycle(
             logging.getLogger(__name__).error(
                 "notify_anomaly raised %s unexpectedly; continuing", type(e).__name__
             )
+    dedup.forget_missing(raw_anomalies)
 
     while True:
         warning = nm.pop_first_failure()

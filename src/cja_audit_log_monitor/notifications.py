@@ -2,7 +2,7 @@
 
 import hashlib
 import logging
-from datetime import UTC, date, datetime
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -364,32 +364,47 @@ class NotificationManager:
 
         return sent
 
-    def notify_anomaly(self, anomaly: dict[str, Any]) -> int:
-        """Send anomaly notifications to all configured channels.
+    def channels(self) -> list[str]:
+        """Keys of the active channels: ``webhook:<n>`` (n counts from 1) and ``slack``."""
+        keys = [
+            f"webhook:{index}"
+            for index, webhook in enumerate(self.config.webhooks, 1)
+            if webhook.enabled
+        ]
+        if self.config.slack_webhook_url:
+            keys.append("slack")
+        return keys
+
+    def notify_anomaly(
+        self, anomaly: dict[str, Any], channels: set[str] | None = None
+    ) -> set[str]:
+        """Send an anomaly to the active channels, or only to ``channels`` when given.
 
         Args:
             anomaly: Anomaly data dictionary.
+            channels: Channel keys (see ``channels()``) to send to; None means all.
 
         Returns:
-            Number of successful notifications sent.
+            The keys of the channels that accepted it.
         """
         if not self.config.notify_on_anomalies:
-            return 0
+            return set()
 
-        sent = 0
+        accepted: set[str] = set()
         payload = self._build_anomaly_payload(anomaly)
 
-        # Send to webhooks
-        for webhook in self.config.webhooks:
+        for index, webhook in enumerate(self.config.webhooks, 1):
+            key = f"webhook:{index}"
+            if channels is not None and key not in channels:
+                continue
             if self.send_webhook(webhook, payload):
-                sent += 1
+                accepted.add(key)
 
-        # Send to Slack
-        if self.config.slack_webhook_url:
+        if self.config.slack_webhook_url and (channels is None or "slack" in channels):
             if self._post_slack(self._build_slack_anomaly_payload(anomaly)):
-                sent += 1
+                accepted.add("slack")
 
-        return sent
+        return accepted
 
     def _build_slack_anomaly_payload(self, anomaly: dict[str, Any]) -> dict[str, Any]:
         """Build a Slack payload for an anomaly, with its text escaped."""
@@ -429,18 +444,16 @@ class NotificationManager:
         return self.config.has_active_channels
 
 
-def _today_iso() -> str:
-    """Return today's local date as YYYY-MM-DD. Module-level for test patching."""
-    return date.today().isoformat()
-
-
 class AnomalyDedupFilter:
-    """In-memory, per-session anomaly dedup by stable fingerprint.
+    """In-memory, per-session anomaly dedup by stable fingerprint, per channel.
 
-    Fingerprint composition: SHA-256 over (today's date, anomaly type, all
-    scalar identifying fields except description and known quantitative fields).
-    Quantitative fields are excluded so a recurring anomaly whose count grew
-    between poll cycles still dedupes.
+    Fingerprint composition: SHA-256 over (anomaly type, all scalar identifying fields
+    except description and known quantitative fields). Quantitative fields are excluded
+    so a recurring anomaly whose count grew between scans still dedupes.
+
+    An anomaly counts as sent to a channel only once that channel accepted it, so a
+    failed channel gets it again next scan. A fingerprint is forgotten when a scan no
+    longer reports it, so an anomaly that clears and comes back is sent again.
     """
 
     _EXCLUDED_FIELDS = frozenset({
@@ -449,6 +462,7 @@ class AnomalyDedupFilter:
 
     def __init__(self) -> None:
         self._seen: set[str] = set()
+        self._sent: dict[str, set[str]] = {}
 
     def fingerprint(self, anomaly: dict[str, Any]) -> str:
         """Return a stable 16-char hex fingerprint for the anomaly."""
@@ -457,7 +471,7 @@ class AnomalyDedupFilter:
             for k, v in anomaly.items()
             if k not in self._EXCLUDED_FIELDS
         )
-        serialized = _today_iso() + "|" + "|".join(f"{k}={v}" for k, v in items)
+        serialized = "|".join(f"{k}={v}" for k, v in items)
         return hashlib.sha256(serialized.encode("utf-8")).hexdigest()[:16]
 
     def suppress_seen(
@@ -477,3 +491,25 @@ class AnomalyDedupFilter:
             self._seen.add(fp)
             out.append(anomaly)
         return out
+
+    def pending(
+        self, anomalies: list[dict[str, Any]], channels: set[str]
+    ) -> list[tuple[dict[str, Any], set[str]]]:
+        """Each anomaly with the channels it has not reached yet (anomalies with none left
+        are left out)."""
+        out = []
+        for anomaly in anomalies:
+            todo = channels - self._sent.get(self.fingerprint(anomaly), set())
+            if todo:
+                out.append((anomaly, todo))
+        return out
+
+    def mark_sent(self, anomaly: dict[str, Any], channels: set[str]) -> None:
+        """Record that ``channels`` accepted ``anomaly``."""
+        self._sent.setdefault(self.fingerprint(anomaly), set()).update(channels)
+
+    def forget_missing(self, anomalies: list[dict[str, Any]]) -> None:
+        """Forget anomalies this scan did not report, so their return is news again."""
+        current = {self.fingerprint(anomaly) for anomaly in anomalies}
+        self._seen &= current
+        self._sent = {fp: sent for fp, sent in self._sent.items() if fp in current}

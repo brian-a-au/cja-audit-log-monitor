@@ -188,7 +188,7 @@ class TestNotificationManager:
         manager = NotificationManager(config)
         result = manager.notify_anomaly({"type": "test", "description": "Test"})
 
-        assert result == 0
+        assert result == set()
 
     def test_context_manager(self) -> None:
         """Test context manager properly closes client."""
@@ -410,26 +410,29 @@ class TestAnomalyDedupFilter:
         f.suppress_seen([a1])
         assert f.suppress_seen([a2]) == []
 
-    def test_day_bucket_simulated_via_freezegun_alternative(self, monkeypatch):
-        """Same anomaly on different days fingerprints differently.
-
-        We patch the date helper directly because freezegun isn't a project dep.
-        """
-        from datetime import date
-
-        import cja_audit_log_monitor.notifications as nm_mod
+    def test_same_anomaly_keeps_its_fingerprint_across_days(self):
+        """The fingerprint holds no date, so a running anomaly is not news at midnight."""
         from cja_audit_log_monitor.notifications import AnomalyDedupFilter
 
         f = AnomalyDedupFilter()
         a = {"type": "high_activity_user", "user": "e@x.com", "action_count": 50,
              "average": 10.0, "description": "..."}
+        first = f.fingerprint(a)
+        assert f.fingerprint(dict(a)) == first
 
-        monkeypatch.setattr(nm_mod, "_today_iso", lambda: date(2026, 5, 4).isoformat())
-        f.suppress_seen([a])
+    def test_pending_mark_sent_and_forget(self):
+        from cja_audit_log_monitor.notifications import AnomalyDedupFilter
 
-        monkeypatch.setattr(nm_mod, "_today_iso", lambda: date(2026, 5, 5).isoformat())
-        out = f.suppress_seen([a])
-        assert len(out) == 1
+        f = AnomalyDedupFilter()
+        a = {"type": "bulk_delete_single_user", "user": "m@x.com", "delete_count": 12}
+        channels = {"slack", "webhook:1"}
+        assert f.pending([a], channels) == [(a, channels)]
+        f.mark_sent(a, {"webhook:1"})
+        assert f.pending([a], channels) == [(a, {"slack"})]
+        f.mark_sent(a, {"slack"})
+        assert f.pending([a], channels) == []
+        f.forget_missing([])
+        assert f.pending([a], channels) == [(a, channels)]
 
 
 class TestNoSecretLeaks:
@@ -516,7 +519,8 @@ class TestSlackEscaping:
         )
         httpx_mock.add_response(url=url, status_code=200)
 
-        assert manager.notify_anomaly({"type": "t", "description": "<!channel> & co"}) == 1
+        sent = manager.notify_anomaly({"type": "t", "description": "<!channel> & co"})
+        assert sent == {"slack"}
         text = json.dumps(json.loads(httpx_mock.get_requests()[0].content))
         assert "&lt;!channel&gt; &amp; co" in text
 
