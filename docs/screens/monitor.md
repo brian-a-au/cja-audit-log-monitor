@@ -1,30 +1,42 @@
 # Real-Time Monitor
 
-The Monitor screen polls the audit API on a configurable interval and streams new events into a live table while running configured alert rules against the incoming batch. Press `m` to open it.
+The monitor asks the audit API for new events at a set interval. It adds each new event to a live table and checks it against your alert rules. Press `m` to open it.
 
 ![Monitor](../screenshots/monitor.svg)
 
 ## What you see
 
-- **Controls bar** (one row): `▶ start` / `■ stop` buttons and an `interval` input (seconds, minimum 5).
-- **Status row**: a `running` / `stopped` indicator that flips color with state, plus *last check · new · alerts*, updated after every poll.
-- **Live log stream**: a log table that prepends new entries as they arrive, with the same color-coded action column as the Log Browser. Cleared each time you start a new session.
-- **Alerts panel**: a compact summary of any alerts triggered during the active session.
-- **Notifications**: alerts and warnings (e.g. "high event volume detected") raise toast notifications on top of the screen.
-- **Delivery-failure warning** (only if it happens): if a Slack/webhook delivery fails, you'll see a single warning toast naming the channel. Subsequent failures during the same session are suppressed; logs always record every attempt.
+- **The controls**, which are the `▶ start` and `■ stop` buttons and an `interval` box in seconds.
+- **The status row**, which shows `running`, `stopped` or an error. Its color and its left border change with the state. It also shows the time of the last check, the number of new events and the number of alerts. It updates after every poll.
+- **The live log stream**, a table with the same colored action column as the log browser.
+  - The newest event is at the bottom.
+  - When the cursor is on the last row, the view follows new rows as they arrive. When you move the cursor up, the view stays where you put it.
+  - The table keeps the newest 1,000 rows and drops older ones.
+  - The table is cleared each time you start the monitor.
+- **The alerts panel**, a short summary of the alerts that fired since you started.
+- **Toasts** for alerts and warnings, e.g. "High event volume detected".
+- **A delivery warning** if a send to Slack or a webhook fails. You see one warning for each channel. Later failures on that channel show no warning until a send works again. The log records every failure.
+
+## How polling works
+
+- The interval box starts at `monitor_interval` from the config file, which is 60 seconds unless you change it.
+- The first poll after you press start reads the last 5 minutes. It shows up to 100 of those entries so you have some context. It does not alert on them or count them as new.
+- Each later poll reads from 5 minutes before the last good poll up to now. The monitor skips entries it has already shown. This overlap catches events that the API indexed late.
+- One poll reads at most 20 pages. If it reaches that limit, a toast warns you.
+- After a good poll, the header shows `connected` again.
+- When a poll fails, the status row shows the error. Only the first failure in a row shows a toast. The monitor keeps trying at each interval, so you can fix your settings and carry on. The CLI `monitor` command is different, because it stops on a login or permission error.
 
 ## What you can do
 
-- **Start / stop** monitoring with the buttons or the `Space` key.
-- **Tune the polling interval** before starting — short intervals for incident watch, longer intervals for a passive feed.
-- **Watch alerts trigger live** — every poll runs the active alert rules over the new batch and increments the session counters. The toast shows the actual rule name and message (e.g. `bulk_delete: Multiple delete operations: 5 events in 60 minutes`). When a `notifications:` block is configured (Slack/webhooks), each fired rule is also delivered externally. See [Delivery channels](../alert-rules.md#delivery-channels).
-- **Manual poll** — pressing `r` while monitoring is running fires an extra poll without disrupting the interval timer; the screen guards against overlapping polls.
-- **Stop cleanly** — the worker is cancelled, button states reset, and the in-memory dedup set is preserved so a restart picks up where you left off.
+- **Start and stop** with the buttons or with `Space`. `Space` works even when the interval box has focus.
+- **Change the interval.** Type a number of seconds and press `Enter`. The value must be 5 or more. If it is lower, the box is marked as invalid and the old value stays.
+- **Watch alerts fire.** Each poll checks the new events against the alert rules that are on. The toast shows the rule name and the message, e.g. `bulk_delete: Multiple delete operations: 5 events in 60 minutes`. Rules with `per_user: true` count each account on its own. When the config file has a `notifications:` block, each alert is also sent to Slack or your webhooks. See [Delivery channels](../alert-rules.md#delivery-channels).
+- **Poll now.** Press `r` while the monitor runs to poll at once. The interval timer does not change, and two polls never run at the same time.
+- **Stop.** The poll in progress is dropped, so it cannot add rows after you stop. Starting again begins a new session with a new first poll.
 
-## Use cases & benefits
+## When to use it
 
-- **Incident watch**: during a suspected breach or anomaly, leave the monitor running with a short interval (5–15 s) to catch DELETE/EXPORT activity in real time.
-- **Change windows**: during a planned migration or admin push, watch the stream to confirm the right components are being touched and nothing unexpected happens alongside it.
-- **On-call companion**: pair the live alerts panel with your alert rules of choice (bulk deletes, off-hours activity) for a lightweight SOC-style view that runs entirely from your terminal.
-- **Burst-safe polling**: each poll fetches up to 20 pages of recent entries and dedupes against a rolling set of seen IDs, so high-volume bursts won't drop events. If the page cap is hit, you're warned via toast.
-- **No infrastructure required**: no webhooks, no event bus, no separate agent — just the CLI talking to the same API the rest of the tool uses.
+- **During an incident.** Run the monitor with a short interval, e.g. 5 to 15 seconds, to see `DELETE` and `EXPORT` events as they happen.
+- **During a planned change.** Watch the stream to check that the right components change and nothing else does.
+- **While on call.** Turn on the rules you care about, e.g. bulk deletes, and keep the view open in your terminal.
+- **No extra setup.** The monitor uses the same API and credentials as the rest of the tool.

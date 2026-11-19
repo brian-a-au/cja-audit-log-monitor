@@ -1,10 +1,10 @@
 # Alert Rules
 
-Alert rules detect suspicious patterns across audit activity and are evaluated by both the TUI's [Real-Time Monitor](screens/monitor.md) and the CLI's `cja-audit-log-monitor cli alerts test` / `cja-audit-log-monitor cli monitor` commands. The same engine powers both.
+Alert rules look for suspicious patterns in audit activity. The TUI [Real-Time Monitor](screens/monitor.md) checks them, and so do the CLI commands `monitor`, `tail` and `alerts test`. All of them use the same rule code, so a rule behaves the same way everywhere.
 
 ## Where rules live
 
-Rules are defined in `~/.cja-audit-log-monitor/config.yaml`. Run `uv run cja-audit-log-monitor cli init` to create the file. The rules in it are commented out, so edit the file and remove the `#` marks to use them.
+Rules are defined in the config file, which is `~/.cja-audit-log-monitor/config.yaml` unless you choose another path (see [Where the config file lives](configuration.md#where-the-config-file-lives)). Run `cja-audit-log-monitor cli init` to create the file. The rules in it are commented out, so edit the file and remove the `#` marks to use them.
 
 If the file defines no `alert_rules`, the tool uses four built-in rules. If the file defines any `alert_rules`, those rules replace the built-in ones completely. The built-in rules are not merged in.
 
@@ -60,35 +60,37 @@ alert_rules:
 | `threshold_count` | no | `1` | How many matching events fire the alert. It must be 1 or more. |
 | `threshold_window_minutes` | no | `60` | The length of the time window, in minutes. It must be 1 or more. |
 | `users` | no | none (all users) | Limits the rule to these people. Each entry can be an Adobe user id, an email address, or a display name. An event matches if any of its three values is in the list. |
-| `per_user` | no | `false` | When `true`, each account is counted on its own, so five people deleting once each does not fire a rule that needs five deletes. Accounts are told apart by their id, not by their display name. |
+| `per_user` | no | `false` | When `true`, each account is counted on its own, so five people deleting once each does not fire a rule that needs five deletes. The tool tells accounts apart by their account id, not by their display name, so two people with the same name are counted apart. |
 
 A rule fires when **`threshold_count` or more matching events** happen within **`threshold_window_minutes`**. The window is measured by the time of the events themselves, not by the time you run the tool. After a rule fires, its count starts again from zero.
 
 ## Anomaly checks
 
-Anomalies are separate from rules. They are checks that run over a batch of entries, and you cannot configure them in `alert_rules`. There are three:
+Anomalies are separate from rules. They are checks that run over a batch of entries, and you cannot configure them in `alert_rules`. There are three checks:
 
-- **`off_hours_activity`**: a burst of activity between midnight and 5am (00:00 up to, but not including, 05:00). The hour needs at least 5 actions and more than twice the average per hour. The CLI judges the hours in UTC. The TUI judges them in your local time zone.
-- **`high_activity_user`**: one user with at least 20 actions, and more than three times the average of all the other users. It needs at least two users in the data.
-- **`bulk_delete_single_user`**: one user with 11 or more deletes. Each user is checked on their own.
+- **`off_hours_activity`** finds a burst of activity between midnight and 5am (from 00:00 up to, but not including, 05:00). The hour needs at least 5 actions and more than twice the average per hour. The CLI judges the hours in UTC. The TUI judges them in your local time zone.
+- **`high_activity_user`** finds one user with at least 20 actions, and more than three times the average of all the other users. It needs at least two users in the data.
+- **`bulk_delete_single_user`** finds each user with 11 or more deletes. Each user is checked on their own.
 
 ## Testing rules
 
 ```bash
-uv run cja-audit-log-monitor cli alerts test --days 1
+cja-audit-log-monitor cli alerts test --days 1
 ```
 
-Or open the [Alerts screen](screens/alerts.md) in the TUI and click `test rules`. Either path runs every enabled rule against the last 24 hours of audit data and reports what would have fired.
+This command runs every enabled rule against the last day of audit data and reports what would have fired. `--days` sets how many days to test. The command also runs the anomaly checks. It does not send notifications.
+
+You can also open the [Alerts screen](screens/alerts.md) in the TUI and click `test rules`. The screen tests up to 1,000 entries from the last 24 hours. The test uses a separate copy of the rules, so it does not change the counts of a running monitor and does not send notifications.
 
 ## Tips
 
-- **Toggles last until you quit.** The [Alerts screen](screens/alerts.md) lets you turn rules on and off without touching the YAML, which helps during a planned change window. These changes are kept only while the app is running. When you quit, the rules come back from the config file. The `reset rules` button rebuilds the rules from the config file (or the built-in rules if the file has none) right away.
+- **Toggles last until you quit.** On the [Alerts screen](screens/alerts.md) you can turn rules on and off without editing the config file, e.g. during a planned change. The tool keeps these changes only while the app runs. When you quit, the rules come back from the config file. The `reset rules` button rebuilds the rules from the config file right away. If the file has no rules, it rebuilds the built-in rules.
 - **Off-hours activity depends on the time zone.** The CLI judges the hours between midnight and 5am in UTC. The TUI dashboard judges them in your local time zone, the same zone its charts use. Each anomaly's description names the zone, for example "Unusual activity at 02:00 PST".
 - **Use `per_user` for volume rules.** Without it, a rule counts events from everyone together, so a few people doing normal work can add up to an alert.
 
 ## Delivery channels
 
-Fired alerts can optionally be delivered to external channels via the `notifications:` block in `~/.cja-audit-log-monitor/config.yaml`.
+The tool can send alerts that fire to Slack and to webhooks. You set this up in the `notifications:` block of the config file.
 
 ```yaml
 notifications:
@@ -107,34 +109,33 @@ notifications:
 
 | Field | Purpose |
 |---|---|
-| `slack_webhook_url` | Slack incoming webhook URL. One per org. |
-| `notify_on_alerts` | Master toggle for rule-based alert delivery. Default `true`. |
-| `notify_on_anomalies` | Enable anomaly delivery via `cja-audit-log-monitor cli anomalies [--watch]`. Default `false` (opt-in). |
-| `webhooks[].url` | Webhook target. Multiple supported. |
-| `webhooks[].enabled` | Per-webhook toggle. Default `true`. |
-| `webhooks[].method` | HTTP method. Default `POST`. |
-| `webhooks[].headers` | Custom headers (e.g. `Authorization`). |
-| `webhooks[].timeout` | Request timeout in seconds. Default `30`. |
-| `webhooks[].include_entry_details` | Include the audit entry in the payload. Default `true`. |
+| `slack_webhook_url` | The URL of a Slack incoming webhook. You can set one. |
+| `notify_on_alerts` | Whether to send alerts from rules. The default is `true`. |
+| `notify_on_anomalies` | Whether `cja-audit-log-monitor cli anomalies` sends anomalies. The default is `false`. |
+| `webhooks[].url` | The URL to send to. You can list more than one webhook. |
+| `webhooks[].enabled` | Whether this webhook is used. The default is `true`. |
+| `webhooks[].method` | The HTTP method. The default is `POST`. |
+| `webhooks[].headers` | Extra headers to send, e.g. `Authorization`. |
+| `webhooks[].timeout` | How many seconds to wait for a reply. The default is `30`. |
+| `webhooks[].include_entry_details` | Whether to include the audit entry in the message. The default is `true`. |
 
-Both the [Real-Time Monitor screen](screens/monitor.md) and the CLI's `cja-audit-log-monitor cli monitor` / `tail` dispatch to all configured channels when a rule fires. The first delivery failure per channel per session surfaces a one-time warning; subsequent failures are suppressed until the channel recovers (logs always record every failure).
+When a rule fires, the [Real-Time Monitor screen](screens/monitor.md) and the CLI commands `monitor` and `tail` send it to every channel you set up.
+
+When a send to a channel fails for the first time in a session, you see one warning. Later failures on that channel show no warning until a send to it works again. The log records every failure.
+
+The tool keeps your channels private and safe:
+
+- Webhook and Slack URLs are hidden in logs and in failure messages.
+- User names and other text from the API are escaped in Slack messages. A name such as `<!channel>` shows as text and does not notify the channel.
 
 ### Anomaly delivery
 
-Anomalies (`high_activity_user`, `bulk_delete_single_user`, `off_hours_activity`) are
-detected by `analyze_for_anomalies` and dispatched via `cja-audit-log-monitor cli anomalies`.
+The anomaly checks are `high_activity_user`, `bulk_delete_single_user` and `off_hours_activity`. Only `cja-audit-log-monitor cli anomalies` sends anomalies to your channels.
 
-- **Opt-in.** Set `notify_on_anomalies: true` in your `notifications:` block. Default
-  is `false`.
-- **Dedup.** Per-session in-memory fingerprint over `(type, identifying fields,
-  today's date)`. Recurring anomalies whose counts grew between cycles still
-  dedupe within a session. Dedup state is lost on process exit.
-- **Day-bucket boundary.** An anomaly observed at 23:59 fingerprints differently
-  at 00:01 the next day, so a long-running `--watch` loop will re-dispatch
-  recurring patterns under the new day. This is intended.
-- **Failure warnings.** Anomaly delivery shares the alert failure-warning channel:
-  one warning per channel per session, then silenced.
-- **TUI Dashboard.** The Dashboard's Recent Anomalies block remains a passive
-  review surface and does not dispatch.
+- **You must turn it on.** Set `notify_on_anomalies: true` in your `notifications:` block. The default is `false`.
+- **Repeats are skipped.** While the command runs, it remembers each anomaly it has sent by its type, the user or other details, and the date. It does not send the same anomaly again that day, even if its count grows. The command forgets this when it exits.
+- **A new day sends again.** An anomaly seen at 23:59 counts as a new one at 00:01 the next day. So a long `--watch` run sends an anomaly that continues again on each new day.
+- **Failure warnings work the same way as for alerts.** You see one warning for each channel in a session.
+- **The TUI does not send anomalies.** The dashboard's recent anomalies list is only for you to look at.
 
-See [CLI Reference → `anomalies`](cli.md#anomalies--detect-and-deliver-anomalies) for the command flags.
+See [CLI Reference, `anomalies`](cli.md#anomalies) for the command flags.

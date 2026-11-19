@@ -1,28 +1,30 @@
 # Statistics
 
-The Statistics screen runs deeper analytics over a configurable date window — up to 5,000 entries per query — and renders the results as charts and rankings. Press `s` to open it.
+The statistics view shows charts and a user ranking for the number of days you choose. It reads up to 5,000 entries for each window. Press `s` to open it.
 
 ![Statistics](../screenshots/statistics.svg)
 
 ## What you see
 
-- **Window control**: a `days` input and an `update` button. Default is 7 days. It stays visible even when the window has no activity, so you can widen it.
-- **Stat cards**: the total number of entries in the window, active users, and the dates of the window. When the window has more than 5,000 entries, a note says the charts use the newest 5,000.
-- **Action distribution** and **hourly activity** charts side by side. Hours and days are in your local time zone. The busiest hour is highlighted.
-- **Daily activity** (one bar per day, last 14 days in the window) and the **user ranking** (top 10 by action count) side by side.
+- **The window control**, which is a `days` box and an `update` button. The box starts at `default_days` from the config file, which is 7 unless you change it. The control stays on screen even when the window has no activity, so you can make the window longer.
+- **Stat cards** with the total number of entries in the window, the number of active users, and the dates of the window. When the window has more than 5,000 entries, a note says that the charts use the newest 5,000.
+- **An action chart** and an **hourly activity chart**, side by side. Hours and days are in your local time zone. The busiest hour is highlighted.
+- **A daily activity chart** with one bar for each of the last 14 days in the window, and a **user ranking** of the top 10 users by action count.
+- **A loading message** in each chart while the data loads.
 
 ## What you can do
 
-- **Adjust the window** by typing a number and clicking `update` (or press `r` to refresh the current window).
-- **Compare patterns over time** by stepping the window up (30 / 60 / 90 days) — the daily chart adapts automatically.
-- **Identify peak hours** in the hourly chart to spot off-hours work or batch jobs.
-- **Find power users and outliers** in the ranking — useful when the dashboard's top-5 isn't enough resolution.
-- **Pivot to detail** — once a hot user, action, or hour stands out, jump to the Log Browser (`l`) and filter to it.
+- **Change the window.** Type a number of days and press `Enter` or click `update`. The box then shows the number that was used. A value below 1 becomes 1.
+- **Load again.** Press `r` to load the current window again.
+- **Compare periods.** Try 30, 60 or 90 days. The daily chart always shows the last 14 days of the window.
+- **Find busy hours** in the hourly chart, e.g. work at night or batch jobs.
+- **Find the most active users** in the ranking. It shows 10 users, while the dashboard shows fewer.
+- **Look closer.** When a user, action or hour stands out, press `l` for the log browser and filter by it.
 
-## Use cases & benefits
+## When to use it
 
-- **Capacity / usage reporting**: "how many edits did we do last quarter?" Set days to 90, take a screenshot of the summary panel.
-- **Off-hours detection**: a tall bar at 02:00 in the hourly chart is a signal worth investigating, even if no alert rule fired.
-- **User behaviour baselining**: the ranking gives you a sense of normal — which makes anomalies on the Dashboard easier to interpret.
-- **Visual-first analytics**: charts are rendered in pure terminal characters, so the screen works over SSH without any GUI dependency.
-- **Bounded by design**: a hard cap of 5,000 entries per query keeps the screen fast; widen the days to look further back rather than expecting unbounded results.
+- **Usage reports.** To see how many edits happened last quarter, set the window to 90 days.
+- **Night activity.** A tall bar at 02:00 in the hourly chart is worth a look, even when no alert fired.
+- **Normal levels.** The ranking shows what normal activity looks like for your users. This helps you judge the dashboard's anomalies.
+- **Remote use.** The charts use plain terminal characters, so the view works over SSH.
+- **A fixed limit.** The view reads at most 5,000 entries, so it stays fast. For a longer window with many entries, the charts use the newest 5,000.
