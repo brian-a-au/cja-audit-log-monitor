@@ -2941,3 +2941,33 @@ def test_monitor_hides_channel_summary_when_alert_delivery_is_off(runner: CliRun
     ):
         result = runner.invoke(main, ["cli", "monitor"])
     assert "Notification channels" not in result.output
+
+
+def test_exit_does_not_wait_for_an_abandoned_worker(monkeypatch) -> None:
+    import threading
+
+    from cja_audit_log_monitor import cli as cli_module
+
+    exits: list[int] = []
+    monkeypatch.setattr(cli_module.os, "_exit", exits.append)
+    release = threading.Event()
+    worker = threading.Thread(target=release.wait, args=(10,))
+    worker.start()
+    try:
+        cli_module.exit_without_waiting_for_workers(0)
+    finally:
+        release.set()
+        worker.join()
+    assert exits == [0]
+
+
+def test_exit_returns_normally_when_no_worker_is_left(monkeypatch) -> None:
+    import threading
+
+    from cja_audit_log_monitor import cli as cli_module
+
+    exits: list[int] = []
+    monkeypatch.setattr(cli_module.os, "_exit", exits.append)
+    monkeypatch.setattr(cli_module.threading, "enumerate", lambda: [threading.main_thread()])
+    cli_module.exit_without_waiting_for_workers(0)
+    assert exits == []

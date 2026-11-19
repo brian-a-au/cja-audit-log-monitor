@@ -4406,3 +4406,60 @@ class TestReloadKeepsWhatWorks:
                 "keeping the current settings" in n.message for n in app._notifications
             )
             assert state.settings.client_id == "from-file"
+
+
+# ---------------------------------------------------------------------------
+# Quit is immediate, even with a request in progress (G5)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.real_mount
+async def test_quit_during_hung_request_exits_fast(fake_api, tmp_path, monkeypatch) -> None:
+    """q during a request exits at once, and the request is never retried after quit."""
+    import asyncio
+    import threading
+    import time
+
+    import httpx
+
+    from .fakeapi import raw_entry
+
+    fake_api.entries = [raw_entry(1)]
+    for key, value in fake_api.env(tmp_path / "missing.yaml").items():
+        monkeypatch.setenv(key, value)
+    built: list[float] = []
+    real_client = httpx.Client
+
+    def counting_client(*args, **kwargs):
+        built.append(time.monotonic())
+        return real_client(*args, **kwargs)
+
+    monkeypatch.setattr("cja_audit_log_monitor.client.httpx.Client", counting_client)
+    fake_api.block.set()
+    # Release the server after 10 seconds, so a regression fails instead of hanging.
+    threading.Timer(10, fake_api.block.clear).start()
+    from cja_audit_log_monitor.tui.screens.dashboard import DashboardScreen
+
+    fetch_done = threading.Event()
+    real_fetch = DashboardScreen._fetch
+
+    def tracked_fetch(self):
+        try:
+            return real_fetch(self)
+        finally:
+            fetch_done.set()
+
+    monkeypatch.setattr(DashboardScreen, "_fetch", tracked_fetch)
+    app = CJAAuditApp()
+    async with app.run_test(size=(100, 30)) as pilot:
+        assert await asyncio.to_thread(fake_api.blocked.wait, 10)
+        requests_before = len(fake_api.requests)
+        pressed = time.monotonic()
+        await pilot.press("q")
+        fake_api.block.clear()  # the server answers right away, as in the review's repro
+    elapsed = time.monotonic() - pressed
+    # Wait until the abandoned fetch thread has ended, however it ends.
+    assert await asyncio.to_thread(fetch_done.wait, 15)
+    assert elapsed < 2, f"quit took {elapsed:.1f}s"
+    assert [t for t in built if t > pressed] == [], "a new HTTP client was built after quit"
+    assert len(fake_api.requests) == requests_before, "a request was sent after quit"

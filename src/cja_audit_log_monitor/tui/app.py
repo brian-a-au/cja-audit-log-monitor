@@ -374,7 +374,7 @@ class CJAAuditApp(App):
 
     def action_quit(self) -> None:
         """Quit the application."""
-        self.state.close()
+        self.state.close(wait=False)  # a request in progress must not hold up quitting
         self.exit()
 
 

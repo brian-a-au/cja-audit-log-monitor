@@ -5,6 +5,7 @@ import threading
 import time
 from datetime import UTC, datetime, timedelta
 from email.utils import format_datetime
+from unittest.mock import patch
 
 import httpx
 import pytest
@@ -639,3 +640,65 @@ def test_401_after_429s_still_refreshes_the_token(
     with client:
         response = client.get_logs()
     assert len(response.content) == 1
+
+
+@pytest.mark.httpx_mock(assert_all_responses_were_requested=False)
+class TestClose:
+    """After close() the client sends nothing more (G5, G46)."""
+
+    def test_no_request_after_close(self, client: AuditLogsClient, httpx_mock: HTTPXMock) -> None:
+        from cja_audit_log_monitor.client import ClientClosedError
+
+        client.close()
+        with pytest.raises(ClientClosedError):
+            client.get_logs()
+        api_calls = [r for r in httpx_mock.get_requests() if "/auditlogs" in str(r.url)]
+        assert api_calls == []
+
+    def test_close_during_send_is_a_clean_error(
+        self, client: AuditLogsClient, httpx_mock: HTTPXMock
+    ) -> None:
+        from cja_audit_log_monitor.client import ClientClosedError
+
+        http = client.client  # the lookup a worker thread did before close()
+        http.close()
+
+        def stale_lookup(self):
+            return http
+
+        with (
+            patch.object(type(client), "client", property(stale_lookup)),
+            pytest.raises(ClientClosedError),
+        ):
+            client.get_logs()
+
+    def test_close_without_waiting_leaves_the_connection_to_the_last_request(
+        self, client: AuditLogsClient
+    ) -> None:
+        from unittest.mock import MagicMock
+
+        http = MagicMock()
+        client._client = http
+        client._in_flight = 1  # a worker thread is reading a response
+        client.close(wait=False)
+        http.close.assert_not_called()  # closing it would not wake the reader
+        client._request_done()
+        http.close.assert_called_once()
+
+    def test_response_after_close_is_not_retried(
+        self, client: AuditLogsClient, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from cja_audit_log_monitor.client import ClientClosedError
+
+        monkeypatch.setattr("cja_audit_log_monitor.client.time.sleep", lambda s: None)
+        url = "https://cja.adobe.io/auditlogs/api/v1/auditlogs"
+
+        def close_then_fail(request):
+            client.close(wait=False)
+            return httpx.Response(503)
+
+        httpx_mock.add_callback(close_then_fail, url=url)
+        with pytest.raises(ClientClosedError):
+            client.get_logs()
+        api_calls = [r for r in httpx_mock.get_requests() if "/auditlogs" in str(r.url)]
+        assert len(api_calls) == 1

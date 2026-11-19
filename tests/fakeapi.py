@@ -132,6 +132,7 @@ def start(api: FakeApi) -> FakeApi:
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     server.daemon_threads = True
+    server.block_on_close = False  # a held request must not hold up the test's teardown
     api.server = server
     api.url = f"http://127.0.0.1:{server.server_address[1]}"
     threading.Thread(target=server.serve_forever, daemon=True).start()
