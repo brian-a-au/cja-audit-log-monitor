@@ -2996,10 +2996,12 @@ def test_env_value_overriding_a_file_value_is_blamed_on_the_environment(tmp_path
 
 
 def test_cli_config_marks_a_missing_file(tmp_path) -> None:
-    missing = tmp_path / "missing.yaml"
-    result = CliRunner().invoke(main, ["-c", str(missing), "cli", "config"])
+    # "Config file: " plus a 60 character path ends near column 80, so a plain print would
+    # break the line before "(not found)", as it did on the Linux CI runner.
+    missing = "m" * 55 + ".yaml"  # relative to the test's working folder, tmp_path
+    result = CliRunner().invoke(main, ["-c", missing, "cli", "config"])
     assert result.exit_code == 0
-    assert "(not found)" in result.stdout
+    assert f"{missing} (not found)" in result.stdout
 
 
 def test_init_message_does_not_ask_for_scopes(tmp_path) -> None:
