@@ -40,8 +40,8 @@ SLIDES = [
     (["l"], "Log browser", "Every entry, newest first, with filters and paging."),
     (["down", "down", "enter"], "Entry details", "Press enter to see every field of an entry."),
     (["escape", "m"], "Live monitor", "New events appear as they happen."),
-    (["s"], "Statistics", "Actions, components, and activity by hour and by day."),
-    (["a"], "Alerts", "Rules flag bulk deletes, bulk exports and activity at night."),
+    (["s"], "Statistics", "Actions, the most active users, and activity by hour and by day."),
+    (["a"], "Alerts", "Rules flag bulk deletes, bulk exports and deletes of key components."),
     (["question_mark"], "Keyboard shortcuts", "Press ? to see every key."),
 ]
 

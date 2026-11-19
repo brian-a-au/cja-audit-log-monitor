@@ -5,7 +5,7 @@
 [![Python](https://img.shields.io/pypi/pyversions/cja-audit-log-monitor)](https://pypi.org/project/cja-audit-log-monitor/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/brian-a-au/cja-audit-log-monitor/blob/main/LICENSE)
 
-[![Slideshow of the terminal app: the dashboard, the log browser, entry details, the live monitor, statistics, alert rules and the keyboard shortcuts](https://raw.githubusercontent.com/brian-a-au/cja-audit-log-monitor/main/docs/showcase.gif)](https://github.com/brian-a-au/cja-audit-log-monitor/blob/main/docs/showcase.png)
+[![Slideshow of the terminal app: the dashboard, the log browser, entry details, the live monitor, statistics, the alerts view and the keyboard shortcuts](https://raw.githubusercontent.com/brian-a-au/cja-audit-log-monitor/main/docs/showcase.gif)](https://github.com/brian-a-au/cja-audit-log-monitor/blob/main/docs/showcase.png)
 
 A 28-second loop of the real app, made from synthetic data. Click the animation for a still image.
 
@@ -19,7 +19,7 @@ A terminal app for monitoring and analyzing Adobe Customer Journey Analytics (CJ
 - **Real-time monitor.** New audit events appear as they happen, at a polling interval you choose.
 - **Filtering.** You can filter by user, action type, component type, and text in the description.
 - **Charts.** You can see action counts, activity by hour, and activity by day.
-- **Alerts and anomalies.** Rules detect bulk deletes, exports, and unusual activity between midnight and 5am. You can send alerts to Slack or to a webhook.
+- **Alerts and anomalies.** Rules detect bulk deletes, bulk exports and bulk shares. Separate anomaly checks find unusual activity between midnight and 5am. You can send alerts to Slack or to a webhook.
 - **Export.** You can save filtered logs as JSON, CSV, or TSV, either the page you see or every matching entry.
 
 ## Install
@@ -69,7 +69,7 @@ cja-audit-log-monitor --version
 
 Two options work with the TUI and with every CLI command. Put them before `cli` or `tui`:
 
-- `-v` / `--verbose` turns on debug logging to stderr.
+- `-v` / `--verbose` turns on debug logging to stderr. It affects the CLI only. The TUI has no log file, and it shows logged warnings as toasts.
 - `-c` / `--config PATH` reads a config file other than `~/.cja-audit-log-monitor/config.yaml`. You can also set the path with the `CJA_CONFIG_PATH` environment variable.
 
 CLI commands write data to stdout and messages to stderr. Most of them accept `-F json`. See the [CLI reference](https://github.com/brian-a-au/cja-audit-log-monitor/blob/main/docs/cli.md) for every command and flag.
@@ -110,17 +110,17 @@ The statistics view shows charts of actions, activity by hour and by day, and a 
 
 ![Statistics](https://raw.githubusercontent.com/brian-a-au/cja-audit-log-monitor/main/docs/screenshots/statistics.svg)
 
-### [Alert Rules](https://github.com/brian-a-au/cja-audit-log-monitor/blob/main/docs/screens/alerts.md) (press `a`)
+### [Alerts](https://github.com/brian-a-au/cja-audit-log-monitor/blob/main/docs/screens/alerts.md) (press `a`)
 
-The alert rules view lets you turn rules on and off and test them against recent data. These changes last until you quit. [Read more](https://github.com/brian-a-au/cja-audit-log-monitor/blob/main/docs/screens/alerts.md)
+The alerts view lets you turn rules on and off and test them against recent data. These changes last until you quit. [Read more](https://github.com/brian-a-au/cja-audit-log-monitor/blob/main/docs/screens/alerts.md)
 
 ![Alerts](https://raw.githubusercontent.com/brian-a-au/cja-audit-log-monitor/main/docs/screenshots/alerts.svg)
 
-### [Settings](https://github.com/brian-a-au/cja-audit-log-monitor/blob/main/docs/screens/settings.md) (press `c`)
+### [Config](https://github.com/brian-a-au/cja-audit-log-monitor/blob/main/docs/screens/settings.md) (press `c`)
 
 The config view shows the connection status and the settings in use. You can test the connection and load the settings again. [Read more](https://github.com/brian-a-au/cja-audit-log-monitor/blob/main/docs/screens/settings.md)
 
-![Settings](https://raw.githubusercontent.com/brian-a-au/cja-audit-log-monitor/main/docs/screenshots/settings.svg)
+![Config view](https://raw.githubusercontent.com/brian-a-au/cja-audit-log-monitor/main/docs/screenshots/settings.svg)
 
 ## Keyboard shortcuts
 
@@ -130,18 +130,18 @@ The config view shows the connection status and the settings in use. You can tes
 | `l` | Go to the log browser |
 | `m` | Go to the monitor |
 | `s` | Go to statistics |
-| `a` | Go to alert rules |
+| `a` | Go to the alerts view |
 | `c` | Go to the config view |
 | `/` | Go to the search box |
 | `Tab` | Move to the next control |
 | `r` | Refresh the current view |
 | `e` | Open the export dialog |
-| `n` / `p` | Next or previous page (in the log browser) |
+| `n` / `p` | Next or previous page (in the log browser). The footer does not list these keys, but they still work. |
 | `Enter` | Show entry details (in the log browser) |
 | `Space` | Start or stop the monitor (in the monitor) |
 | `?` | Show the keyboard shortcuts |
-| `Esc` | Close a dialog or the detail panel, or leave a filter box |
-| `q` | Quit |
+| `Esc` | Close a dialog or the detail panel, or leave a filter box or the stats days box |
+| `q` | Quit. This also works while the help overlay is open. |
 
 ## Documentation
 
