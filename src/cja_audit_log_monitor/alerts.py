@@ -255,8 +255,8 @@ class AlertEngine:
                     panel=panel,
                 ))
 
-                # Log alert
-                logger.warning(
+                # Log alert (INFO: the alert panel already shows it; -v adds this line)
+                logger.info(
                     "Alert triggered: %s - %s events by %s",
                     rule.name,
                     event_count,

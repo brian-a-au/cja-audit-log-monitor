@@ -4,7 +4,8 @@ import logging
 import signal
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager, suppress
 from datetime import UTC, datetime, timedelta
 
 from rich.console import Console
@@ -21,9 +22,14 @@ from .notifications import NotificationManager
 from .utils import RecentIds, entry_key, get_user_identifier
 
 logger = logging.getLogger(__name__)
+_PACKAGE_LOGGER = "cja_audit_log_monitor"
 
-_MONITOR_PAGE_SIZE = 100
-_MAX_POLL_PAGES = 20
+# A poll asks for the largest page the API allows, so a normal poll is one request and a
+# backlog after a gap (a laptop asleep, an outage) is read in few requests.
+POLL_PAGE_SIZE = 1000
+# The most pages one poll reads: 50,000 events, about a week at 5 events a minute. Past
+# that the oldest events of the gap are skipped and the monitor says how many.
+MAX_POLL_PAGES = 50
 
 # API statuses that retrying will not fix: the monitor stops instead of looping.
 FATAL_STATUS = frozenset({400, 401, 403, 404})
@@ -48,9 +54,9 @@ def fetch_unseen(
     get_logs: Callable[[AuditLogQuery], AuditLogResponse],
     query: AuditLogQuery,
     seen: RecentIds,
-    max_pages: int = _MAX_POLL_PAGES,
+    max_pages: int | None = None,
     stop: threading.Event | None = None,
-) -> tuple[list[AuditLogEntry], bool]:
+) -> tuple[list[AuditLogEntry], int | None]:
     """Read every page of ``query`` and return the entries not in ``seen``, oldest first.
 
     Paging ends on an empty page, the last page (by ``last`` or the API's page count), or after
@@ -59,15 +65,21 @@ def fetch_unseen(
     keys once the whole poll has worked. When ``stop`` is set, paging ends before the next page.
 
     Returns:
-        The unseen entries, oldest first, and whether the page limit ended paging.
+        The unseen entries, oldest first, and how many matching events were not read
+        because the page limit ended paging: 0 when paging ended normally, or None when
+        the limit was hit and the API gave no total.
     """
+    if max_pages is None:
+        max_pages = MAX_POLL_PAGES
     fresh: dict[str, AuditLogEntry] = {}
-    hit_cap = False
+    read = 0
+    response: AuditLogResponse | None = None
     for page in range(max_pages):
         if stop is not None and stop.is_set():
             break
         query.page = page
         response = get_logs(query)
+        read += len(response.content)
         for entry in response.content:
             key = entry_key(entry)
             if key not in seen and key not in fresh:
@@ -75,9 +87,19 @@ def fetch_unseen(
         if not response.content or response.last or is_final_page(page, response):
             break
     else:
-        hit_cap = True
+        total = response.total_elements if response is not None else None
+        # A total below what was read means the API's count is not usable here.
+        skipped = None if total is None or total < read else total - read
+        return list(reversed(fresh.values())), skipped
     # The API returns newest first; hand them back oldest first.
-    return list(reversed(fresh.values())), hit_cap
+    return list(reversed(fresh.values())), 0
+
+
+def skipped_message(skipped: int | None) -> str:
+    """The warning for a poll that hit the page limit (``skipped`` from fetch_unseen)."""
+    if skipped is None:
+        return "The gap held more events than one poll reads; older events were skipped."
+    return f"{skipped:,} older events in this gap were skipped (more than one poll reads)."
 
 
 class AuditLogMonitor:
@@ -115,11 +137,19 @@ class AuditLogMonitor:
         self._entry_filter = entry_filter
         self._last_poll_time: datetime | None = None
         self._seen = RecentIds(SEEN_IDS_MAX)
+        # When the first poll was tried; events after it are never treated as baseline.
+        self._first_attempt: datetime | None = None
+        # Events the last poll skipped at the page limit (None: an unknown number).
+        self._skipped: int | None = 0
         # Why the last poll failed, or None when it worked.
         self._poll_error: str | None = None
         # How many polls worked, so a caller can tell a run where every poll failed.
         self.successful_polls = 0
         self._stop_announced = False
+        # True while a poll (and its alerts and deliveries) runs; Ctrl+C then ends it at once.
+        self._in_poll = False
+        # True once Ctrl+C or SIGTERM stopped the monitor.
+        self.stopped_by_user = False
         self._on_new_entry: Callable[[AuditLogEntry], None] | None = None
 
     def set_callback(self, callback: Callable[[AuditLogEntry], None]) -> None:
@@ -139,17 +169,22 @@ class AuditLogMonitor:
         logged and give no entries.
         """
         now = datetime.now(UTC)
-        query = build_poll_query(self._last_poll_time, now, _MONITOR_PAGE_SIZE)
+        if self._last_poll_time is None and self._first_attempt is None:
+            self._first_attempt = now
+        query = build_poll_query(self._last_poll_time, now, POLL_PAGE_SIZE)
+        self._skipped = 0
 
         try:
-            new_entries, hit_cap = fetch_unseen(self.client.get_logs, query, self._seen)
-            if hit_cap:
-                logger.warning(
-                    "Monitor poll reached %d pages; backlog may be larger than one cycle",
-                    _MAX_POLL_PAGES,
-                )
-        except AuthenticationError:
-            raise
+            new_entries, skipped = fetch_unseen(self.client.get_logs, query, self._seen)
+            if skipped != 0:
+                self._skipped = skipped
+        except AuthenticationError as e:
+            if not e.transient:
+                raise
+            # IMS or the network failed for a moment: try again next poll, like an API 503.
+            logger.error("Error fetching audit logs: %s", e)
+            self._poll_error = str(e)
+            return []
         except APIError as e:
             if e.status_code in FATAL_STATUS:
                 raise
@@ -213,9 +248,38 @@ class AuditLogMonitor:
             if status is not None:
                 status.start()
 
+    @contextmanager
+    def _logs_around_status(self) -> Iterator[None]:
+        """While the status line is live, print the package's log records around it.
+
+        The root handler writes to stderr, which Rich does not route through the live
+        status on stdout, so a log line would land on the status line. Here each record is
+        printed with the status paused, and the package logger stops passing records up
+        to the root handler until the monitor ends.
+        """
+        monitor = self
+        package_logger = logging.getLogger(_PACKAGE_LOGGER)
+
+        class _AroundStatus(logging.Handler):
+            def emit(self, record: logging.LogRecord) -> None:
+                try:
+                    monitor._print_warning(record.getMessage())
+                except Exception:
+                    self.handleError(record)
+
+        handler = _AroundStatus()
+        old_propagate = package_logger.propagate
+        package_logger.addHandler(handler)
+        package_logger.propagate = False
+        try:
+            yield
+        finally:
+            package_logger.removeHandler(handler)
+            package_logger.propagate = old_propagate
+
     def _display_entry(self, entry: AuditLogEntry) -> None:
         """Display a new audit log entry."""
-        timestamp = entry.timestamp.strftime("%H:%M:%S") if entry.timestamp else "-"
+        timestamp = entry.timestamp.strftime("%H:%M:%S UTC") if entry.timestamp else "-"
         action_color = get_action_color(entry.action or "")
 
         text = Text()
@@ -231,16 +295,41 @@ class AuditLogMonitor:
         self.console.print(text)
 
     def _signal_handler(self, signum: int, frame: object) -> None:
-        """Handle interrupt signal."""
+        """Stop the monitor. During a poll, end the poll at once.
+
+        A poll can block on the network or on a webhook for minutes, so waiting for it
+        would make Ctrl+C look broken. The entries of an interrupted poll are dropped.
+        """
         self._running = False
+        self.stopped_by_user = True
         if not self._stop_announced:
             self._stop_announced = True
-            self.console.print("\n[yellow]Stopping monitor...[/yellow]")
+            self.console.print("\n[yellow]Monitor stopped.[/yellow]")
+        if self._in_poll:
+            raise KeyboardInterrupt
 
     def _run_poll(self, status: Status) -> None:
         """Poll once, show the result, and update the status line."""
+        self._in_poll = True
+        try:
+            self._poll_and_show(status)
+        finally:
+            self._in_poll = False
+
+    def _poll_and_show(self, status: Status) -> None:
+        """The body of ``_run_poll``."""
         is_baseline = self._last_poll_time is None
         entries = self._get_new_entries()
+        if self._skipped != 0:
+            self._print_warning(skipped_message(self._skipped))
+        if is_baseline and self._first_attempt is not None:
+            # Polls before this one failed: events after the first attempt are new, not
+            # baseline, so they still raise alerts.
+            first = self._first_attempt
+            late = [e for e in entries if e.timestamp is not None and e.timestamp > first]
+            entries = [e for e in entries if e not in late]
+            for entry in late:
+                self._handle_entry(entry)
         if is_baseline:
             if entries:
                 self.console.print(f"[dim]Found {len(entries)} recent entries[/dim]")
@@ -250,7 +339,7 @@ class AuditLogMonitor:
         else:
             for entry in entries:
                 self._handle_entry(entry)
-        clock = datetime.now().strftime("%H:%M:%S")
+        clock = datetime.now(UTC).strftime("%H:%M:%S UTC")
         if self._poll_error is not None:
             status.update(
                 f"Last poll {clock} failed: {escape(self._poll_error)}. "
@@ -261,7 +350,13 @@ class AuditLogMonitor:
                 f"Baseline {clock}: {len(entries)} existing entries. Next in {self.interval}s"
             )
         else:
-            status.update(f"Last poll {clock}: {len(entries)} new. Next in {self.interval}s")
+            skipped = ""
+            if self._skipped != 0:
+                count = "some" if self._skipped is None else f"{self._skipped:,}"
+                skipped = f", {count} skipped"
+            status.update(
+                f"Last poll {clock}: {len(entries)} new{skipped}. Next in {self.interval}s"
+            )
 
     def start(self, duration: int | None = None) -> None:
         """Start monitoring for new audit log entries.
@@ -284,12 +379,14 @@ class AuditLogMonitor:
             self.console.print()
 
             # Initial fetch sets the baseline; show the newest few entries for context.
-            with self.console.status("Waiting for first poll...") as status:
+            with suppress(KeyboardInterrupt), self.console.status(
+                "Waiting for first poll..."
+            ) as status, self._logs_around_status():
                 self._status = status
-                self._run_poll(status)
-
+                # The duration counts from before the first poll, which can be slow.
                 start_time = time.monotonic()
                 last_check = start_time
+                self._run_poll(status)
 
                 while self._running:
                     current_time = time.monotonic()

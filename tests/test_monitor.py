@@ -461,7 +461,7 @@ class TestPollDedupe:
     def test_page_cap_ends_the_poll_and_warns(
         self, monitor: AuditLogMonitor, mock_client: MagicMock, caplog: pytest.LogCaptureFixture
     ) -> None:
-        from cja_audit_log_monitor.monitor import _MAX_POLL_PAGES
+        from cja_audit_log_monitor.monitor import MAX_POLL_PAGES
 
         counter = iter(range(100_000))
 
@@ -470,9 +470,10 @@ class TestPollDedupe:
 
         monitor._last_poll_time = datetime.now(UTC)
         mock_client.get_logs.side_effect = endless
-        monitor._get_new_entries()
-        assert mock_client.get_logs.call_count == _MAX_POLL_PAGES
-        assert "reached" in caplog.text
+        monitor.err_console = MagicMock()
+        monitor._run_poll(MagicMock())
+        assert mock_client.get_logs.call_count == MAX_POLL_PAGES
+        assert "older events were skipped" in str(monitor.err_console.print.call_args)
 
     def test_entry_filter_applies_but_entries_still_marked_seen(
         self, mock_client: MagicMock
@@ -519,11 +520,19 @@ class TestPollErrors:
     def test_transient_status_is_logged_and_loop_continues(
         self, mock_client: MagicMock, caplog: pytest.LogCaptureFixture
     ) -> None:
+        import itertools
+
         mock_client.get_logs.side_effect = APIError("down", status_code=503)
-        monitor = AuditLogMonitor(mock_client, interval=1)
-        monitor.start(duration=5)
+        err_console = MagicMock()
+        monitor = AuditLogMonitor(mock_client, interval=1, err_console=err_console)
+        ticks = itertools.count(0, 1)
+        with (
+            patch("cja_audit_log_monitor.monitor.time.monotonic", lambda: next(ticks)),
+            patch("cja_audit_log_monitor.monitor.time.sleep"),
+        ):
+            monitor.start(duration=5)
         assert mock_client.get_logs.call_count > 1
-        assert "down" in caplog.text
+        assert "down" in str(err_console.print.call_args_list)
 
     def test_failed_poll_shows_in_status(self, mock_client: MagicMock) -> None:
         """A transient failure must not read as a good poll with nothing new."""
@@ -592,7 +601,7 @@ class TestPollErrors:
         monitor = AuditLogMonitor(mock_client, console=console, interval=1)
         monitor._signal_handler(2, None)
         monitor._signal_handler(15, None)
-        stops = [c for c in console.print.call_args_list if "Stopping monitor" in str(c)]
+        stops = [c for c in console.print.call_args_list if "Monitor stopped" in str(c)]
         assert len(stops) == 1
 
 
@@ -609,25 +618,37 @@ class TestFetchUnseen:
             AuditLogResponse(content=[_entry("c", 3), _entry("b", 2)]),
             AuditLogResponse(content=[_entry("a", 1)], last=True),
         ]
-        fresh, hit_cap = fetch_unseen(
+        fresh, skipped = fetch_unseen(
             lambda q: pages[q.page], build_poll_query(None, T0, 2), seen, max_pages=5
         )
         assert [e.id for e in fresh] == ["a", "c"]
-        assert hit_cap is False
+        assert skipped == 0
         assert "a" not in seen  # the caller decides when to remember them
 
     def test_reports_hitting_the_page_cap(self) -> None:
         from cja_audit_log_monitor.monitor import fetch_unseen
         from cja_audit_log_monitor.utils import RecentIds
 
-        fresh, hit_cap = fetch_unseen(
+        fresh, skipped = fetch_unseen(
             lambda q: AuditLogResponse(content=[_entry(f"p{q.page}")]),
             build_poll_query(None, T0, 1),
             RecentIds(10),
             max_pages=3,
         )
         assert len(fresh) == 3
-        assert hit_cap is True
+        assert skipped is None  # the cap was hit and the API gave no total
+
+    def test_counts_what_the_page_cap_skipped(self) -> None:
+        from cja_audit_log_monitor.monitor import fetch_unseen
+        from cja_audit_log_monitor.utils import RecentIds
+
+        _, skipped = fetch_unseen(
+            lambda q: AuditLogResponse(content=[_entry(f"p{q.page}")], total_elements=10),
+            build_poll_query(None, T0, 1),
+            RecentIds(10),
+            max_pages=3,
+        )
+        assert skipped == 7
 
     def test_stop_ends_paging(self) -> None:
         import threading
@@ -764,3 +785,346 @@ class TestPollGuards:
         with patch("cja_audit_log_monitor.monitor.time.sleep", sleep):
             monitor.start()
         assert len(sleeps) == 1
+
+
+class TestTransientTokenFailure:
+    """One failed token refresh does not end a monitor (G2)."""
+
+    def test_monitor_survives_transient_token_failure(self, mock_client: MagicMock) -> None:
+        mock_client.get_logs.side_effect = [
+            AuditLogResponse(content=[], last=True),
+            AuthenticationError("OAuth authentication failed: 503", transient=True),
+            AuditLogResponse(content=[], last=True),
+        ]
+        monitor = AuditLogMonitor(mock_client, console=MagicMock(), interval=5)
+        status = MagicMock()
+        for _ in range(3):
+            monitor._run_poll(status)
+        assert monitor.successful_polls == 2
+
+    def test_monitor_stops_on_bad_credentials(self, mock_client: MagicMock) -> None:
+        mock_client.get_logs.side_effect = AuthenticationError("invalid_client")
+        monitor = AuditLogMonitor(mock_client, console=MagicMock(), interval=5)
+        with pytest.raises(AuthenticationError):
+            monitor._run_poll(MagicMock())
+
+
+class _FakeAuditApi:
+    """Answers get_logs from a list of entries by date window and page, newest first."""
+
+    def __init__(self, entries: list[AuditLogEntry]) -> None:
+        self.entries = sorted(entries, key=lambda e: e.timestamp, reverse=True)
+        self.fail_next: list[Exception] = []
+        self.calls = 0
+
+    def get_logs(self, query):
+        self.calls += 1
+        if self.fail_next:
+            raise self.fail_next.pop(0)
+        hits = [
+            e for e in self.entries
+            if query.start_date <= e.timestamp <= query.end_date
+        ]
+        size = query.page_size
+        chunk = hits[query.page * size:(query.page + 1) * size]
+        pages = max(1, -(-len(hits) // size))
+        return AuditLogResponse(
+            content=chunk, total_elements=len(hits), total_pages=pages,
+            last=query.page >= pages - 1,
+        )
+
+
+class _Clock:
+    """A stand-in for the monitor module's datetime, with a settable now()."""
+
+    now_value = T0
+
+    @classmethod
+    def now(cls, tz=None):
+        return cls.now_value
+
+
+@pytest.fixture
+def clock(monkeypatch):
+    import cja_audit_log_monitor.monitor as monitor_module
+
+    class FakeDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return _Clock.now_value
+
+    monkeypatch.setattr(monitor_module, "datetime", FakeDatetime)
+    _Clock.now_value = T0
+    return _Clock
+
+
+def _stream(start: datetime, minutes: int, per_minute: int, prefix: str = "e"):
+    return [
+        AuditLogEntry(
+            id=f"{prefix}{m}-{k}",
+            timestamp=start + timedelta(minutes=m, seconds=k * (60 / per_minute)),
+            action="CREATE",
+            user_email=f"u{k}@example.com",
+        )
+        for m in range(minutes)
+        for k in range(per_minute)
+    ]
+
+
+class TestBacklog:
+    """After a gap the monitor reads the whole backlog, or says what it skipped (G3)."""
+
+    def test_gap_backlog_is_read_in_full(self, clock) -> None:
+        gap = _stream(T0 + timedelta(seconds=1), 480, 5)
+        api = _FakeAuditApi(gap)
+        seen: list[AuditLogEntry] = []
+        monitor = AuditLogMonitor(MagicMock(get_logs=api.get_logs), console=MagicMock())
+        monitor._on_new_entry = seen.append
+        monitor._run_poll(MagicMock())  # baseline at T0
+        clock.now_value = T0 + timedelta(minutes=481)
+        monitor._run_poll(MagicMock())
+        assert len(seen) == len(gap) == 2400
+
+    def test_backlog_over_limit_reports_skipped_count(self, clock, monkeypatch) -> None:
+        import cja_audit_log_monitor.monitor as monitor_module
+
+        monkeypatch.setattr(monitor_module, "POLL_PAGE_SIZE", 10)
+        monkeypatch.setattr(monitor_module, "MAX_POLL_PAGES", 3)
+        api = _FakeAuditApi(_stream(T0 + timedelta(seconds=1), 10, 5))  # 50 events
+        err_console = MagicMock()
+        status = MagicMock()
+        monitor = AuditLogMonitor(
+            MagicMock(get_logs=api.get_logs), console=MagicMock(), err_console=err_console
+        )
+        monitor._run_poll(status)
+        clock.now_value = T0 + timedelta(minutes=11)
+        monitor._run_poll(status)
+        printed = " ".join(str(c) for c in err_console.print.call_args_list)
+        assert "20 older events in this gap were skipped" in printed
+        assert "20 skipped" in status.update.call_args.args[0]
+
+    def test_monitor_survives_sleep_and_ims_blip(self, clock) -> None:
+        """Review Focus 1: a long sleep, then one failed token refresh, then recovery."""
+        from cja_audit_log_monitor.alerts import AlertEngine
+
+        gap = _stream(T0 + timedelta(seconds=1), 480, 5)
+        deletes = [
+            AuditLogEntry(
+                id=f"del-{i}", timestamp=T0 + timedelta(minutes=200, seconds=i),
+                action="DELETE", user_email="mallory@example.com",
+            )
+            for i in range(6)
+        ]
+        api = _FakeAuditApi(gap + deletes)
+        seen: list[AuditLogEntry] = []
+        engine = AlertEngine()
+        fired: list[str] = []
+        check = engine.check_entry
+
+        def recording_check(entry):
+            alerts = check(entry)
+            fired.extend(a.rule_name for a in alerts)
+            return alerts
+
+        engine.check_entry = recording_check
+        monitor = AuditLogMonitor(
+            MagicMock(get_logs=api.get_logs), console=MagicMock(), alert_engine=engine
+        )
+        monitor._on_new_entry = seen.append
+        monitor._run_poll(MagicMock())  # baseline
+        clock.now_value = T0 + timedelta(minutes=481)
+        api.fail_next = [AuthenticationError("IMS 503", transient=True)]
+        monitor._run_poll(MagicMock())
+        clock.now_value = T0 + timedelta(minutes=482)
+        monitor._run_poll(MagicMock())
+        ids = [e.id for e in seen]
+        assert len(ids) == len(set(ids)) == len(gap) + len(deletes)
+        assert "bulk_delete" in fired
+
+
+class TestCtrlC:
+    """Ctrl+C stops at once, even while a poll or a webhook send is blocked (G4)."""
+
+    def test_signal_during_a_poll_stops_at_once(self, mock_client: MagicMock) -> None:
+        import signal
+
+        console = MagicMock()
+        monitor = AuditLogMonitor(mock_client, console=console, interval=5)
+
+        def blocked_poll(query):
+            monitor._signal_handler(signal.SIGINT, None)
+            raise AssertionError("the poll went on after Ctrl+C")
+
+        mock_client.get_logs.side_effect = blocked_poll
+        monitor.start()
+        printed = " ".join(str(c) for c in console.print.call_args_list)
+        assert "Monitor stopped." in printed
+        assert monitor.stopped_by_user is True
+
+    def test_ctrl_c_stops_during_a_blocked_poll(self, fake_api, tmp_path) -> None:
+        import signal
+        import subprocess
+        import time
+
+        from .fakeapi import command
+
+        fake_api.block.set()
+        proc = subprocess.Popen(
+            [*command(), "cli", "monitor", "-i", "5", "--no-alerts"],
+            env=fake_api.env(tmp_path / "missing.yaml"),
+            cwd=tmp_path,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        try:
+            assert fake_api.blocked.wait(30), "the monitor never reached the API"
+            sent = time.monotonic()
+            proc.send_signal(signal.SIGINT)
+            out, err = proc.communicate(timeout=10)
+            elapsed = time.monotonic() - sent
+        finally:
+            fake_api.block.clear()
+            if proc.poll() is None:
+                proc.kill()
+        assert elapsed < 2, f"took {elapsed:.1f}s after Ctrl+C"
+        assert proc.returncode == 0, err
+        assert "Monitor stopped." in out + err
+
+    def test_signal_during_a_webhook_send_stops_at_once(self, mock_client: MagicMock) -> None:
+        import itertools
+        import signal
+
+        from cja_audit_log_monitor.alerts import AlertEngine
+        from cja_audit_log_monitor.models import ActionType, AlertRule
+
+        deletes = [_entry(f"d{i}", i / 10, action="DELETE") for i in range(3)]
+        mock_client.get_logs.side_effect = [
+            AuditLogResponse(content=[], last=True),
+            AuditLogResponse(content=list(reversed(deletes)), last=True),
+        ]
+        nm = MagicMock()
+        nm.is_configured.return_value = True
+        nm.pop_first_failure.return_value = None
+        monitor = AuditLogMonitor(
+            mock_client, console=MagicMock(), interval=5,
+            alert_engine=AlertEngine([AlertRule(name="any", actions=[ActionType.DELETE])]),
+            notification_manager=nm,
+        )
+        nm.notify_alert.side_effect = lambda *a: monitor._signal_handler(signal.SIGINT, None)
+        shown: list[str] = []
+        monitor._display_entry = lambda entry: shown.append(entry.id)
+        ticks = itertools.count(0, 10)
+        with patch("cja_audit_log_monitor.monitor.time.monotonic", lambda: next(ticks)):
+            with patch("cja_audit_log_monitor.monitor.time.sleep"):
+                monitor.start()
+        assert nm.notify_alert.call_count == 1
+        assert monitor.stopped_by_user is True
+
+
+class TestLogLinesAndStatus:
+    """Log records pause the live status line instead of breaking it (G6)."""
+
+    def test_log_record_pauses_the_status_line(self, mock_client: MagicMock) -> None:
+        import itertools
+        import logging
+
+        events: list[str] = []
+        err_console = MagicMock()
+        err_console.print.side_effect = lambda *a, **k: events.append("print")
+
+        def failing_poll(query):
+            raise APIError("down", status_code=503)
+
+        mock_client.get_logs.side_effect = failing_poll
+        monitor = AuditLogMonitor(mock_client, console=MagicMock(), err_console=err_console)
+
+        class FakeStatus:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def update(self, text):
+                pass
+
+            def stop(self):
+                events.append("stop")
+
+            def start(self):
+                events.append("start")
+
+        monitor.console.status = lambda *a, **k: FakeStatus()
+        ticks = itertools.count(0, 10)
+        with (
+            patch("cja_audit_log_monitor.monitor.time.monotonic", lambda: next(ticks)),
+            patch("cja_audit_log_monitor.monitor.time.sleep"),
+        ):
+            monitor.start(duration=5)
+        assert events[:3] == ["stop", "print", "start"]
+        assert logging.getLogger("cja_audit_log_monitor").propagate is True
+
+    def test_alert_is_logged_at_info(self, caplog) -> None:
+        import logging
+
+        from cja_audit_log_monitor.alerts import AlertEngine
+        from cja_audit_log_monitor.models import ActionType, AlertRule
+
+        engine = AlertEngine([AlertRule(name="any", actions=[ActionType.DELETE])])
+        with caplog.at_level(logging.DEBUG):
+            engine.check_entry(_entry("x", action="DELETE"))
+        records = [r for r in caplog.records if "Alert triggered" in r.getMessage()]
+        assert [r.levelno for r in records] == [logging.INFO]
+
+
+class TestMonitorDetails:
+    """Clock labels, duration, a failed first poll (G42)."""
+
+    def test_clock_label_names_utc(self, mock_client: MagicMock) -> None:
+        mock_client.get_logs.return_value = AuditLogResponse(content=[], last=True)
+        console = MagicMock()
+        monitor = AuditLogMonitor(mock_client, console=console, interval=5)
+        status = MagicMock()
+        monitor._run_poll(status)
+        assert "UTC" in status.update.call_args.args[0]
+        monitor._display_entry(_entry("a"))
+        assert "UTC" in str(console.print.call_args)
+
+    def test_duration_counts_the_first_poll(self, mock_client: MagicMock) -> None:
+        clock = {"t": 0.0}
+
+        def slow_poll(query):
+            clock["t"] += 6  # each poll takes 6 seconds
+            return AuditLogResponse(content=[], last=True)
+
+        def sleep(seconds):
+            clock["t"] += seconds
+
+        mock_client.get_logs.side_effect = slow_poll
+        monitor = AuditLogMonitor(mock_client, console=MagicMock(), interval=5)
+        with (
+            patch("cja_audit_log_monitor.monitor.time.monotonic", lambda: clock["t"]),
+            patch("cja_audit_log_monitor.monitor.time.sleep", sleep),
+        ):
+            monitor.start(duration=10)
+        assert clock["t"] <= 13  # the 10 seconds include the first poll
+
+    def test_first_poll_fails_later_entries_still_alert(self, mock_client: MagicMock) -> None:
+        later = AuditLogEntry(
+            id="late", action="DELETE", timestamp=datetime.now(UTC) + timedelta(seconds=30)
+        )
+        mock_client.get_logs.side_effect = [
+            APIError("down", status_code=503),
+            AuditLogResponse(content=[later], last=True),
+        ]
+        engine = MagicMock()
+        engine.check_entry.return_value = []
+        monitor = AuditLogMonitor(
+            mock_client, console=MagicMock(), interval=5, alert_engine=engine
+        )
+        monitor._run_poll(MagicMock())
+        with patch("cja_audit_log_monitor.monitor.datetime") as fake_dt:
+            fake_dt.now.return_value = datetime.now(UTC) + timedelta(minutes=1)
+            monitor._run_poll(MagicMock())
+        engine.check_entry.assert_called_once_with(later)

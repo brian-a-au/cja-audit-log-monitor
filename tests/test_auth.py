@@ -248,3 +248,40 @@ class TestTokenLifecycle:
         assert body["client_id"] == [sample_settings.client_id]
         assert body["client_secret"] == [sample_settings.secret.get_secret_value()]
         assert body["scope"] == [",".join(sample_settings.scopes_list)]
+
+
+class TestTransientFailures:
+    """IMS outages and network errors are marked transient; bad credentials are not (G2)."""
+
+    IMS = "https://ims-na1.adobelogin.com/ims/token/v3"
+
+    @pytest.mark.parametrize("status", [429, 500, 503])
+    def test_ims_server_error_is_transient(
+        self, sample_settings: CJASettings, httpx_mock: HTTPXMock, status: int
+    ) -> None:
+        httpx_mock.add_response(url=self.IMS, status_code=status, text="busy")
+        with pytest.raises(AuthenticationError) as info:
+            TokenManager(sample_settings).get_token()
+        assert info.value.transient is True
+
+    def test_network_error_is_transient(
+        self, sample_settings: CJASettings, httpx_mock: HTTPXMock
+    ) -> None:
+        httpx_mock.add_exception(httpx.ConnectError("dns"), url=self.IMS)
+        with pytest.raises(AuthenticationError) as info:
+            TokenManager(sample_settings).get_token()
+        assert info.value.transient is True
+
+    @pytest.mark.parametrize("status", [400, 401])
+    def test_bad_credentials_are_not_transient(
+        self, sample_settings: CJASettings, httpx_mock: HTTPXMock, status: int
+    ) -> None:
+        httpx_mock.add_response(url=self.IMS, status_code=status, json={"error": "invalid_client"})
+        with pytest.raises(AuthenticationError) as info:
+            TokenManager(sample_settings).get_token()
+        assert info.value.transient is False
+
+    def test_missing_credentials_are_not_transient(self) -> None:
+        with pytest.raises(AuthenticationError) as info:
+            TokenManager(CJASettings(_env_file=None)).get_token()
+        assert info.value.transient is False

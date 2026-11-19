@@ -781,7 +781,7 @@ def monitor(
             err_console.print(f"[dim]Alert detection enabled with {rule_count} rules[/dim]")
 
         with NotificationManager(settings.notifications) as nm:
-            if nm.is_configured():
+            if nm.is_configured() and settings.notifications.notify_on_alerts:
                 channel_summary = []
                 if settings.notifications.slack_webhook_url:
                     channel_summary.append("Slack")
@@ -799,9 +799,10 @@ def monitor(
                 alert_engine=alert_engine,
                 notification_manager=nm,
             )
-            monitor_instance.start(duration=duration)
+            with client:
+                monitor_instance.start(duration=duration)
 
-        if monitor_instance.successful_polls == 0:
+        if monitor_instance.successful_polls == 0 and not monitor_instance.stopped_by_user:
             err_console.print("[red]No poll succeeded; see the errors above.[/red]")
             sys.exit(1)
 
@@ -870,7 +871,7 @@ def anomalies(
                 cycle_delay = interval
                 try:
                     _run_anomalies_cycle(client, nm, dedup, lookback, output_format, watch)
-                except APIError as e:
+                except (APIError, AuthenticationError) as e:
                     if not watch or not _is_retryable_anomalies_error(e):
                         raise
                     if isinstance(e, RateLimitError):
@@ -889,8 +890,10 @@ def anomalies(
 _RETRYABLE_ANOMALY_STATUSES = frozenset({408, 425, 429, 500, 502, 503, 504})
 
 
-def _is_retryable_anomalies_error(error: APIError) -> bool:
-    """Return whether a watch cycle should retry an API failure."""
+def _is_retryable_anomalies_error(error: APIError | AuthenticationError) -> bool:
+    """Return whether a watch cycle should retry an API or token failure."""
+    if isinstance(error, AuthenticationError):
+        return error.transient
     return error.status_code is None or error.status_code in _RETRYABLE_ANOMALY_STATUSES
 
 
@@ -1225,11 +1228,11 @@ def tail(
             )
 
             err_console.print(f"[green]Tailing audit logs{filter_str}[/green]")
-            err_console.print(f"[dim]Polling every {interval}s, Ctrl+C to stop[/dim]\n")
 
-            monitor_instance.start()
+            with client:
+                monitor_instance.start()
 
-        if monitor_instance.successful_polls == 0:
+        if monitor_instance.successful_polls == 0 and not monitor_instance.stopped_by_user:
             err_console.print("[red]No poll succeeded; see the errors above.[/red]")
             sys.exit(1)
 

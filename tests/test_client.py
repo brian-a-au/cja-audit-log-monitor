@@ -622,3 +622,20 @@ class TestRetryAndRefresh:
             result = client.verify_connection()
         assert result["connected"] is False
         assert "403" in result["error"]
+
+
+def test_401_after_429s_still_refreshes_the_token(
+    client: AuditLogsClient,
+    sample_api_response: dict,
+    httpx_mock: HTTPXMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("cja_audit_log_monitor.client.time.sleep", lambda s: None)
+    url = "https://cja.adobe.io/auditlogs/api/v1/auditlogs"
+    httpx_mock.add_response(url=url, status_code=429)
+    httpx_mock.add_response(url=url, status_code=429)
+    httpx_mock.add_response(url=url, status_code=401)
+    httpx_mock.add_response(url=url, json=sample_api_response)
+    with client:
+        response = client.get_logs()
+    assert len(response.content) == 1

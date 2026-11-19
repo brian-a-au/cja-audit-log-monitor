@@ -1367,6 +1367,35 @@ class TestAnomaliesCommand:
         assert "Notification delivery failed (slack)" in result.stderr
         assert "Notification delivery failed (slack)" not in result.stdout
 
+    @patch("cja_audit_log_monitor.cli.NotificationManager")
+    @patch("cja_audit_log_monitor.cli._run_anomalies_cycle")
+    @patch("cja_audit_log_monitor.cli.get_client")
+    def test_watch_survives_transient_token_failure(
+        self,
+        mock_get_client: MagicMock,
+        mock_cycle: MagicMock,
+        mock_nm_cls: MagicMock,
+        runner: CliRunner,
+    ) -> None:
+        from cja_audit_log_monitor.auth import AuthenticationError
+
+        client = MagicMock()
+        client.__enter__ = MagicMock(return_value=client)
+        client.__exit__ = MagicMock(return_value=False)
+        mock_get_client.return_value = (client, _settings())
+        nm_instance = MagicMock()
+        nm_instance.__enter__ = MagicMock(return_value=nm_instance)
+        nm_instance.__exit__ = MagicMock(return_value=False)
+        nm_instance.is_configured = MagicMock(return_value=False)
+        mock_nm_cls.return_value = nm_instance
+        mock_cycle.side_effect = [AuthenticationError("IMS 503", transient=True), None]
+
+        with patch("cja_audit_log_monitor.cli.time.sleep", side_effect=[None, KeyboardInterrupt]):
+            result = runner.invoke(main, ["cli", "anomalies", "--watch", "--interval", "5"])
+
+        assert result.exit_code == 0
+        assert mock_cycle.call_count == 2
+
     @pytest.mark.parametrize("status_code", [None, 408, 425, 429, 500, 502, 503, 504])
     @patch("cja_audit_log_monitor.cli.NotificationManager")
     @patch("cja_audit_log_monitor.cli._run_anomalies_cycle")
@@ -2881,3 +2910,34 @@ def test_init_message_does_not_ask_for_scopes(tmp_path) -> None:
     assert result.exit_code == 0
     assert "SCOPES" not in result.stdout
     assert ".env.example" not in result.stdout
+
+
+def test_tail_prints_the_polling_line_once(runner: CliRunner) -> None:
+    with (
+        patch("cja_audit_log_monitor.cli.get_client") as gc,
+        patch("cja_audit_log_monitor.cli.AuditLogMonitor.start", lambda self, *a, **k: None),
+    ):
+        client = MagicMock()
+        gc.return_value = (client, MagicMock(alert_rules=[]))
+        result = runner.invoke(main, ["cli", "tail", "--no-alerts"])
+    assert result.output.lower().count("polling every") <= 1
+    assert "Polling every" not in result.stderr
+
+
+def test_monitor_hides_channel_summary_when_alert_delivery_is_off(runner: CliRunner) -> None:
+    from cja_audit_log_monitor.config import CJASettings
+    from cja_audit_log_monitor.models import NotificationConfig
+
+    settings = CJASettings(
+        _env_file=None,
+        notifications=NotificationConfig(
+            slack_webhook_url="https://hooks.slack.com/x", notify_on_alerts=False
+        ),
+    )
+    with (
+        patch("cja_audit_log_monitor.cli.get_client", return_value=(MagicMock(), settings)),
+        patch("cja_audit_log_monitor.cli.AuditLogMonitor.start", lambda self, *a, **k: None),
+        patch("cja_audit_log_monitor.cli.AuditLogMonitor.successful_polls", 1, create=True),
+    ):
+        result = runner.invoke(main, ["cli", "monitor"])
+    assert "Notification channels" not in result.output
