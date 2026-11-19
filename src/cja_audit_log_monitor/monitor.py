@@ -4,8 +4,8 @@ import logging
 import signal
 import threading
 import time
-from collections.abc import Callable
-from contextlib import suppress
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager, suppress
 from datetime import UTC, datetime, timedelta
 
 from rich.console import Console
@@ -22,6 +22,7 @@ from .notifications import NotificationManager
 from .utils import RecentIds, entry_key, get_user_identifier
 
 logger = logging.getLogger(__name__)
+_PACKAGE_LOGGER = "cja_audit_log_monitor"
 
 # A poll asks for the largest page the API allows, so a normal poll is one request and a
 # backlog after a gap (a laptop asleep, an outage) is read in few requests.
@@ -243,6 +244,35 @@ class AuditLogMonitor:
             if status is not None:
                 status.start()
 
+    @contextmanager
+    def _logs_around_status(self) -> Iterator[None]:
+        """While the status line is live, print the package's log records around it.
+
+        The root handler writes to stderr, which Rich does not route through the live
+        status on stdout, so a log line would land on the status line. Here each record is
+        printed with the status paused, and the package logger stops passing records up
+        to the root handler until the monitor ends.
+        """
+        monitor = self
+        package_logger = logging.getLogger(_PACKAGE_LOGGER)
+
+        class _AroundStatus(logging.Handler):
+            def emit(self, record: logging.LogRecord) -> None:
+                try:
+                    monitor._print_warning(record.getMessage())
+                except Exception:
+                    self.handleError(record)
+
+        handler = _AroundStatus()
+        old_propagate = package_logger.propagate
+        package_logger.addHandler(handler)
+        package_logger.propagate = False
+        try:
+            yield
+        finally:
+            package_logger.removeHandler(handler)
+            package_logger.propagate = old_propagate
+
     def _display_entry(self, entry: AuditLogEntry) -> None:
         """Display a new audit log entry."""
         timestamp = entry.timestamp.strftime("%H:%M:%S") if entry.timestamp else "-"
@@ -339,7 +369,7 @@ class AuditLogMonitor:
             # Initial fetch sets the baseline; show the newest few entries for context.
             with suppress(KeyboardInterrupt), self.console.status(
                 "Waiting for first poll..."
-            ) as status:
+            ) as status, self._logs_around_status():
                 self._status = status
                 self._run_poll(status)
 

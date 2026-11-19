@@ -520,11 +520,19 @@ class TestPollErrors:
     def test_transient_status_is_logged_and_loop_continues(
         self, mock_client: MagicMock, caplog: pytest.LogCaptureFixture
     ) -> None:
+        import itertools
+
         mock_client.get_logs.side_effect = APIError("down", status_code=503)
-        monitor = AuditLogMonitor(mock_client, interval=1)
-        monitor.start(duration=5)
+        err_console = MagicMock()
+        monitor = AuditLogMonitor(mock_client, interval=1, err_console=err_console)
+        ticks = itertools.count(0, 1)
+        with (
+            patch("cja_audit_log_monitor.monitor.time.monotonic", lambda: next(ticks)),
+            patch("cja_audit_log_monitor.monitor.time.sleep"),
+        ):
+            monitor.start(duration=5)
         assert mock_client.get_logs.call_count > 1
-        assert "down" in caplog.text
+        assert "down" in str(err_console.print.call_args_list)
 
     def test_failed_poll_shows_in_status(self, mock_client: MagicMock) -> None:
         """A transient failure must not read as a good poll with nothing new."""
@@ -1012,3 +1020,59 @@ class TestCtrlC:
                 monitor.start()
         assert nm.notify_alert.call_count == 1
         assert monitor.stopped_by_user is True
+
+
+class TestLogLinesAndStatus:
+    """Log records pause the live status line instead of breaking it (G6)."""
+
+    def test_log_record_pauses_the_status_line(self, mock_client: MagicMock) -> None:
+        import itertools
+        import logging
+
+        events: list[str] = []
+        err_console = MagicMock()
+        err_console.print.side_effect = lambda *a, **k: events.append("print")
+
+        def failing_poll(query):
+            raise APIError("down", status_code=503)
+
+        mock_client.get_logs.side_effect = failing_poll
+        monitor = AuditLogMonitor(mock_client, console=MagicMock(), err_console=err_console)
+
+        class FakeStatus:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def update(self, text):
+                pass
+
+            def stop(self):
+                events.append("stop")
+
+            def start(self):
+                events.append("start")
+
+        monitor.console.status = lambda *a, **k: FakeStatus()
+        ticks = itertools.count(0, 10)
+        with (
+            patch("cja_audit_log_monitor.monitor.time.monotonic", lambda: next(ticks)),
+            patch("cja_audit_log_monitor.monitor.time.sleep"),
+        ):
+            monitor.start(duration=5)
+        assert events[:3] == ["stop", "print", "start"]
+        assert logging.getLogger("cja_audit_log_monitor").propagate is True
+
+    def test_alert_is_logged_at_info(self, caplog) -> None:
+        import logging
+
+        from cja_audit_log_monitor.alerts import AlertEngine
+        from cja_audit_log_monitor.models import ActionType, AlertRule
+
+        engine = AlertEngine([AlertRule(name="any", actions=[ActionType.DELETE])])
+        with caplog.at_level(logging.DEBUG):
+            engine.check_entry(_entry("x", action="DELETE"))
+        records = [r for r in caplog.records if "Alert triggered" in r.getMessage()]
+        assert [r.levelno for r in records] == [logging.INFO]
