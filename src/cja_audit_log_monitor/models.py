@@ -206,8 +206,8 @@ class AuditLogQuery(BaseModel):
         if self.start_date or self.end_date:
             start = self.start_date or API_EARLIEST
             end = self.end_date or datetime.now(UTC)
-            params["startDate"] = start.strftime(_DATE_FORMAT)
-            params["endDate"] = end.strftime(_DATE_FORMAT)
+            params["startDate"] = start.astimezone(UTC).strftime(_DATE_FORMAT)
+            params["endDate"] = end.astimezone(UTC).strftime(_DATE_FORMAT)
 
         if self.actions:
             params["action"] = [a.value for a in self.actions]

@@ -1,7 +1,7 @@
 """Tests for CLI commands."""
 
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -3358,3 +3358,74 @@ class TestOneLineErrors:
         assert result.exit_code == 1
         lines = [line for line in result.stderr.splitlines() if line.strip()]
         assert lines == ["Unexpected error: ZeroDivisionError: odd"]
+
+
+class TestFiltersAndDates:
+    """Filters, limits and date ranges do what the flags say (G28, G29, G45)."""
+
+    @staticmethod
+    def _client():
+        client = MagicMock()
+        client.__enter__ = MagicMock(return_value=client)
+        client.__exit__ = MagicMock(return_value=False)
+        client.get_all_logs.return_value = []
+        client.get_component_logs.return_value = []
+        return client
+
+    def _run(self, args):
+        client = self._client()
+        with patch("cja_audit_log_monitor.cli.get_client", return_value=(client, _settings())):
+            result = CliRunner().invoke(main, ["cli", *args])
+        return result, client
+
+    @pytest.mark.parametrize("command", [["component", "-i", "x"], ["dashboard", "-i", "x"]])
+    def test_component_and_dashboard_fetch_only_the_limit(self, command) -> None:
+        result, client = self._run([*command, "-l", "5"])
+        assert result.exit_code == 0, result.output
+        assert client.get_component_logs.call_args.kwargs.get("max_entries") == 5
+
+    @pytest.mark.parametrize(
+        "args",
+        [["search", "-u", ""], ["search", "--component-id", " "], ["search", "--desc", ""],
+         ["query", "-u", ""], ["timeline", "-u", " "], ["tail", "-u", ""],
+         ["tail", "--component-id", ""]],
+        ids=lambda a: " ".join(a),
+    )
+    def test_blank_filter_is_a_usage_error(self, args) -> None:
+        result, client = self._run(args)
+        assert result.exit_code == 2
+        client.get_all_logs.assert_not_called()
+
+    def test_filter_values_are_stripped(self) -> None:
+        result, client = self._run(["user", "-u", " a@example.com "])
+        assert result.exit_code == 0
+        query = client.get_all_logs.call_args.args[0]
+        assert query.to_query_params()["userEmail"] == "a@example.com"
+
+    @pytest.mark.parametrize("value", ["2026-01-15", "20260115"])
+    def test_end_date_forms_get_end_of_day(self, value) -> None:
+        from cja_audit_log_monitor.cli import parse_date
+
+        parsed = parse_date(value, end_of_day=True)
+        assert (parsed.hour, parsed.minute, parsed.second) == (23, 59, 59)
+
+    def test_ambiguous_date_is_a_usage_error(self) -> None:
+        result, _ = self._run(["search", "-e", "2026-1-5"])
+        assert result.exit_code == 2
+
+    @pytest.mark.parametrize("args", [["-s", "2999-01-01"], ["-e", "1999-01-01"]])
+    def test_one_sided_range_is_checked(self, args) -> None:
+        result, client = self._run(["search", *args])
+        assert result.exit_code == 2
+        client.get_all_logs.assert_not_called()
+
+    def test_offset_dates_are_sent_in_utc(self) -> None:
+        from cja_audit_log_monitor.models import AuditLogQuery
+
+        query = AuditLogQuery(
+            start_date=datetime(2026, 1, 15, 5, 0, tzinfo=timezone(timedelta(hours=5))),
+            end_date=datetime(2026, 1, 15, 6, 0, tzinfo=timezone(timedelta(hours=5))),
+        )
+        params = query.to_query_params()
+        assert params["startDate"] == "2026-01-15T00:00:00+0000"
+        assert params["endDate"] == "2026-01-15T01:00:00+0000"

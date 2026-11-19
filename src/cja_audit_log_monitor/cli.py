@@ -43,7 +43,7 @@ from .formatters import (
     format_stats_panel,
     format_user_stats_table,
 )
-from .models import ActionType, AuditLogEntry, AuditLogQuery, ComponentType
+from .models import API_EARLIEST, ActionType, AuditLogEntry, AuditLogQuery, ComponentType
 from .monitor import AuditLogMonitor
 from .notifications import AnomalyDedupFilter, NotificationManager
 from .stats import build_date_range_query, calculate_stats, generate_report
@@ -80,10 +80,10 @@ def output_format_option(func: Callable[P, R]) -> Callable[P, R]:
 
 
 def require_text(ctx: click.Context, param: click.Parameter, value: str | None) -> str | None:
-    """Reject an empty or blank ID, which would silently match everything."""
+    """Reject an empty or blank filter, which would silently match everything; strip it."""
     if value is not None and not value.strip():
         raise click.BadParameter("must not be empty")
-    return value
+    return value.strip() if value is not None else None
 
 
 def days_or_default(days: int | None, settings: CJASettings) -> int:
@@ -231,53 +231,62 @@ def get_client(config_path: Path | None = None) -> tuple[AuditLogsClient, CJASet
     return client, settings
 
 
-_DATE_ONLY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_DATE_ONLY = re.compile(r"^\d{4}-\d{2}-\d{2}$|^\d{8}$")
+_HAS_TIME = re.compile(r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}")
+_DATE_FORMS = "use YYYY-MM-DD, YYYYMMDD, or an ISO date and time such as 2026-01-15T10:00Z"
 
 
 def parse_date(date_str: str | None, end_of_day: bool = False) -> datetime | None:
-    """Parse a date string to a timezone-aware datetime (UTC when no zone is given).
+    """Parse a date string to a timezone-aware UTC datetime.
 
-    A date-only value means midnight UTC, or 23:59:59 UTC with ``end_of_day=True`` so an
-    end date covers the whole day. Values that carry a time are used as given.
+    A date-only value (``YYYY-MM-DD`` or ``YYYYMMDD``) means midnight UTC, or 23:59:59 UTC
+    with ``end_of_day=True`` so an end date covers the whole day. A value with a time is
+    read as UTC when it has no zone, and converted to UTC when it has one.
     """
     if not date_str:
         return None
 
     normalized = date_str.strip()
-    date_only = bool(_DATE_ONLY.match(normalized))
-    if normalized.endswith("Z"):
+    if normalized.endswith(("Z", "z")):
         normalized = normalized[:-1] + "+00:00"
-
-    parsed: datetime | None = None
+    date_only = bool(_DATE_ONLY.match(normalized))
+    if not date_only and not _HAS_TIME.match(normalized):
+        raise click.BadParameter(f"{date_str!r} is not a date: {_DATE_FORMS}")
     try:
         parsed = datetime.fromisoformat(normalized)
     except ValueError:
-        for fmt in ("%Y-%m-%d", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%d %H:%M:%S"):
-            try:
-                parsed = datetime.strptime(normalized, fmt)
-                break
-            except ValueError:
-                continue
-    if parsed is None:
-        raise click.BadParameter(f"Invalid date format: {date_str}")
+        raise click.BadParameter(f"{date_str!r} is not a date: {_DATE_FORMS}") from None
 
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=UTC)
     if date_only and end_of_day:
         parsed = parsed.replace(hour=23, minute=59, second=59)
-    return parsed
+    return parsed.astimezone(UTC)
 
 
 def parse_date_range(
     start_date: str | None, end_date: str | None
 ) -> tuple[datetime | None, datetime | None]:
-    """Parse ``--start-date`` and ``--end-date``; reject a start that is after the end."""
+    """Parse ``--start-date`` and ``--end-date``; reject a range that ends before it starts.
+
+    With only one of the two, the other is the default the API is sent (the earliest
+    date, or now), and the range is checked against it.
+    """
     start = parse_date(start_date)
     end = parse_date(end_date, end_of_day=True)
     if start and end and start > end:
         raise click.BadParameter(
             f"--start-date ({start_date}) is after --end-date ({end_date})",
             param_hint="--start-date",
+        )
+    if start and not end and start > datetime.now(UTC):
+        raise click.BadParameter(
+            f"--start-date ({start_date}) is in the future", param_hint="--start-date"
+        )
+    if end and not start and end < API_EARLIEST:
+        raise click.BadParameter(
+            f"--end-date ({end_date}) is before {API_EARLIEST:%Y-%m-%d}",
+            param_hint="--end-date",
         )
     return start, end
 
@@ -438,7 +447,7 @@ def cli_list(
 
 
 @cli.command()
-@click.option("--user", "-u", help="Filter by user ID or email")
+@click.option("--user", "-u", callback=require_text, help="Filter by user ID or email")
 @click.option(
     "--action",
     "-a",
@@ -453,8 +462,8 @@ def cli_list(
     multiple=True,
     help="Filter by component type",
 )
-@click.option("--component-id", help="Filter by specific component ID")
-@click.option("--description", "--desc", help="Search in description")
+@click.option("--component-id", callback=require_text, help="Filter by specific component ID")
+@click.option("--description", "--desc", callback=require_text, help="Search in description")
 @click.option("--limit", "-l", type=POSITIVE_INT, default=100, help="Maximum entries to return")
 @click.option("--details", "-D", is_flag=True, help="Show additional details")
 @output_format_option
@@ -526,8 +535,7 @@ def dashboard(ctx: click.Context, dashboard_id: str, limit: int, output_format: 
     client, settings = get_client(config_path)
 
     with client:
-        entries = client.get_component_logs(dashboard_id, "PROJECT")
-        entries = entries[:limit]
+        entries = client.get_component_logs(dashboard_id, "PROJECT", max_entries=limit)
 
     if output_format == "json":
         from .export import entry_to_dict
@@ -624,8 +632,7 @@ def component(
     client, settings = get_client(config_path)
 
     with client:
-        entries = client.get_component_logs(component_id, component_type)
-        entries = entries[:limit]
+        entries = client.get_component_logs(component_id, component_type, max_entries=limit)
 
     if not entries:
         if output_format == "json":
@@ -1268,8 +1275,8 @@ def report(
     default=5,
     help="Polling interval in seconds (minimum 5)",
 )
-@click.option("--user", "-u", help="Filter by user ID or email")
-@click.option("--component-id", help="Filter by component ID")
+@click.option("--user", "-u", callback=require_text, help="Filter by user ID or email")
+@click.option("--component-id", callback=require_text, help="Filter by component ID")
 @click.option(
     "--action",
     "-a",
@@ -1448,7 +1455,7 @@ def alerts_test(ctx: click.Context, days: int) -> None:
 @click.option("--last-week", is_flag=True, help="Query last 7 days")
 @click.option("--last-month", is_flag=True, help="Query last 30 days")
 @click.option("--today", is_flag=True, help="Query today's logs")
-@click.option("--user", "-u", help="Filter by user ID or email")
+@click.option("--user", "-u", callback=require_text, help="Filter by user ID or email")
 @click.option(
     "--action",
     "-a",
@@ -1567,7 +1574,7 @@ def query(
     multiple=True,
     help="Filter by component type",
 )
-@click.option("--user", "-u", help="Filter by user")
+@click.option("--user", "-u", callback=require_text, help="Filter by user")
 @output_format_option
 @click.pass_context
 @handle_cli_errors

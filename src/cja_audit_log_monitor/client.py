@@ -428,6 +428,7 @@ class AuditLogsClient:
         self,
         component_id: str,
         component_type: str | None = None,
+        max_entries: int | None = None,
     ) -> list[AuditLogEntry]:
         """Get all audit logs for a specific component (e.g., dashboard).
 
@@ -447,7 +448,7 @@ class AuditLogsClient:
             except ValueError:
                 logger.warning("Unknown component type: %s", component_type)
 
-        return self.get_all_logs(query)
+        return self.get_all_logs(query, max_entries=max_entries)
 
     def verify_connection(self) -> dict[str, Any]:
         """Verify API connection and authentication.
