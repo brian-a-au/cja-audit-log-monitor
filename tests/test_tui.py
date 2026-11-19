@@ -5058,3 +5058,18 @@ def test_no_private_textual_imports() -> None:
         if re.search(r"textual(\.\w+)*\._\w+", path.read_text())
     ]
     assert hits == []
+
+
+async def test_tui_monitor_stops_on_an_error_retrying_cannot_fix(mock_app_state, monkeypatch):
+    """A 403 stops the TUI monitor, as it stops the CLI monitor (G52)."""
+    from cja_audit_log_monitor.client import APIError
+
+    app = _make_app(mock_app_state)
+    async with app.run_test(size=(140, 40), notifications=True) as pilot:
+        screen = await _start_monitor_without_loop(app, pilot, monkeypatch)
+        await _drive_poll(screen, pilot)
+        mock_app_state.client.get_logs.side_effect = APIError("forbidden", status_code=403)
+        await _drive_poll(screen, pilot)
+        assert await _wait_for(lambda: not mock_app_state.monitor.is_running, pilot)
+        assert "stopped" in _status_indicator(screen)
+        assert any("forbidden" in n.message for n in app._notifications)

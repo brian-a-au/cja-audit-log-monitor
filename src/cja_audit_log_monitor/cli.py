@@ -45,10 +45,10 @@ from .formatters import (
     literal,
 )
 from .models import API_EARLIEST, ActionType, AuditLogEntry, AuditLogQuery, ComponentType
-from .monitor import AuditLogMonitor
+from .monitor import AuditLogMonitor, is_retryable
 from .notifications import AnomalyDedupFilter, NotificationManager
 from .stats import build_date_range_query, calculate_stats, generate_report
-from .utils import get_user_identifier
+from .utils import user_identities
 
 P = ParamSpec("P")
 R = TypeVar("R")
@@ -88,6 +88,15 @@ def require_text(ctx: click.Context, param: click.Parameter, value: str | None) 
     if value is not None and not value.strip():
         raise click.BadParameter("must not be empty")
     return value.strip() if value is not None else None
+
+
+def plural(count: int, noun: str) -> str:
+    """``count`` with ``noun`` in the right number, e.g. "1 entry" or "1,200 entries"."""
+    if count == 1:
+        return f"1 {noun}"
+    last = noun.rsplit(" ", 1)[-1]
+    plural_last = last[:-1] + "ies" if last.endswith("y") else last + "s"
+    return f"{count:,} {noun[: len(noun) - len(last)]}{plural_last}"
 
 
 def days_or_default(days: int | None, settings: CJASettings) -> int:
@@ -459,7 +468,7 @@ def cli_list(
     else:
         table = format_logs_table(entries, show_details=details)
         console.print(table)
-        console.print(f"\n[dim]Showing {len(entries)} entries[/dim]")
+        console.print(f"\n[dim]Showing {plural(len(entries), 'entry')}[/dim]")
 
 
 @cli.command()
@@ -530,7 +539,7 @@ def search(
         if output_format == "json":
             emit_json({"entries": [], "count": 0})
         else:
-            console.print("[dim]No matching audit logs found.[/dim]")
+            console.print("[dim]No audit logs found.[/dim]")
         return
 
     if output_format == "json":
@@ -541,7 +550,7 @@ def search(
     else:
         table = format_logs_table(entries, show_details=details)
         console.print(table)
-        console.print(f"\n[dim]Found {len(entries)} matching entries[/dim]")
+        console.print(f"\n[dim]Found {plural(len(entries), 'matching entry')}[/dim]")
 
 
 @cli.command()
@@ -580,7 +589,7 @@ def dashboard(ctx: click.Context, dashboard_id: str, limit: int, output_format: 
     console.print(f"[bold]Audit history for dashboard:[/bold] {literal(dashboard_id)}\n")
     table = format_logs_table(entries, show_details=True)
     console.print(table)
-    console.print(f"\n[dim]Found {len(entries)} entries[/dim]")
+    console.print(f"\n[dim]Found {plural(len(entries), 'entry')}[/dim]")
 
 
 @cli.command()
@@ -627,7 +636,7 @@ def user(
         console.print(f"[bold]Audit history for user:[/bold] {literal(user_id)}\n")
         table = format_logs_table(entries, show_details=True)
         console.print(table)
-        console.print(f"\n[dim]Found {len(entries)} entries[/dim]")
+        console.print(f"\n[dim]Found {plural(len(entries), 'entry')}[/dim]")
 
 
 @cli.command()
@@ -690,7 +699,7 @@ def component(
         console.print(f"{header}\n")
         table = format_logs_table(entries, show_details=True)
         console.print(table)
-        console.print(f"\n[dim]Found {len(entries)} entries[/dim]")
+        console.print(f"\n[dim]Found {plural(len(entries), 'entry')}[/dim]")
 
 
 @cli.command()
@@ -820,7 +829,7 @@ def export(
             f"[yellow]No audit logs matched; wrote an empty file to {target}.[/yellow]"
         )
     else:
-        err_console.print(f"[green]Exported {count} entries to {target}[/green]")
+        err_console.print(f"[green]Exported {plural(count, 'entry')} to {target}[/green]")
     if cut["value"]:
         err_console.print(
             f"[yellow]Stopped at --max-entries {max_entries}; more entries matched.[/yellow]"
@@ -1021,7 +1030,7 @@ def anomalies(
                 try:
                     _run_anomalies_cycle(client, nm, dedup, lookback, output_format, watch)
                 except (APIError, AuthenticationError) as e:
-                    if not watch or not _is_retryable_anomalies_error(e):
+                    if not watch or not is_retryable(e):
                         raise
                     if isinstance(e, RateLimitError):
                         cycle_delay = max(interval, e.retry_after)
@@ -1036,16 +1045,6 @@ def anomalies(
         err_console.print("\n[yellow]Anomaly scan stopped.[/yellow]")
         if not watch:
             sys.exit(1)  # an interrupted one-off scan did not finish, as for other commands
-
-
-_RETRYABLE_ANOMALY_STATUSES = frozenset({408, 425, 429, 500, 502, 503, 504})
-
-
-def _is_retryable_anomalies_error(error: APIError | AuthenticationError) -> bool:
-    """Return whether a watch cycle should retry an API or token failure."""
-    if isinstance(error, AuthenticationError):
-        return error.transient
-    return error.status_code is None or error.status_code in _RETRYABLE_ANOMALY_STATUSES
 
 
 def _install_anomalies_signal_handlers() -> None:
@@ -1279,7 +1278,7 @@ def report(
         entries = client.get_all_logs(query, max_entries=max_entries + 1)
 
     if not entries:
-        err_console.print("[yellow]No audit logs found for the specified period.[/yellow]")
+        err_console.print("[dim]No audit logs found for the specified period.[/dim]")
 
     truncated = len(entries) > max_entries
     entries = entries[:max_entries]
@@ -1347,12 +1346,12 @@ def tail(
             actions_filter = parse_actions(action) if action else None
             action_values = {item.value for item in actions_filter} if actions_filter else None
 
+            wanted_user = user.casefold() if user else None
+
             def matches(entry: AuditLogEntry) -> bool:
-                if user and user not in (
-                    entry.user_id,
-                    entry.user_email,
-                    get_user_identifier(entry),
-                ):
+                # The same match as a rule's `users`: id, email or name, in any case.
+                names = {name.casefold() for name in user_identities(entry)}
+                if wanted_user and wanted_user not in names:
                     return False
                 if component_id and entry.component_id != component_id:
                     return False
@@ -1466,7 +1465,7 @@ def alerts_test(ctx: click.Context, days: int) -> None:
         entries = client.get_all_logs(query)
 
     if not entries:
-        console.print("[yellow]No audit logs found.[/yellow]")
+        console.print("[dim]No audit logs found.[/dim]")
         return
 
     # Check all entries
@@ -1594,7 +1593,7 @@ def query(
         table = format_logs_table(entries, show_details=False)
         console.print(table)
         if not quiet:
-            console.print(f"\n[dim]Found {len(entries)} entries ({label})[/dim]")
+            console.print(f"\n[dim]Found {plural(len(entries), 'entry')} ({label})[/dim]")
 
 
 @cli.command()

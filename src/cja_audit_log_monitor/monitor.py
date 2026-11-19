@@ -39,6 +39,20 @@ POLL_OVERLAP = timedelta(minutes=5)
 SEEN_IDS_MAX = 5000
 
 
+def is_retryable(error: Exception) -> bool:
+    """Whether a later poll may work: the one retry policy for every monitor loop.
+
+    A transient sign-in failure is retried, and so is any API failure whose status is not
+    in ``FATAL_STATUS`` (or that has no status, e.g. a network error). Bad credentials and
+    the fatal statuses are not: retrying cannot fix them.
+    """
+    if isinstance(error, AuthenticationError):
+        return error.transient
+    if isinstance(error, APIError):
+        return error.status_code not in FATAL_STATUS
+    return True
+
+
 def build_poll_query(since: datetime | None, now: datetime, page_size: int) -> AuditLogQuery:
     """Build the query for one poll: from just before ``since`` (or ``now``) up to ``now``."""
     return AuditLogQuery(
@@ -169,15 +183,8 @@ class AuditLogMonitor:
             new_entries, skipped = fetch_unseen(self.client.get_logs, query, self._seen)
             if skipped != 0:
                 self._skipped = skipped
-        except AuthenticationError as e:
-            if not e.transient:
-                raise
-            # IMS or the network failed for a moment: try again next poll, like an API 503.
-            logger.error("Error fetching audit logs: %s", e)
-            self._poll_error = str(e)
-            return []
-        except APIError as e:
-            if e.status_code in FATAL_STATUS:
+        except (AuthenticationError, APIError) as e:
+            if not is_retryable(e):
                 raise
             logger.error("Error fetching audit logs: %s", e)
             self._poll_error = str(e)

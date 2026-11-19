@@ -1,6 +1,7 @@
 """Tests for CLI commands."""
 
 import json
+import re
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -1560,7 +1561,7 @@ class TestAnomaliesCommand:
         assert result.exit_code == 0
         sleep.assert_called_once_with(60)
 
-    @pytest.mark.parametrize("status_code", [400, 401, 403, 501, 505])
+    @pytest.mark.parametrize("status_code", [400, 401, 403, 404])
     @patch("cja_audit_log_monitor.cli.NotificationManager")
     @patch("cja_audit_log_monitor.cli._run_anomalies_cycle")
     @patch("cja_audit_log_monitor.cli.get_client")
@@ -3713,3 +3714,116 @@ def test_api_network_failure_is_a_network_error(runner) -> None:
     with patch("cja_audit_log_monitor.cli.get_client", return_value=(client, _settings())):
         result = runner.invoke(main, ["cli", "list"])
     assert result.stderr.startswith("Network error: could not reach cja.adobe.io")
+
+
+@pytest.mark.parametrize("given", ["ALICE@example.com", "Alice Smith", "u-alice"])
+def test_tail_user_matches_like_rule_users(runner: CliRunner, given) -> None:
+    """tail -u matches id, email or name in any case, the same way rule `users` do."""
+    client = MagicMock()
+    client.get_logs.return_value = AuditLogResponse(
+        content=[
+            AuditLogEntry(
+                id="1",
+                action="CREATE",
+                user_id="U-ALICE",
+                user_email="alice@example.com",
+                user_name="alice smith",
+                component_name="mine-comp",
+            ),
+            AuditLogEntry(
+                id="2", action="CREATE", user_email="bob@example.com", component_name="other-comp"
+            ),
+        ],
+        last=True,
+    )
+
+    def fake_start(self, *args, **kwargs):
+        for entry in self._get_new_entries():
+            self._display_entry(entry)
+
+    with (
+        patch("cja_audit_log_monitor.cli.get_client") as gc,
+        patch("cja_audit_log_monitor.cli.AuditLogMonitor.start", fake_start),
+    ):
+        gc.return_value = (client, MagicMock(alert_rules=[]))
+        result = runner.invoke(main, ["cli", "tail", "-u", given, "--no-alerts"])
+    assert result.exit_code == 0, result.output
+    assert "mine-comp" in result.output
+    assert "other-comp" not in result.output
+
+
+@pytest.mark.parametrize(("status", "retried"), [(418, True), (400, False)])
+def test_anomalies_watch_uses_the_shared_retry_policy(runner, status, retried) -> None:
+    from cja_audit_log_monitor.client import APIError
+
+    client = MagicMock()
+    client.__enter__ = MagicMock(return_value=client)
+    client.__exit__ = MagicMock(return_value=False)
+    with (
+        patch("cja_audit_log_monitor.cli.get_client", return_value=(client, _settings())),
+        patch(
+            "cja_audit_log_monitor.cli._run_anomalies_cycle",
+            side_effect=[APIError("x", status_code=status), None],
+        ) as cycle,
+        patch("cja_audit_log_monitor.cli.time.sleep", side_effect=[None, KeyboardInterrupt]),
+    ):
+        result = runner.invoke(main, ["cli", "anomalies", "--watch", "--interval", "5"])
+    assert (cycle.call_count == 2) is retried
+    assert (result.exit_code == 0) is retried
+
+
+class TestCountWording:
+    """Counts read "1 entry", and empty results use one wording (G47)."""
+
+    @staticmethod
+    def _run(args, entries):
+        client = MagicMock()
+        client.__enter__ = MagicMock(return_value=client)
+        client.__exit__ = MagicMock(return_value=False)
+        client.get_all_logs.return_value = entries
+        client.get_component_logs.return_value = entries
+        client.get_logs_paginated.side_effect = lambda *a, **k: iter(entries)
+        with patch("cja_audit_log_monitor.cli.get_client", return_value=(client, _settings())):
+            return CliRunner().invoke(main, ["cli", *args])
+
+    @pytest.mark.parametrize(
+        "args",
+        [
+            ["list"],
+            ["search"],
+            ["user", "-u", "a@example.com"],
+            ["component", "-i", "c"],
+            ["dashboard", "-i", "d"],
+            ["query", "--today"],
+        ],
+        ids=lambda a: a[0],
+    )
+    def test_one_entry_is_singular(self, sample_audit_entry, args) -> None:
+        result = self._run(args, [sample_audit_entry])
+        assert result.exit_code == 0, result.output
+        assert "1 entries" not in result.output
+        assert re.search(r"\b1 (matching )?entry\b", result.output)
+
+    @pytest.mark.parametrize(
+        "args",
+        [
+            ["list"],
+            ["search"],
+            ["user", "-u", "a@example.com"],
+            ["component", "-i", "c"],
+            ["dashboard", "-i", "d"],
+            ["query", "--today"],
+            ["stats"],
+            ["timeline"],
+            ["top-users"],
+        ],
+        ids=lambda a: a[0],
+    )
+    def test_empty_results_use_one_wording(self, args) -> None:
+        result = self._run(args, [])
+        assert result.exit_code == 0, result.output
+        assert "No audit logs found" in result.output
+
+    def test_export_of_one_entry(self, tmp_path, sample_audit_entry) -> None:
+        result = self._run(["export", "-o", str(tmp_path / "o.json")], [sample_audit_entry])
+        assert "Exported 1 entry " in result.stderr

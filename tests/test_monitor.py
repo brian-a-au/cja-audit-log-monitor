@@ -1138,3 +1138,24 @@ def test_cli_monitor_shows_every_channel_failure(mock_client: MagicMock) -> None
     monitor._handle_entry(_entry("d", action="DELETE"))
     printed = str(err_console.print.call_args_list)
     assert "webhook 1 failed" in printed and "webhook 2 failed" in printed
+
+
+class TestOneRetryPolicy:
+    """The CLI monitor, the TUI monitor and anomalies --watch retry the same errors (G52)."""
+
+    @pytest.mark.parametrize(
+        ("error", "retry"),
+        [
+            (APIError("down", status_code=503), True),
+            (APIError("teapot", status_code=418), True),
+            (APIError("no network"), True),
+            (APIError("bad request", status_code=400), False),
+            (APIError("denied", status_code=403), False),
+            (AuthenticationError("IMS 503", transient=True), True),
+            (AuthenticationError("invalid_client"), False),
+        ],
+    )
+    def test_is_retryable(self, error, retry) -> None:
+        from cja_audit_log_monitor.monitor import is_retryable
+
+        assert is_retryable(error) is retry
