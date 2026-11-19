@@ -2,12 +2,11 @@
 
 from datetime import UTC, datetime
 
-from rich.cells import cell_len, set_cell_size
 from rich.text import Text
 from textual.widgets import DataTable
 from textual.widgets.data_table import RowKey
 
-from ...formatters import format_timestamp, get_action_color, get_action_icon
+from ...formatters import cut_cells, format_timestamp, get_action_color, get_action_icon
 from ...models import AuditLogEntry
 from ...utils import entry_key, get_user_identifier, local_tz_name
 
@@ -131,12 +130,7 @@ class LogTable(DataTable):
 
         Works on the plain string, so square brackets in the text are never markup.
         """
-        if width < 1:
-            return ""
-        if cell_len(text) <= width:
-            return text
-        # Cut by cells, not characters: a wide (CJK) glyph takes two cells.
-        return set_cell_size(text, width - 1).rstrip() + "…"
+        return cut_cells(text, width)
 
     def _width_of(self, key: str) -> int:
         """Current width of column ``key``, or its preferred width before the table is laid out."""

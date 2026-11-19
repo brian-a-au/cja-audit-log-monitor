@@ -4827,3 +4827,27 @@ async def test_two_entries_with_the_same_id_on_one_page(mock_app_state, sample_a
         await app.workers.wait_for_complete()
         await pilot.pause()
         assert table.row_count == 5
+
+
+@pytest.mark.parametrize("size", [(80, 24), (100, 30)])
+@pytest.mark.parametrize(("key", "widget_id"), [("d", "#top-users"), ("s", "#user-ranking")])
+async def test_top_users_cjk_name_fits_one_line(
+    mock_app_state, sample_audit_entries, size, key, widget_id
+):
+    """G36: names are cut by cell width, so a wide name never wraps the count."""
+    from rich.cells import cell_len
+
+    cjk = "日本語のユーザー名前テスト@example.com"
+    entries = [e.model_copy(update={"user_email": cjk, "user_id": "U-cjk"})
+               for e in sample_audit_entries]
+    mock_app_state.client.get_logs_sample.return_value = (entries, len(entries))
+    app = _make_app(mock_app_state)
+    async with app.run_test(size=size) as pilot:
+        view = await _show_and_load(app, pilot, key)
+        widget = view.query_one(widget_id, Static)
+        await pilot.pause()
+        width = widget.content_region.width
+        lines = [line for line in _plain(widget).splitlines() if line.strip()]
+        assert lines
+        for line in lines:
+            assert cell_len(line.rstrip()) <= width - 1, line

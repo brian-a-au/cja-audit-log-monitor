@@ -7,7 +7,7 @@ from textual.containers import Horizontal, Vertical
 from textual.widget import Widget
 from textual.widgets import Button, Input, Label, LoadingIndicator, Static
 
-from ...formatters import TCSS_TOKEN_HEX, literal, render_bar
+from ...formatters import TCSS_TOKEN_HEX, fit_cells, literal, render_bar
 from ...stats import (
     build_date_range_query,
     calculate_stats,
@@ -212,12 +212,11 @@ class StatsScreen(ContentView):
         daily_widget.update("\n".join(daily_lines) or no_activity_message(days))
 
         ranking_widget = self.query_one("#user-ranking", Static)
-        # "NN. " (4) + name + " " + 5-digit count (6).
-        name_width = max(8, min(32, ranking_widget.content_region.width - 10))
+        # "NN. " (4) + name + " " + 5-digit count (6), plus one blank cell at the edge.
+        name_width = max(8, min(32, ranking_widget.content_region.width - 11))
         user_lines = []
         for rank, (user, count) in enumerate(self._users, 1):
-            name = user if len(user) <= name_width else user[: name_width - 1] + "…"
-            user_lines.append(f"{rank:>2}. {literal(f'{name:<{name_width}}')} {count:>5,}")
+            user_lines.append(f"{rank:>2}. {literal(fit_cells(user, name_width))} {count:>5,}")
         ranking_widget.update("\n".join(user_lines) or no_activity_message(days))
 
 
