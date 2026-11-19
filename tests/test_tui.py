@@ -2819,6 +2819,15 @@ class TestHelpScreen:
                 line = next((ln for ln in text.splitlines() if ln.strip().startswith(key)), "")
                 assert words in line, (key, line)
 
+    async def test_dashboard_line_uses_configured_days(self, mock_app_state):
+        mock_app_state.settings.default_days = 3
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(120, 40)) as pilot:
+            help_screen = await self._open(app, pilot)
+            text = "\n".join(str(s.render()) for s in help_screen.query(".help-section-body"))
+            assert "summary of the last 3 days" in text
+            assert "last 7 days" not in text
+
     async def test_title_is_lowercase(self, mock_app_state):
         app = _make_app(mock_app_state)
         async with app.run_test(size=(120, 40)) as pilot:

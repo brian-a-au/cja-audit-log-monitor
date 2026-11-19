@@ -87,6 +87,7 @@ class AuditLogMonitor:
         self,
         client: AuditLogsClient,
         console: Console | None = None,
+        err_console: Console | None = None,
         interval: int = 60,
         alert_engine: AlertEngine | None = None,
         notification_manager: NotificationManager | None = None,
@@ -96,7 +97,8 @@ class AuditLogMonitor:
 
         Args:
             client: Audit logs API client.
-            console: Rich console for output.
+            console: Rich console for entries and the status line.
+            err_console: Rich console for warnings; defaults to one writing to stderr.
             interval: Polling interval in seconds.
             alert_engine: Optional alert engine for suspicious activity detection.
             notification_manager: Optional notification manager for external delivery.
@@ -104,6 +106,7 @@ class AuditLogMonitor:
         """
         self.client = client
         self.console = console or Console()
+        self.err_console = err_console or Console(stderr=True)
         self.interval = interval
         self.alert_engine = alert_engine
         self.notification_manager = notification_manager
@@ -187,7 +190,7 @@ class AuditLogMonitor:
             if self.notification_manager:
                 warning = self.notification_manager.pop_first_failure()
                 if warning:
-                    self.console.print(f"[yellow]{escape(str(warning))}[/yellow]")
+                    self.err_console.print(f"[yellow]{escape(str(warning))}[/yellow]")
 
         self._display_entry(entry)
 
@@ -236,6 +239,10 @@ class AuditLogMonitor:
             status.update(
                 f"Last poll {clock} failed: {escape(self._poll_error)}. "
                 f"Retrying in {self.interval}s"
+            )
+        elif is_baseline:
+            status.update(
+                f"Baseline {clock}: {len(entries)} existing entries. Next in {self.interval}s"
             )
         else:
             status.update(f"Last poll {clock}: {len(entries)} new. Next in {self.interval}s")

@@ -19,11 +19,12 @@ from .state import AppState
 ConnectionStatus = Literal["connecting", "connected", "disconnected"]
 
 
+# The dashboard line holds a {days} placeholder, filled from the configured default_days.
 HELP_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
     (
         "views",
         [
-            ("d", "dashboard · summary of the last 7 days"),
+            ("d", "dashboard · summary of the last {days} days"),
             ("l", "logs · browse and filter entries"),
             ("m", "monitor · watch for new entries"),
             ("s", "stats · charts for any number of days"),
@@ -71,6 +72,7 @@ class HelpScreen(ModalScreen):
 
     def compose(self) -> ComposeResult:
         """Compose help screen content."""
+        days = self.app.state.settings.default_days
         key_width = max(len(key) for _, rows in HELP_SECTIONS for key, _ in rows) + 2
         with VerticalScroll(id="help-overlay"):
             yield Static("keyboard shortcuts", id="help-title", classes="modal-title")
@@ -78,7 +80,7 @@ class HelpScreen(ModalScreen):
                 yield Static(title.upper(), classes="section-label help-section")
                 body = "\n".join(
                     resolve_tcss_markup(f"[$primary]{literal(key):<{key_width}}[/$primary]")
-                    + literal(description)
+                    + literal(description.replace("{days}", str(days)))
                     for key, description in rows
                 )
                 yield Static(body, classes="help-section-body")

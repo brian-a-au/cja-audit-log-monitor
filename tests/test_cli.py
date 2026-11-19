@@ -1353,6 +1353,8 @@ class TestAnomaliesCommand:
         result = runner.invoke(main, ["cli", "anomalies"])
         assert result.exit_code == 0
         assert "Notification delivery failed (slack)" in result.output
+        assert "Notification delivery failed (slack)" in result.stderr
+        assert "Notification delivery failed (slack)" not in result.stdout
 
     @pytest.mark.parametrize("status_code", [None, 408, 425, 429, 500, 502, 503, 504])
     @patch("cja_audit_log_monitor.cli.NotificationManager")

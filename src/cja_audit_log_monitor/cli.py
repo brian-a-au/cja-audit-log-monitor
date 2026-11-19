@@ -964,9 +964,7 @@ def _run_anomalies_cycle(
         warning = nm.pop_first_failure()
         if warning is None:
             break
-        (err_console if as_json else console).print(
-            f"[yellow]⚠ {escape(str(warning))}[/yellow]"
-        )
+        err_console.print(f"[yellow]⚠ {escape(str(warning))}[/yellow]")
 
 
 @cli.command()
