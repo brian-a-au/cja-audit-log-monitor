@@ -126,8 +126,10 @@ class TestFormatLogsTable:
         """Test formatting with details enabled."""
         table = format_logs_table([sample_audit_entry], show_details=True)
         assert isinstance(table, Table)
-        # Should have more columns with details
-        assert len(table.columns) > 5
+        # Details replaces Name; its first line is the component name
+        headers = [c.header for c in table.columns]
+        assert "Details" in headers
+        assert "Name" not in headers
 
 
 class TestFormatSingleEntry:

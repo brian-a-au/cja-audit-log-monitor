@@ -60,6 +60,24 @@ def days_option(what: str) -> Callable[[Callable[P, R]], Callable[P, R]]:
     )
 
 
+def output_format_option(func: Callable[P, R]) -> Callable[P, R]:
+    """The -F/--output-format option (table or json) shared by the read commands."""
+    return click.option(
+        "--output-format",
+        "-F",
+        type=click.Choice(["table", "json"], case_sensitive=False),
+        default="table",
+        help="Output format",
+    )(func)
+
+
+def require_text(ctx: click.Context, param: click.Parameter, value: str | None) -> str | None:
+    """Reject an empty or blank ID, which would silently match everything."""
+    if value is not None and not value.strip():
+        raise click.BadParameter("must not be empty")
+    return value
+
+
 def days_or_default(days: int | None, settings: CJASettings) -> int:
     """The --days value, or the configured default_days when the flag was not given."""
     return settings.default_days if days is None else days
@@ -68,9 +86,16 @@ console = Console()
 err_console = Console(stderr=True)
 
 
-def emit_json(data: Any) -> None:
-    """Write machine-readable JSON to stdout, bypassing Rich markup and wrapping."""
-    click.echo(json.dumps(data, indent=2, default=str))
+def emit_json(data: Any, compact: bool = False) -> None:
+    """Write machine-readable JSON to stdout, bypassing Rich markup and wrapping.
+
+    ``compact`` writes one object on a single line (for streams of documents).
+    """
+    if compact:
+        click.echo(json.dumps(data, separators=(",", ":"), default=str))
+        sys.stdout.flush()
+    else:
+        click.echo(json.dumps(data, indent=2, default=str))
 
 
 def handle_cli_errors(func: Callable[P, R]) -> Callable[P, R]:
@@ -233,7 +258,7 @@ def parse_components(components: tuple[str, ...] | None) -> list[ComponentType] 
     return result
 
 
-@click.group(invoke_without_command=True)
+@click.group(invoke_without_command=True, context_settings={"show_default": True})
 @click.option("--verbose", "-v", is_flag=True, help="Enable verbose logging")
 @click.option(
     "--config",
@@ -282,13 +307,7 @@ def cli(ctx: click.Context) -> None:
     help="Filter by component type (can specify multiple)",
 )
 @click.option("--details", "-D", is_flag=True, help="Show additional details")
-@click.option(
-    "--output-format",
-    "-F",
-    type=click.Choice(["table", "json"]),
-    default="table",
-    help="Output format",
-)
+@output_format_option
 @click.pass_context
 @handle_cli_errors
 def cli_list(
@@ -348,14 +367,8 @@ def cli_list(
 @click.option("--component-id", help="Filter by specific component ID")
 @click.option("--description", "--desc", help="Search in description")
 @click.option("--limit", "-l", type=POSITIVE_INT, default=100, help="Maximum entries to return")
-@click.option("--details", is_flag=True, help="Show additional details")
-@click.option(
-    "--output-format",
-    "-F",
-    type=click.Choice(["table", "json"]),
-    default="table",
-    help="Output format",
-)
+@click.option("--details", "-D", is_flag=True, help="Show additional details")
+@output_format_option
 @click.pass_context
 @handle_cli_errors
 def search(
@@ -410,11 +423,14 @@ def search(
 
 
 @cli.command()
-@click.option("--dashboard-id", "-i", required=True, help="Dashboard/Project ID")
+@click.option(
+    "--dashboard-id", "-i", required=True, callback=require_text, help="Dashboard/Project ID"
+)
 @click.option("--limit", "-l", type=POSITIVE_INT, default=100, help="Maximum entries to return")
+@output_format_option
 @click.pass_context
 @handle_cli_errors
-def dashboard(ctx: click.Context, dashboard_id: str, limit: int) -> None:
+def dashboard(ctx: click.Context, dashboard_id: str, limit: int, output_format: str) -> None:
     """Show all audit events for a specific dashboard/project."""
     config_path = ctx.obj.get("config_path")
 
@@ -423,6 +439,16 @@ def dashboard(ctx: click.Context, dashboard_id: str, limit: int) -> None:
     with client:
         entries = client.get_component_logs(dashboard_id, "PROJECT")
         entries = entries[:limit]
+
+    if output_format == "json":
+        from .export import entry_to_dict
+
+        emit_json({
+            "dashboard_id": dashboard_id,
+            "entries": [entry_to_dict(e) for e in entries],
+            "count": len(entries),
+        })
+        return
 
     if not entries:
         console.print(f"[dim]No audit logs found for dashboard {escape(dashboard_id)}[/dim]")
@@ -435,16 +461,12 @@ def dashboard(ctx: click.Context, dashboard_id: str, limit: int) -> None:
 
 
 @cli.command()
-@click.option("--user-id", "-u", required=True, help="User ID or email address")
+@click.option(
+    "--user-id", "-u", required=True, callback=require_text, help="User ID or email address"
+)
 @days_option("Number of days to query")
 @click.option("--limit", "-l", type=POSITIVE_INT, default=100, help="Maximum entries to return")
-@click.option(
-    "--output-format",
-    "-F",
-    type=click.Choice(["table", "json"]),
-    default="table",
-    help="Output format",
-)
+@output_format_option
 @click.pass_context
 @handle_cli_errors
 def user(
@@ -486,22 +508,18 @@ def user(
 
 
 @cli.command()
-@click.option("--id", "-i", "component_id", required=True, help="Component ID")
+@click.option(
+    "--id", "-i", "component_id", required=True, callback=require_text, help="Component ID"
+)
 @click.option(
     "--type",
     "-t",
     "component_type",
-    type=click.Choice([c.value for c in ComponentType]),
+    type=click.Choice([c.value for c in ComponentType], case_sensitive=False),
     help="Component type (optional)",
 )
 @click.option("--limit", "-l", type=POSITIVE_INT, default=100, help="Maximum entries to return")
-@click.option(
-    "--output-format",
-    "-F",
-    type=click.Choice(["table", "json"]),
-    default="table",
-    help="Output format",
-)
+@output_format_option
 @click.pass_context
 @handle_cli_errors
 def component(
@@ -554,8 +572,8 @@ def component(
 @cli.command()
 @click.option(
     "--format",
-    "-f",
-    type=click.Choice(["json", "csv", "tsv"]),
+    "-F",
+    type=click.Choice(["json", "csv", "tsv"], case_sensitive=False),
     default="json",
     help="Export format",
 )
@@ -662,14 +680,8 @@ def export(
 
 @cli.command()
 @days_option("Number of days to analyze")
-@click.option("--top", "-t", type=POSITIVE_INT, default=10, help="Number of top users to show")
-@click.option(
-    "--output-format",
-    "-F",
-    type=click.Choice(["table", "json"]),
-    default="table",
-    help="Output format",
-)
+@click.option("--top", "-n", type=POSITIVE_INT, default=10, help="Number of top users to show")
+@output_format_option
 @click.pass_context
 @handle_cli_errors
 def stats(ctx: click.Context, days: int | None, top: int, output_format: str) -> None:
@@ -705,7 +717,11 @@ def stats(ctx: click.Context, days: int | None, top: int, output_format: str) ->
         emit_json(data)
     else:
         # Show summary panel
-        panel = format_stats_panel(stats_data, title=f"Audit Log Statistics (Last {days} Days)")
+        panel = format_stats_panel(
+            stats_data,
+            title=f"Audit Log Statistics (Last {days} Days)",
+            include_top_users=False,  # the Most Active Users table below has them
+        )
         console.print(panel)
         console.print()
 
@@ -736,7 +752,7 @@ def stats(ctx: click.Context, days: int | None, top: int, output_format: str) ->
     help="Polling interval in seconds (minimum 5, default: from config (60))",
 )
 @click.option(
-    "--duration", "-D", type=POSITIVE_INT,
+    "--duration", type=POSITIVE_INT,
     help="Duration in seconds (default: indefinite)",
 )
 @click.option("--alerts/--no-alerts", default=True, help="Enable alert detection")
@@ -797,14 +813,15 @@ def monitor(
     "--interval",
     type=INTERVAL_SECONDS,
     default=300,
-    help="Poll interval in seconds (--watch only, minimum 5, default 300)",
+    help="Poll interval in seconds (--watch only, minimum 5)",
 )
 @click.option(
     "--lookback",
     type=POSITIVE_INT,
     default=24,
-    help="Hours of history to scan per cycle (default 24)",
+    help="Hours of history to scan per cycle",
 )
+@output_format_option
 @click.pass_context
 @handle_cli_errors
 def anomalies(
@@ -812,8 +829,13 @@ def anomalies(
     watch: bool,
     interval: int,
     lookback: int,
+    output_format: str,
 ) -> None:
-    """Detect anomalies and dispatch to configured notification channels."""
+    """Detect anomalies and dispatch to configured notification channels.
+
+    With -F json each scan prints one JSON document on stdout; with --watch, one JSON
+    object per line (one per cycle). Status messages go to stderr.
+    """
     config_path = ctx.obj.get("config_path")
 
     try:
@@ -830,11 +852,11 @@ def anomalies(
                 enabled_webhooks = settings.notifications.enabled_webhook_count
                 if enabled_webhooks:
                     channel_summary.append(f"{enabled_webhooks} webhook(s)")
-                console.print(
+                err_console.print(
                     f"[dim]Anomaly delivery enabled: {', '.join(channel_summary)}[/dim]"
                 )
             elif nm.is_configured():
-                console.print(
+                err_console.print(
                     "[dim]Notifications configured but notify_on_anomalies is false.[/dim]"
                 )
 
@@ -845,7 +867,7 @@ def anomalies(
             while True:
                 cycle_delay = interval
                 try:
-                    _run_anomalies_cycle(client, nm, dedup, lookback)
+                    _run_anomalies_cycle(client, nm, dedup, lookback, output_format, watch)
                 except APIError as e:
                     if not watch or not _is_retryable_anomalies_error(e):
                         raise
@@ -899,6 +921,8 @@ def _run_anomalies_cycle(
     nm: NotificationManager,
     dedup: AnomalyDedupFilter,
     lookback: int,
+    output_format: str = "table",
+    watch: bool = False,
 ) -> None:
     """One scan cycle: fetch → detect → dedup → print + dispatch → drain warnings."""
     end = datetime.now(UTC)
@@ -911,12 +935,21 @@ def _run_anomalies_cycle(
     raw_anomalies = analyze_for_anomalies(entries)
     new_anomalies = dedup.suppress_seen(raw_anomalies)
 
+    as_json = output_format == "json"
+    if as_json:
+        emit_json({"anomalies": new_anomalies, "count": len(new_anomalies)}, compact=watch)
+
+    if not raw_anomalies and not as_json:
+        unit = "hour" if lookback == 1 else "hours"
+        console.print(f"[dim]No anomalies found in the last {lookback} {unit}.[/dim]")
+
     for anomaly in new_anomalies:
         # Escape the description: it's user-derived (component names, user
         # identifiers) and may contain `[` characters that would otherwise
         # be parsed as Rich markup.
         description = anomaly.get("description", anomaly.get("type", "anomaly"))
-        console.print(f"[yellow]•[/yellow] {escape(description)}")
+        if not as_json:
+            console.print(f"[yellow]•[/yellow] {escape(description)}")
         try:
             nm.notify_anomaly(anomaly)
         except Exception as e:
@@ -931,7 +964,9 @@ def _run_anomalies_cycle(
         warning = nm.pop_first_failure()
         if warning is None:
             break
-        console.print(f"[yellow]⚠ {escape(str(warning))}[/yellow]")
+        (err_console if as_json else console).print(
+            f"[yellow]⚠ {escape(str(warning))}[/yellow]"
+        )
 
 
 @cli.command()
@@ -999,13 +1034,7 @@ def components(ctx: click.Context) -> None:
 
 
 @cli.command()
-@click.option(
-    "--output-format",
-    "-F",
-    type=click.Choice(["table", "json"]),
-    default="table",
-    help="Output format",
-)
+@output_format_option
 @click.pass_context
 @handle_cli_errors
 def verify(ctx: click.Context, output_format: str) -> None:
@@ -1131,7 +1160,7 @@ def report(
     help="Polling interval in seconds (minimum 5)",
 )
 @click.option("--user", "-u", help="Filter by user ID or email")
-@click.option("--component-id", "-c", help="Filter by component ID")
+@click.option("--component-id", help="Filter by component ID")
 @click.option(
     "--action",
     "-a",
@@ -1217,13 +1246,7 @@ def alerts(ctx: click.Context) -> None:
 
 
 @alerts.command("list")
-@click.option(
-    "--output-format",
-    "-F",
-    type=click.Choice(["table", "json"]),
-    default="table",
-    help="Output format",
-)
+@output_format_option
 @click.pass_context
 @handle_cli_errors
 def alerts_list(ctx: click.Context, output_format: str) -> None:
@@ -1239,14 +1262,17 @@ def alerts_list(ctx: click.Context, output_format: str) -> None:
     else:
         from rich.table import Table
 
-        table = Table(title="Alert Rules")
-        table.add_column("Name", style="cyan")
-        table.add_column("Description")
-        table.add_column("Enabled", justify="center")
-        table.add_column("Threshold", justify="right")
-        table.add_column("Window", justify="right")
-        table.add_column("Actions")
-        table.add_column("Components")
+        # Narrow headers and tight padding keep the table inside 80 columns; the key
+        # columns never wrap, and only the free-text columns give way.
+        name_width = max((len(str(rule["name"])) for rule in rules_status), default=4)
+        table = Table(title="Alert Rules", padding=(0, 1, 0, 0), pad_edge=False)
+        table.add_column("Name", style="cyan", no_wrap=True, min_width=name_width)
+        table.add_column("Description", min_width=11, overflow="fold")
+        table.add_column("On", justify="center", no_wrap=True)
+        table.add_column("Count", justify="right", no_wrap=True)
+        table.add_column("Win", justify="right", no_wrap=True)
+        table.add_column("Actions", no_wrap=True)
+        table.add_column("Components", min_width=10, overflow="fold")
 
         for rule in rules_status:
             enabled = "[green]✓[/green]" if rule["enabled"] else "[red]✗[/red]"
@@ -1309,10 +1335,10 @@ def alerts_test(ctx: click.Context, days: int) -> None:
 
 
 @cli.command()
-@click.option("--yesterday", "date_preset", flag_value="yesterday", help="Query yesterday's logs")
-@click.option("--last-week", "date_preset", flag_value="last_week", help="Query last 7 days")
-@click.option("--last-month", "date_preset", flag_value="last_month", help="Query last 30 days")
-@click.option("--today", "date_preset", flag_value="today", help="Query today's logs")
+@click.option("--yesterday", is_flag=True, help="Query yesterday's logs")
+@click.option("--last-week", is_flag=True, help="Query last 7 days")
+@click.option("--last-month", is_flag=True, help="Query last 30 days")
+@click.option("--today", is_flag=True, help="Query today's logs")
 @click.option("--user", "-u", help="Filter by user ID or email")
 @click.option(
     "--action",
@@ -1327,19 +1353,16 @@ def alerts_test(ctx: click.Context, days: int) -> None:
     help="Filter by component type",
 )
 @click.option("--limit", "-l", type=POSITIVE_INT, default=100, help="Maximum entries to return")
-@click.option(
-    "--output-format",
-    "-F",
-    type=click.Choice(["table", "json"]),
-    default="table",
-    help="Output format",
-)
+@output_format_option
 @click.option("--quiet", "-q", is_flag=True, help="Minimal output (for scripting)")
 @click.pass_context
 @handle_cli_errors
 def query(
     ctx: click.Context,
-    date_preset: str | None,
+    yesterday: bool,
+    last_week: bool,
+    last_month: bool,
+    today: bool,
     user: str | None,
     action: tuple[str, ...],
     component: tuple[str, ...],
@@ -1347,7 +1370,18 @@ def query(
     output_format: str,
     quiet: bool,
 ) -> None:
-    """Query audit logs with date presets."""
+    """Query audit logs with date presets (--today, --yesterday, --last-week, --last-month)."""
+    presets = {
+        "yesterday": yesterday,
+        "last_week": last_week,
+        "last_month": last_month,
+        "today": today,
+    }
+    chosen = [name for name, on in presets.items() if on]
+    if len(chosen) > 1:
+        names = ", ".join("--" + name.replace("_", "-") for name in chosen)
+        raise click.UsageError(f"{names} are mutually exclusive; pick one.")
+    date_preset = chosen[0] if chosen else None
     config_path = ctx.obj.get("config_path")
 
     client, settings = get_client(config_path)
@@ -1359,9 +1393,9 @@ def query(
         end = now
         label = "today"
     elif date_preset == "yesterday":
-        yesterday = now - timedelta(days=1)
-        start = yesterday.replace(hour=0, minute=0, second=0, microsecond=0)
-        end = yesterday.replace(hour=23, minute=59, second=59, microsecond=999999)
+        day_before = now - timedelta(days=1)
+        start = day_before.replace(hour=0, minute=0, second=0, microsecond=0)
+        end = day_before.replace(hour=23, minute=59, second=59, microsecond=999999)
         label = "yesterday"
     elif date_preset == "last_week":
         start = now - timedelta(days=7)
@@ -1425,6 +1459,7 @@ def query(
     help="Filter by component type",
 )
 @click.option("--user", "-u", help="Filter by user")
+@output_format_option
 @click.pass_context
 @handle_cli_errors
 def timeline(
@@ -1433,6 +1468,7 @@ def timeline(
     action: tuple[str, ...],
     component: tuple[str, ...],
     user: str | None,
+    output_format: str,
 ) -> None:
     """Show activity timeline visualization."""
     config_path = ctx.obj.get("config_path")
@@ -1450,14 +1486,25 @@ def timeline(
     with client:
         entries = client.get_all_logs(query)
 
-    if not entries:
-        console.print("[dim]No audit logs found.[/dim]")
-        return
-
     from .stats import get_daily_distribution, get_hourly_distribution
+
+    if not entries:
+        if output_format == "json":
+            emit_json({"days": days, "daily": {}, "hourly": {f"{h:02d}": 0 for h in range(24)}})
+        else:
+            console.print("[dim]No audit logs found.[/dim]")
+        return
 
     daily = get_daily_distribution(entries)
     hourly = get_hourly_distribution(entries)
+
+    if output_format == "json":
+        emit_json({
+            "days": days,
+            "daily": dict(sorted(daily.items())),
+            "hourly": {f"{hour:02d}": hourly.get(hour, 0) for hour in range(24)},
+        })
+        return
 
     # Display daily activity
     console.print("[bold]Daily Activity[/bold]")
@@ -1484,14 +1531,17 @@ def timeline(
     "--action",
     "-a",
     required=True,
-    type=click.Choice([a.value for a in ActionType]),
+    type=click.Choice([a.value for a in ActionType], case_sensitive=False),
     help="Action type to find",
 )
 @days_option("Number of days to search")
 @click.option("--limit", "-l", type=POSITIVE_INT, default=50, help="Maximum entries to show")
+@output_format_option
 @click.pass_context
 @handle_cli_errors
-def find_action(ctx: click.Context, action: str, days: int | None, limit: int) -> None:
+def find_action(
+    ctx: click.Context, action: str, days: int | None, limit: int, output_format: str
+) -> None:
     """Find all occurrences of a specific action type."""
     config_path = ctx.obj.get("config_path")
 
@@ -1506,6 +1556,17 @@ def find_action(ctx: click.Context, action: str, days: int | None, limit: int) -
     with client:
         entries = client.get_all_logs(query, max_entries=limit)
 
+    if output_format == "json":
+        from .export import entry_to_dict
+
+        emit_json({
+            "action": action,
+            "days": days,
+            "entries": [entry_to_dict(e) for e in entries],
+            "count": len(entries),
+        })
+        return
+
     if not entries:
         console.print(f"[dim]No {action} actions found.[/dim]")
         return
@@ -1517,10 +1578,11 @@ def find_action(ctx: click.Context, action: str, days: int | None, limit: int) -
 
 @cli.command()
 @days_option("Number of days to analyze")
-@click.option("--top", "-t", type=POSITIVE_INT, default=10, help="Number of top items to show")
+@click.option("--top", "-n", type=POSITIVE_INT, default=10, help="Number of top users to show")
+@output_format_option
 @click.pass_context
 @handle_cli_errors
-def top_users(ctx: click.Context, days: int | None, top: int) -> None:
+def top_users(ctx: click.Context, days: int | None, top: int, output_format: str) -> None:
     """Show most active users."""
     config_path = ctx.obj.get("config_path")
 
@@ -1534,13 +1596,20 @@ def top_users(ctx: click.Context, days: int | None, top: int) -> None:
     with client:
         entries = client.get_all_logs(query)
 
+    from .stats import get_user_activity
+
+    users = get_user_activity(entries)[:top] if entries else []
+
+    if output_format == "json":
+        emit_json({
+            "days": days,
+            "users": [{"user": name, "count": count} for name, count in users],
+        })
+        return
+
     if not entries:
         console.print("[dim]No audit logs found.[/dim]")
         return
-
-    from .stats import get_user_activity
-
-    users = get_user_activity(entries)[:top]
 
     user_table = format_user_stats_table(users)
     console.print(user_table)
@@ -1548,28 +1617,39 @@ def top_users(ctx: click.Context, days: int | None, top: int) -> None:
 
 @cli.command()
 @click.argument("entry_id")
+@click.option(
+    "--max-entries",
+    type=POSITIVE_INT,
+    default=10_000,
+    show_default=True,
+    help="Newest entries to search before giving up",
+)
 @click.pass_context
 @handle_cli_errors
-def show(ctx: click.Context, entry_id: str) -> None:
+def show(ctx: click.Context, entry_id: str, max_entries: int) -> None:
     """Show detailed information for a specific audit log entry."""
     config_path = ctx.obj.get("config_path")
 
     client, settings = get_client(config_path)
 
-    # Search for the entry by ID
-    query = AuditLogQuery(page_size=100)
+    # The API has no lookup by id, so page through the newest entries until it turns up.
+    query = AuditLogQuery(page_size=MAX_PAGE_SIZE)
 
     with client:
-        # We need to search through logs to find the entry
         found_entry = None
-        for entry in client.get_logs_paginated(query, max_pages=10):
+        searched = 0
+        for entry in islice(client.get_logs_paginated(query), max_entries):
+            searched += 1
             if entry.id == entry_id:
                 found_entry = entry
                 break
 
     if not found_entry:
         err_console.print(f"[yellow]Entry not found: {escape(entry_id)}[/yellow]")
-        err_console.print("[dim]Note: Only recent entries can be found this way.[/dim]")
+        err_console.print(
+            f"[dim]Searched {searched:,} entries; "
+            "raise --max-entries to look further back.[/dim]"
+        )
         sys.exit(1)
 
     panel = format_single_entry(found_entry)

@@ -154,25 +154,41 @@ def format_logs_table(
     Returns:
         Rich Table object.
     """
+    # Details add a text column, so padding is trimmed and the text columns get smaller
+    # minimums to keep the whole table inside 80 columns.
     table = Table(
         title="Audit Logs",
         show_header=True,
         header_style="bold",
         show_lines=False,
         expand=True,
+        padding=(0, 1, 0, 0) if show_details else (0, 1),
+        pad_edge=not show_details,
     )
 
     # Core columns. Time and action never shrink or wrap; the text columns
     # give way (with an ellipsis) on narrow terminals.
     table.add_column("Time (UTC)", style="dim", no_wrap=True, min_width=19)
-    table.add_column("User", ratio=2, min_width=10, no_wrap=True, overflow="ellipsis")
+    table.add_column(
+        "User", ratio=2, min_width=10, no_wrap=True, overflow="ellipsis"
+    )
     table.add_column("Action", no_wrap=True, min_width=13)
-    table.add_column("Component", min_width=12, max_width=17, no_wrap=True, overflow="ellipsis")
-    table.add_column("Name", ratio=3, min_width=8, no_wrap=True, overflow="ellipsis")
-
+    table.add_column(
+        "Component",
+        min_width=9 if show_details else 12,
+        max_width=11 if show_details else 17,
+        no_wrap=True,
+        overflow="ellipsis",
+    )
     if show_details:
-        table.add_column("Description", width=40)
-        table.add_column("IP", width=15)
+        # Details replaces the Name column: its first line is the component name, then the
+        # free text (folds onto more lines), then the IP on its own unbroken line. This
+        # leaves the user column room at 80 columns.
+        table.add_column("Details", ratio=3, min_width=17, overflow="fold")
+    else:
+        table.add_column(
+            "Name", ratio=3, min_width=8, no_wrap=True, overflow="ellipsis"
+        )
 
     for entry in entries:
         action_str = entry.action or "-"
@@ -180,19 +196,23 @@ def format_logs_table(
         action_text = Text(f"{icon} {action_str}")
         action_text.stylize(get_action_color(action_str))
 
+        component_name = entry.component_name or entry.component_id or "-"
         row = [
             Text(format_timestamp(entry.timestamp)),
             Text(get_user_identifier(entry, default="-")),
             action_text,
             Text(entry.component_type or "-"),
-            Text(entry.component_name or entry.component_id or "-"),
         ]
 
         if show_details:
-            row.extend([
-                Text(entry.description or "-"),
-                Text(entry.ip_address or "-"),
-            ])
+            details = Text(component_name, style="bold")
+            if entry.description:
+                details.append(f"\n{entry.description}")
+            if entry.ip_address:
+                details.append(f"\nIP {entry.ip_address}", style="dim")
+            row.append(details)
+        else:
+            row.append(Text(component_name))
 
         table.add_row(*row)
 
@@ -245,8 +265,12 @@ def format_single_entry(entry: AuditLogEntry) -> Panel:
 def format_stats_panel(
     stats: dict[str, Any],
     title: str = "Audit Log Statistics",
+    include_top_users: bool = True,
 ) -> Panel:
-    """Format statistics as a Rich panel."""
+    """Format statistics as a Rich panel.
+
+    Set ``include_top_users`` to False when a user table is printed next to the panel.
+    """
     content = Text()
 
     if "total_entries" in stats:
@@ -258,7 +282,7 @@ def format_stats_panel(
         content.append("Date Range: ", style="bold")
         content.append(f"{date_range['start']} to {date_range['end']}\n\n")
 
-    if "top_users" in stats:
+    if include_top_users and "top_users" in stats:
         content.append("Top Users:\n", style="bold")
         for user, count in stats["top_users"][:5]:
             content.append(f"  {user}: {count:,}\n")
@@ -356,30 +380,3 @@ def format_alert(
         title=Text(f"⚠️  ALERT: {alert_name}"),
         border_style="red",
     )
-
-
-def print_logs(
-    entries: list[AuditLogEntry],
-    console: Console | None = None,
-    show_details: bool = False,
-) -> None:
-    """Print audit logs to console."""
-    if console is None:
-        console = Console()
-
-    if not entries:
-        console.print("[dim]No audit logs found.[/dim]")
-        return
-
-    table = format_logs_table(entries, console, show_details)
-    console.print(table)
-    console.print(f"\n[dim]Showing {len(entries)} entries[/dim]")
-
-
-def print_stats(stats: dict[str, Any], console: Console | None = None) -> None:
-    """Print statistics to console."""
-    if console is None:
-        console = Console()
-
-    panel = format_stats_panel(stats)
-    console.print(panel)
