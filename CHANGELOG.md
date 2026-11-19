@@ -22,16 +22,20 @@ Terminal app
 - The header shows the connection state. Each view names the kind of failure when something goes wrong: not connected, access denied, request rejected, or could not load data.
 - Times in the terminal app use your local time zone, and the zone is named in the column heading.
 - The layout fits terminals from 80x24 up to wide screens.
+- Warnings, e.g. about the config file or a failed delivery, show as toasts. The terminal app has no log file.
+- `q` quits at once, even while a request is in progress.
 
 Command line
 
 - A command line under `cja-audit-log-monitor cli` with commands to list, search, and query logs, and to look up a user, a component, an action, or a dashboard. The `show` command looks up one entry by its id.
 - Commands for statistics, a timeline, top users, and a report that you can write to a file.
 - Commands to watch for new events (`monitor` and `tail`) and to scan for anomalies (`anomalies`), once or on repeat.
+- After a gap, e.g. a laptop asleep, the monitor reads the events it missed, up to 50,000 in one poll, and says how many it skipped past that. A short sign-in failure does not stop it, and Ctrl+C stops it at once.
 - Commands to list the alert rules and test them against recent logs.
 - Setup commands: `verify` checks the connection, `init` creates the config file, `config` shows the settings in use, and `actions` and `components` list the valid names.
 - Most commands accept `-F json`. Data goes to stdout and messages go to stderr, so you can use the output in scripts. Exit codes tell you whether a command succeeded, failed, or was used incorrectly.
-- Dates can be given as a day or as a day and time. A value with no time zone is read as UTC, and times in CLI tables are in UTC.
+- Dates can be given as `YYYY-MM-DD`, `YYYYMMDD`, or a day and time. A value with no time zone is read as UTC, and times in CLI tables are in UTC.
+- Each error prints one line that starts with its kind, e.g. `Configuration error:` or `Network error:`.
 - `--version`, `-v` for debug logging, and `-c` to read a config file from another path.
 
 Alerts and anomalies
@@ -43,12 +47,14 @@ Alerts and anomalies
 Notifications
 
 - Optional delivery of alerts and anomalies to Slack and to webhooks. Delivery is off by default.
-- While `anomalies --watch` runs, it does not send the same anomaly twice in one day. A failed delivery is reported.
+- While `anomalies --watch` runs, each anomaly reaches each channel once. A channel that failed gets it again on the next scan, and each failing channel gives its own warning.
 - Messages and logs show only `https://` and the host name of a Slack or webhook URL, because the rest of the URL can hold a secret.
 
 Export
 
-- Export to JSON, CSV, or TSV from the terminal app and from the CLI.
+- Export to JSON, CSV, or TSV from the terminal app and from the CLI. The CLI takes the format from the file name when `-F` is not given, writes to stdout with `-o -`, and replaces a file only with `--force`.
+- Exports include the change details of each entry. When nothing matches, the file is still written, with no entries.
+- In CSV and TSV, a cell that a spreadsheet could read as a formula starts with `'`. TSV uses no quotes.
 - The terminal app can save every entry that matches the filters, up to 10,000, or only the page you see.
 
 Configuration and security
@@ -58,6 +64,7 @@ Configuration and security
 - Export files are created with mode 0600, because they can hold user emails and IP addresses.
 - The API and sign-in addresses must use https. Plain http is allowed only for `localhost` and `127.0.0.1`.
 - Error messages and debug logs never show the secret.
+- Control characters in audit data, e.g. terminal escape sequences in a component name, are replaced before any output, so they never reach your terminal.
 - The tool refreshes its access token before it expires and retries when the API limits the request rate.
 
 [Unreleased]: https://github.com/brian-a-au/cja-audit-log-monitor/compare/v0.1.0...HEAD
