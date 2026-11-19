@@ -70,6 +70,7 @@ class HelpScreen(ModalScreen):
     AUTO_FOCUS = "*"
 
     BINDINGS = [
+        Binding("q", "app.quit", "quit", show=False),
         Binding("escape", "dismiss", "close"),
         Binding("question_mark", "dismiss", "close"),
     ]

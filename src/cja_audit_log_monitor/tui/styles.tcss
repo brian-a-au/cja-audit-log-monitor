@@ -335,6 +335,11 @@ AlertSummary {
     display: none;
 }
 
+/* At 160 columns and more the panel sits beside the table, with room for an email. */
+Screen.-wide #entry-detail-panel {
+    width: 60;
+}
+
 /* Below 160 columns the panel covers the table: beside a 40-wide panel the table would be
  * too narrow for time, user and action. */
 Screen.-narrow #entry-detail-panel,

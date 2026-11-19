@@ -182,20 +182,27 @@ class LogTable(DataTable):
         return super().clear(columns)
 
     def load_entries(self, entries: list[AuditLogEntry]) -> None:
-        """Load audit log entries into the table.
+        """Load audit log entries into the table; the cursor stays on the same entry.
 
         Args:
             entries: List of audit log entries to display.
         """
+        selected = self.get_selected_entry() if self.row_count else None
+        keep = entry_key(selected) if selected is not None else None
         self.clear()
         # Refresh the zone name, which can change (daylight saving) in a long session.
         if "timestamp" in self.columns:
             self.columns["timestamp"].label = Text(f"time ({local_tz_name()})")
 
         used: dict[str, int] = {}
-        for entry in entries:
+        cursor_row = 0
+        for index, entry in enumerate(entries):
             row_key = self.add_row(*self._build_row(entry), key=_unique_key(entry.id, used))
             self._entries[row_key] = entry
+            if keep is not None and entry_key(entry) == keep:
+                cursor_row = index
+        if cursor_row:
+            self.move_cursor(row=cursor_row)
         # Rows may have brought in the vertical scrollbar, narrowing the table.
         self.call_after_refresh(self._fit_columns)
 

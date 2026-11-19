@@ -3,10 +3,12 @@
 from collections.abc import Iterator
 from datetime import datetime, timedelta
 
+from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.widget import Widget
 from textual.widgets import Button, Input, Label, LoadingIndicator, Static
 
+from ...config import MAX_DAYS
 from ...formatters import TCSS_TOKEN_HEX, fit_cells, literal, render_bar
 from ...stats import (
     build_date_range_query,
@@ -29,6 +31,15 @@ from .base import (
 STATS_SAMPLE = 5000
 
 
+
+
+class _DaysInput(Input):
+    """The days box. Esc leaves it, so the view's keys (d, l, ?, q) work again."""
+
+    BINDINGS = [Binding("escape", "leave", "leave the box", show=False)]
+
+    def action_leave(self) -> None:
+        self.screen.set_focus(None)
 class StatsScreen(ContentView):
     """Screen for viewing statistics and analytics."""
 
@@ -49,7 +60,7 @@ class StatsScreen(ContentView):
         yield Static("statistics", id="stats-title", classes="section-label view-title")
         yield Horizontal(
             Label("days"),
-            Input(
+            _DaysInput(
                 value=str(self._state.stats_days), id="days-input", type="integer", compact=True
             ),
             Button("update", id="update-button", variant="primary", compact=True),
@@ -131,7 +142,12 @@ class StatsScreen(ContentView):
         """Read the days box, show the value actually used, and reload."""
         box = self.query_one("#days-input", Input)
         try:
-            self._state.stats_days = max(1, int(box.value))
+            days = max(1, int(box.value))
+            if days > MAX_DAYS:
+                self.app.notify(
+                    f"days must be at most {MAX_DAYS:,}; using {MAX_DAYS:,}", severity="warning"
+                )
+            self._state.stats_days = min(days, MAX_DAYS)
         except ValueError:
             self._state.stats_days = self._state.settings.default_days
         box.value = str(self._state.stats_days)
@@ -177,7 +193,7 @@ class StatsScreen(ContentView):
         self.query_one("#stats-users", Static).update(f"{len(users):,}")
         now = datetime.now().astimezone()
         start = now - timedelta(days=self._state.stats_days)
-        self.query_one("#stats-period", Static).update(f"{start:%Y-%m-%d} → {now:%Y-%m-%d}")
+        self.query_one("#stats-period", Static).update(f"{start:%m-%d} → {now:%m-%d}")
 
         self.query_one("#stats-action-chart", ActionBarChart).update_data(
             stats.get("action_counts", {}), width=20

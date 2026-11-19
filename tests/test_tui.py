@@ -3091,7 +3091,7 @@ class TestLocalWindows:
         async with app.run_test(size=(140, 40)) as pilot:
             view = await _show_and_load(app, pilot, "s")
             now = datetime.now().astimezone()
-            expected = f"{(now - timedelta(days=7)):%Y-%m-%d} → {now:%Y-%m-%d}"
+            expected = f"{(now - timedelta(days=7)):%m-%d} → {now:%m-%d}"
             assert str(view.query_one("#stats-period", Static).render()) == expected
 
     @pytest.mark.parametrize("key", ["d", "s"])
@@ -4871,3 +4871,146 @@ async def test_focus_and_scroll_survive_modal(mock_app_state, sample_audit_entri
         await pilot.pause()
         after = (app.focused, [w.scroll_y for w in view.query("VerticalScroll")])
         assert after == before
+
+
+class TestLayoutAndKeys:
+    """Keys and small view fixes (G40)."""
+
+    async def test_escape_leaves_stats_days_box(self, mock_app_state):
+        from textual.widgets import Input
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.press("s")
+            await pilot.pause()
+            box = app._screens["stats"].query_one("#days-input", Input)
+            box.focus()
+            await pilot.pause()
+            await pilot.press("escape")
+            await pilot.pause()
+            assert app.focused is not box
+            await pilot.press("d")
+            await pilot.pause()
+            assert app._current_screen == "dashboard"
+
+    @pytest.mark.parametrize("modal_key", ["question_mark"])
+    async def test_q_quits_from_help_and_export_dialog(self, mock_app_state, modal_key):
+        """q quits from the help overlay. In the export dialog q is a letter in the path box."""
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.press(modal_key)
+            await pilot.pause()
+            quits: list[bool] = []
+            app.action_quit = lambda: quits.append(True)
+            await pilot.press("q")
+            await pilot.pause()
+            assert quits == [True]
+
+    async def test_page_past_the_end_moves_to_the_last_page(self, mock_app_state):
+        """After the total shrinks, an empty page past the end loads the last page."""
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, "l")
+            mock_app_state.filters.page = 3
+            mock_app_state.filters.page_size = 50
+            view._update_table([], 60)
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert mock_app_state.filters.page == 1  # the last page of 60 entries at 50
+
+    async def test_refresh_keeps_the_cursor_on_the_same_entry(
+        self, mock_app_state, sample_audit_entries
+    ):
+        from cja_audit_log_monitor.tui.widgets import LogTable
+
+        mock_app_state.client.get_logs.return_value = _logs_response(sample_audit_entries)
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, "l")
+            table = view.query_one("#log-table", LogTable)
+            assert await _wait_for(lambda: table.row_count == len(sample_audit_entries), pilot)
+            table.move_cursor(row=4)
+            chosen = table.get_selected_entry()
+            view.refresh_data()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert table.get_selected_entry() == chosen
+
+    async def test_huge_stats_days_is_refused_in_the_box(self, mock_app_state):
+        from textual.widgets import Input
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40), notifications=True) as pilot:
+            await pilot.press("s")
+            await pilot.pause()
+            view = app._screens["stats"]
+            view.query_one("#days-input", Input).value = "4000000"
+            view._apply_days()
+            await pilot.pause()
+            assert mock_app_state.stats_days <= 3650
+
+    async def test_org_id_shown_in_full_in_the_config_view(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(160, 40)) as pilot:
+            view = await _show_and_load(app, pilot, "c")
+            text = "\n".join(_plain(s) for s in view.query(Static))
+            assert mock_app_state.settings.org_id in text
+
+
+@pytest.mark.parametrize("size", [(80, 24), (100, 30), (140, 42)])
+async def test_config_buttons_visible(mock_app_state, size):
+    from textual.widgets import Button
+
+    app = _make_app(mock_app_state)
+    async with app.run_test(size=size) as pilot:
+        view = await _show_and_load(app, pilot, "c")
+        await pilot.pause()
+        for button_id in ("#verify-button", "#reload-button"):
+            button = view.query_one(button_id, Button)
+            visible = app.screen.find_widget(button).visible_region
+            assert visible.height > 0, f"{button_id} is off screen at {size}"
+
+
+async def test_stats_period_tile_is_one_line_at_100(mock_app_state):
+    app = _make_app(mock_app_state)
+    async with app.run_test(size=(100, 30)) as pilot:
+        view = await _show_and_load(app, pilot, "s")
+        from rich.cells import cell_len
+
+        widget = view.query_one("#stats-period", Static)
+        text = _plain(widget).strip()
+        assert "→" in text
+        assert cell_len(text) <= widget.content_region.width
+
+
+async def test_footer_fits_80_with_detail_focused(mock_app_state):
+    from textual.widgets import Footer
+
+    from cja_audit_log_monitor.tui.modals import EntryDetailPanel
+
+    app = _make_app(mock_app_state)
+    async with app.run_test(size=(80, 24)) as pilot:
+        await _show_and_load(app, pilot, "l")
+        await pilot.press("enter")
+        panel = app.query_one("#entry-detail-panel", EntryDetailPanel)
+        assert await _wait_for(lambda: panel.display and not panel.has_class("hidden"), pilot)
+        await pilot.press("tab")
+        await pilot.pause()
+        footer = app.query_one(Footer)
+        keys = list(footer.query("FooterKey"))
+        last = keys[-1]
+        assert last.region.x + last.region.width <= footer.region.width
+        assert "quit" in [k.description for k in keys]
+
+
+async def test_detail_panel_is_wider_at_200(mock_app_state):
+    from cja_audit_log_monitor.tui.modals import EntryDetailPanel
+
+    app = _make_app(mock_app_state)
+    async with app.run_test(size=(200, 60)) as pilot:
+        await _show_and_load(app, pilot, "l")
+        await pilot.press("enter")
+        panel = app.query_one("#entry-detail-panel", EntryDetailPanel)
+        assert await _wait_for(lambda: panel.display and not panel.has_class("hidden"), pilot)
+        await pilot.pause()
+        assert panel.region.width >= 60

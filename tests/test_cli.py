@@ -2198,7 +2198,7 @@ class TestEmptyResultsAndStreams:
         result = runner.invoke(main, ["cli", "config"])
 
         assert result.exit_code == 0, result.output
-        assert "[/red]bo..." in result.output
+        assert "[/red]boom@AdobeOrg" in result.output
         assert "[bold]ci..." in result.output
 
 
@@ -3555,3 +3555,9 @@ def test_dns_failure_is_a_network_error_naming_the_host(sample_settings, httpx_m
         TokenManager(sample_settings).get_token()
     assert "could not reach ims-na1.adobelogin.com" in str(info.value)
     assert getattr(info.value, "network", False) is True
+
+
+def test_cli_config_shows_the_org_id_in_full(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("ORG_ID", "ABCDEF0123456789@AdobeOrg")
+    result = CliRunner().invoke(main, ["-c", str(tmp_path / "x.yaml"), "cli", "config"])
+    assert "ABCDEF0123456789@AdobeOrg" in result.stdout

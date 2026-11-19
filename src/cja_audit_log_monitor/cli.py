@@ -1148,7 +1148,7 @@ def config(ctx: click.Context) -> None:
     console.print(f"Default days: {settings.default_days}")
     console.print(f"Monitor interval: {settings.monitor_interval}s")
     console.print(f"OAuth configured: {settings.is_oauth_configured()}")
-    org_display = f"{settings.org_id[:8]}..." if settings.org_id else "(not set)"
+    org_display = settings.org_id or "(not set)"
     client_display = f"{settings.client_id[:8]}..." if settings.client_id else "(not set)"
     console.print(f"Org ID: {literal(org_display)}")
     console.print(f"Client ID: {literal(client_display)}")
