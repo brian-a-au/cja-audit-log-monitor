@@ -95,7 +95,9 @@ class TestRedactUrl:
         assert redact_url(url) == "https://hooks.slack.com/\u2026"
 
     def test_drops_userinfo_and_keeps_port(self):
-        assert redact_url("http://user:SECRET@example.com:8080/x") == "http://example.com:8080/\u2026"
+        assert (
+            redact_url("http://user:SECRET@example.com:8080/x") == "http://example.com:8080/\u2026"
+        )
 
     def test_unparseable_value_leaks_nothing(self):
         assert "SECRET" not in redact_url("SECRET")

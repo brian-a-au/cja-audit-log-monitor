@@ -64,8 +64,7 @@ class FilterBar(Static):
             return
         focused = self.screen.focused
         if focused is not None and any(
-            isinstance(widget, Select) and widget.expanded
-            for widget in focused.ancestors_with_self
+            isinstance(widget, Select) and widget.expanded for widget in focused.ancestors_with_self
         ):
             return  # the open dropdown closes itself; the next Escape leaves the bar
         event.stop()  # not also the view's "close details"

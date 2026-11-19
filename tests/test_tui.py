@@ -571,9 +571,7 @@ class TestTableFit:
             assert "150 entries" in _plain(count)
             assert count.region.right <= app.query_one("#pagination").region.right
 
-    async def test_detail_panel_covers_table_at_80_cols(
-        self, mock_app_state, sample_audit_entries
-    ):
+    async def test_detail_panel_covers_table_at_80_cols(self, mock_app_state, sample_audit_entries):
         from cja_audit_log_monitor.tui.modals import EntryDetailPanel
         from cja_audit_log_monitor.tui.widgets import LogTable
 
@@ -1015,7 +1013,7 @@ async def _wait_for(condition, pilot, timeout: float = 3.0) -> bool:
 
 def _reloaded(app, times: int = 1) -> bool:
     """True once the config view's reload handler has run to its end ``times`` times."""
-    return sum("Settings reloaded" in n.message for n in app._notifications) >= times
+    return sum("settings reloaded" in n.message for n in app._notifications) >= times
 
 
 class TestMonitorScreen:
@@ -1163,7 +1161,9 @@ class TestMonitorScreen:
         rule = AlertRule(name="any delete", actions=[ActionType.DELETE])
         mock_app_state._alert_engine = AlertEngine([rule])
         delete = AuditLogEntry(
-            id="d1", action="DELETE", user_email="mallory@example.com",
+            id="d1",
+            action="DELETE",
+            user_email="mallory@example.com",
             timestamp=datetime.now(UTC),
         )
         app = _make_app(mock_app_state)
@@ -1278,9 +1278,7 @@ class TestMonitorStream:
             assert query.start_date == last_good - POLL_OVERLAP
             screen._stop_monitoring()
 
-    async def test_tui_backlog_over_limit_reports_skipped_count(
-        self, mock_app_state, monkeypatch
-    ):
+    async def test_tui_backlog_over_limit_reports_skipped_count(self, mock_app_state, monkeypatch):
         import cja_audit_log_monitor.monitor as monitor_module
 
         monkeypatch.setattr(monitor_module, "MAX_POLL_PAGES", 2)
@@ -1390,9 +1388,7 @@ class TestMonitorStream:
             await pilot.pause()
             release.set()
             # The new session polls once the old poll lets go.
-            assert await _wait_for(
-                lambda: mock_app_state.monitor.last_check is not None, pilot
-            )
+            assert await _wait_for(lambda: mock_app_state.monitor.last_check is not None, pilot)
             await pilot.pause()
             assert screen.query_one("#monitor-log", LogTable).row_count == 0
             assert mock_app_state.monitor.entries_since_start == 0
@@ -1814,7 +1810,7 @@ class TestAlertsViewRealEngine:
             await pilot.pause()
             app.query_one("#reload-button", Button).press()
             assert await _wait_for(
-                lambda: any("Settings reloaded" in n.message for n in app._notifications), pilot
+                lambda: any("settings reloaded" in n.message for n in app._notifications), pilot
             )
             await pilot.press("a")
             assert await _wait_for(lambda: labels() == ["rule_c", "rule_d", "rule_e"], pilot)
@@ -2029,9 +2025,7 @@ class TestSettingsScreen:
 class TestModals:
     """Test modal dialogs."""
 
-    async def test_entry_detail_panel_shows_when_toggled(
-        self, mock_app_state, sample_audit_entry
-    ):
+    async def test_entry_detail_panel_shows_when_toggled(self, mock_app_state, sample_audit_entry):
         from cja_audit_log_monitor.tui.modals import EntryDetailPanel
         from cja_audit_log_monitor.tui.widgets import LogTable
 
@@ -2055,9 +2049,7 @@ class TestModals:
             body_text = _plain(panel.query_one("#detail-body", Static))
             assert sample_audit_entry.id in body_text
 
-    async def test_entry_detail_panel_dismisses_on_escape(
-        self, mock_app_state, sample_audit_entry
-    ):
+    async def test_entry_detail_panel_dismisses_on_escape(self, mock_app_state, sample_audit_entry):
         """Pressing Esc (via `action_dismiss_details`) hides the panel.
 
         Note: We invoke `action_dismiss_details()` directly rather than
@@ -2092,9 +2084,7 @@ class TestModals:
             await pilot.pause()
             assert not panel.is_visible()
 
-    async def test_entry_detail_panel_toggle_semantics(
-        self, mock_app_state, sample_audit_entries
-    ):
+    async def test_entry_detail_panel_toggle_semantics(self, mock_app_state, sample_audit_entries):
         """toggle(): same entry hides; different entry stays visible and re-renders.
 
         Note: toggle() calls show_entry() → _render_entry() → query_one(), so we need
@@ -2754,9 +2744,7 @@ class TestPageLoadedFlag:
             assert view is not None
             assert mock_app_state.page_loaded is True
 
-    async def test_failed_reload_clears_page_and_export_offers_no_page_scope(
-        self, mock_app_state
-    ):
+    async def test_failed_reload_clears_page_and_export_offers_no_page_scope(self, mock_app_state):
         app = _make_app(mock_app_state)
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
@@ -2853,9 +2841,7 @@ class TestStaleLoads:
             await pilot.press("p")
             # Page 0 comes back at once; only then does the slow page 1 fail.
             await app.workers.wait_for_complete()
-            assert await _wait_for(
-                lambda: mock_app_state.client.get_logs.call_count == 3, pilot
-            )
+            assert await _wait_for(lambda: mock_app_state.client.get_logs.call_count == 3, pilot)
             release.set()
             assert await _wait_for(delivered.is_set, pilot)
             await pilot.pause()
@@ -3144,10 +3130,7 @@ class TestSmallCopyFixes:
     async def test_recent_alerts_line_uses_the_available_width(self, mock_app_state):
         from cja_audit_log_monitor.tui.widgets import AlertSummary
 
-        text = (
-            "bulk_delete: 5 events in 60 minutes by "
-            "someone.with.a.long.name@example.com"
-        )
+        text = "bulk_delete: 5 events in 60 minutes by someone.with.a.long.name@example.com"
         app = _make_app(mock_app_state)
         async with app.run_test(size=(140, 40)) as pilot:
             await pilot.press("m")
@@ -3165,8 +3148,9 @@ class TestSmallCopyFixes:
         mock_app_state._alert_engine = AlertEngine([rule])
         now = datetime.now(UTC)
         deletes = [
-            AuditLogEntry(id=str(i), action="DELETE", user_id="u",
-                          timestamp=now - timedelta(seconds=i))
+            AuditLogEntry(
+                id=str(i), action="DELETE", user_id="u", timestamp=now - timedelta(seconds=i)
+            )
             for i in range(1000)
         ]
         mock_app_state.client.get_all_logs.return_value = deletes
@@ -3211,9 +3195,7 @@ class TestSidebarKeys:
         app = _make_app(mock_app_state)
         async with app.run_test(size=(100, 30)) as pilot:
             await pilot.pause()
-            shown = [
-                b.binding.action for b in app.active_bindings.values() if b.binding.show
-            ]
+            shown = [b.binding.action for b in app.active_bindings.values() if b.binding.show]
             assert not any(action.startswith("switch_screen") for action in shown)
             assert "refresh" in shown and "quit" in shown
 
@@ -3466,7 +3448,8 @@ class TestLaterRoundPolish:
             assert labels[0] in ("time (EST)", "time (EDT)")
             dash = await _show_and_load(app, pilot, "d")
             hourly = [
-                str(s.render()) for s in dash.query(".section-label")
+                str(s.render())
+                for s in dash.query(".section-label")
                 if str(s.render()).startswith("HOURLY")
             ]
             assert hourly[0].endswith(("EST", "EDT"))
@@ -4119,9 +4102,7 @@ class TestNarrowLayout:
 
             def quit_visible() -> bool:
                 keys = [
-                    w
-                    for w in app.query_one(Footer).query("FooterKey")
-                    if "quit" in str(w.render())
+                    w for w in app.query_one(Footer).query("FooterKey") if "quit" in str(w.render())
                 ]
                 return bool(keys) and all(k.region.right <= app.size.width for k in keys)
 
@@ -4508,9 +4489,7 @@ class TestReloadKeepsWhatWorks:
             path.write_text("monitor_interval: [unclosed\n")
             await app._screens["settings"]._reload_settings()
             await pilot.pause()
-            assert any(
-                "keeping the current settings" in n.message for n in app._notifications
-            )
+            assert any("keeping the current settings" in n.message for n in app._notifications)
             assert state.settings.client_id == "from-file"
 
 
@@ -4838,8 +4817,9 @@ async def test_top_users_cjk_name_fits_one_line(
     from rich.cells import cell_len
 
     cjk = "日本語のユーザー名前テスト@example.com"
-    entries = [e.model_copy(update={"user_email": cjk, "user_id": "U-cjk"})
-               for e in sample_audit_entries]
+    entries = [
+        e.model_copy(update={"user_email": cjk, "user_id": "U-cjk"}) for e in sample_audit_entries
+    ]
     mock_app_state.client.get_logs_sample.return_value = (entries, len(entries))
     app = _make_app(mock_app_state)
     async with app.run_test(size=size) as pilot:
@@ -4855,8 +4835,9 @@ async def test_top_users_cjk_name_fits_one_line(
 
 @pytest.mark.parametrize("modal_key", ["question_mark", "e"])
 @pytest.mark.parametrize("view_key", ["d", "s", "a", "c"])
-async def test_focus_and_scroll_survive_modal(mock_app_state, sample_audit_entries,
-                                              modal_key, view_key):
+async def test_focus_and_scroll_survive_modal(
+    mock_app_state, sample_audit_entries, modal_key, view_key
+):
     """G37: closing the help overlay or export dialog leaves focus and scroll as they were."""
     mock_app_state.page_loaded = True
     mock_app_state.entries = sample_audit_entries

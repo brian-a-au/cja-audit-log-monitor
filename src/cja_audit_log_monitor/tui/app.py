@@ -194,15 +194,11 @@ class CJAAuditApp(App):
             # Compact sidebar: just the key letter (the marker is the active style).
             return resolve_tcss_markup(f"[$primary]{key}[/$primary]")
         prefix = "▸ " if active else "  "
-        return prefix + resolve_tcss_markup(
-            f"[$primary]{key}[/$primary] {self.NAV_LABELS[nav_id]}"
-        )
+        return prefix + resolve_tcss_markup(f"[$primary]{key}[/$primary] {self.NAV_LABELS[nav_id]}")
 
     _STATUS_DOT = {"connecting": "$warning", "connected": "$success", "disconnected": "$error"}
 
-    def _status_row_text(
-        self, status: ConnectionStatus = "connecting", detail: str = ""
-    ) -> str:
+    def _status_row_text(self, status: ConnectionStatus = "connecting", detail: str = "") -> str:
         """Build the top status row content."""
         org = self.state.settings.org_id  # loads config; may set config_error
         color = self._STATUS_DOT[status]
@@ -364,7 +360,7 @@ class CJAAuditApp(App):
         current = self._screens.get(self._current_screen)
         refresh_method = getattr(current, "refresh_data", None)
         if callable(refresh_method) and refresh_method() is not False:
-            self.notify("Refreshing...", severity="information")
+            self.notify("refreshing…", severity="information")
 
     def action_export(self) -> None:
         """Show export dialog."""
@@ -395,13 +391,3 @@ class RefreshData(Message):
     """Message to trigger data refresh."""
 
     pass
-
-
-def run_tui(config_path: Path | None = None) -> None:
-    """Run the TUI application.
-
-    Args:
-        config_path: Optional path to config file.
-    """
-    app = CJAAuditApp(config_path)
-    app.run()

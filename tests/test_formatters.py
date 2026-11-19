@@ -11,7 +11,6 @@ from cja_audit_log_monitor.formatters import (
     format_stats_panel,
     format_timestamp,
     get_action_color,
-    get_action_color_token,
 )
 from cja_audit_log_monitor.models import AuditLogEntry
 
@@ -20,8 +19,7 @@ class TestActionColors:
     """Tests for action severity color mapping (3-tier + neutral).
 
     ``get_action_color`` now returns hex values so Rich/CLI consumers get real
-    ANSI colour codes.  ``get_action_color_token`` returns the original tcss
-    tokens for callers that need them.
+    ANSI colour codes.
     """
 
     def test_destructive_actions_use_danger_hex(self) -> None:
@@ -50,28 +48,20 @@ class TestActionColors:
 
     def test_action_colors_has_four_distinct_values(self) -> None:
         from cja_audit_log_monitor.formatters import ACTION_COLORS
+
         assert len(set(ACTION_COLORS.values())) == 4
 
     # --- token accessor ---
 
-    def test_get_action_color_token_returns_tcss_tokens(self) -> None:
-        assert get_action_color_token("DELETE") == "$danger"
-        assert get_action_color_token("EXPORT") == "$warning"
-        assert get_action_color_token("CREATE") == "$success"
-        assert get_action_color_token("EDIT") == "$text-muted"
-        assert get_action_color_token("UNKNOWN") == "$text-muted"
-
-
-class TestActionIcons:
-    """Tests for action severity icons."""
-
     def test_destructive_actions_use_cross(self) -> None:
         from cja_audit_log_monitor.formatters import get_action_icon
+
         assert get_action_icon("DELETE") == "✕"
         assert get_action_icon("EMBARGO") == "✕"
 
     def test_sensitive_actions_use_warning_glyph(self) -> None:
         from cja_audit_log_monitor.formatters import get_action_icon
+
         assert get_action_icon("EXPORT") == "⚠"
         assert get_action_icon("SHARE") == "⚠"
         assert get_action_icon("UNSHARE") == "⚠"
@@ -79,17 +69,20 @@ class TestActionIcons:
 
     def test_safe_actions_use_check(self) -> None:
         from cja_audit_log_monitor.formatters import get_action_icon
+
         assert get_action_icon("CREATE") == "✓"
         assert get_action_icon("APPROVE") == "✓"
 
     def test_neutral_actions_use_dot(self) -> None:
         from cja_audit_log_monitor.formatters import get_action_icon
+
         assert get_action_icon("EDIT") == "·"
         assert get_action_icon("REFRESH") == "·"
         assert get_action_icon("API_REQUEST") == "·"
 
     def test_unknown_defaults_to_dot(self) -> None:
         from cja_audit_log_monitor.formatters import get_action_icon
+
         assert get_action_icon("UNKNOWN") == "·"
 
 

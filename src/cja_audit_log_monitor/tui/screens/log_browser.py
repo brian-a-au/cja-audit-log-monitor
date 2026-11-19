@@ -144,10 +144,7 @@ class LogBrowserScreen(ContentView):
 
     def _filters_active(self) -> bool:
         filters = self._state.filters
-        return bool(
-            filters.search_text or filters.user or filters.actions or filters.components
-        )
-
+        return bool(filters.search_text or filters.user or filters.actions or filters.components)
 
     def on_filter_bar_filter_changed(self, event: FilterBar.FilterChanged) -> None:
         """Handle filter changes."""

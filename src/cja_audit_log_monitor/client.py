@@ -54,10 +54,18 @@ def is_final_page(page: int, response: AuditLogResponse) -> bool:
 class APIError(Exception):
     """Raised when API request fails."""
 
-    def __init__(self, message: str, status_code: int | None = None, response: Any = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        status_code: int | None = None,
+        response: Any = None,
+        network: bool = False,
+    ) -> None:
         super().__init__(message)
         self.status_code = status_code
         self.response = response
+        # True when the API host could not be reached at all (DNS, refused, timed out).
+        self.network = network
 
 
 class ClientClosedError(APIError):
@@ -269,7 +277,8 @@ class AuditLogsClient:
                     time.sleep(_retry_delay(None, attempt))  # Exponential backoff
                     attempt += 1
                     continue
-                raise APIError(f"Request failed: {e}") from e
+                host = self.client.base_url.host or self.settings.api_base_url
+                raise APIError(f"could not reach {host} ({type(e).__name__})", network=True) from e
 
         raise APIError("Max retries exceeded")
 
@@ -311,27 +320,19 @@ class AuditLogsClient:
     def get_logs_paginated(
         self,
         query: AuditLogQuery | None = None,
-        max_pages: int | None = None,
     ) -> Iterator[AuditLogEntry]:
         """Iterate through all audit log entries across pages.
 
         Args:
             query: Base query parameters.
-            max_pages: Maximum number of pages to fetch (None for all, else at least 1).
 
         Yields:
             Individual AuditLogEntry objects.
-
-        Raises:
-            ValueError: If ``max_pages`` is less than 1.
         """
-        if max_pages is not None and max_pages < 1:
-            raise ValueError("max_pages must be None or at least 1")
         # Page on a copy so the caller's query keeps its own page number.
         query = query.model_copy() if query else AuditLogQuery()
 
         page = 0
-        pages_fetched = 0
         # New events shift newest-first pages while we read them, which can
         # repeat entries across a page boundary; skip ids already yielded.
         seen_ids: set[str] = set()
@@ -349,8 +350,6 @@ class AuditLogsClient:
                 new_entries += 1
                 yield entry
 
-            pages_fetched += 1
-
             # A page of entries already seen ends paging only when the API gives no page
             # count; otherwise late entries can still follow on later pages.
             more_pages = bool(response.total_pages) and page + 1 < response.total_pages
@@ -358,7 +357,6 @@ class AuditLogsClient:
                 response.last
                 or (not new_entries and not more_pages)
                 or is_final_page(page, response)
-                or (max_pages is not None and pages_fetched >= max_pages)
             ):
                 break
 

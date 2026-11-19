@@ -28,6 +28,7 @@ from .auth import AuthenticationError, TokenManager
 from .client import MAX_PAGE_SIZE, APIError, AuditLogsClient, RateLimitError
 from .config import (
     MAX_DAYS,
+    MAX_MONITOR_INTERVAL,
     CJASettings,
     ConfigError,
     create_default_config,
@@ -57,13 +58,16 @@ POSITIVE_INT = click.IntRange(min=1)
 # A day count, up to about ten years, so a typo cannot overflow a date.
 DAYS = click.IntRange(min=1, max=MAX_DAYS)
 LOOKBACK_HOURS = click.IntRange(min=1, max=MAX_DAYS * 24)
-INTERVAL_SECONDS = click.IntRange(min=5)
+INTERVAL_SECONDS = click.IntRange(min=5, max=MAX_MONITOR_INTERVAL)
 
 
 def days_option(what: str) -> Callable[[Callable[P, R]], Callable[P, R]]:
     """The --days option. Left unset, the command uses the configured default_days."""
     return click.option(
-        "--days", "-d", type=DAYS, default=None,
+        "--days",
+        "-d",
+        type=DAYS,
+        default=None,
         help=f"{what} (default: default_days from the config, 7 if unset)",
     )
 
@@ -89,6 +93,7 @@ def require_text(ctx: click.Context, param: click.Parameter, value: str | None) 
 def days_or_default(days: int | None, settings: CJASettings) -> int:
     """The --days value, or the configured default_days when the flag was not given."""
     return settings.default_days if days is None else days
+
 
 # emoji=False: a name such as ":smile:" prints as written.
 console = Console(emoji=False)
@@ -138,7 +143,7 @@ def handle_cli_errors(func: Callable[P, R]) -> Callable[P, R]:
             label = "Network error" if e.network else "Authentication error"
             error = e
         except APIError as e:
-            label = "API error"
+            label = "Network error" if e.network else "API error"
             error = e
             if e.status_code == 403:
                 error = APIError(
@@ -381,7 +386,8 @@ def exit_without_waiting_for_workers(code: int | None) -> None:
     look hung. Nothing is left to save at this point, so the process ends at once.
     """
     others = [
-        t for t in threading.enumerate()
+        t
+        for t in threading.enumerate()
         if t is not threading.main_thread() and t.is_alive() and not t.daemon
     ]
     if not others:
@@ -402,7 +408,10 @@ def cli(ctx: click.Context) -> None:
 
 @cli.command("list")
 @click.option(
-    "--limit", "-l", type=POSITIVE_INT, default=50,
+    "--limit",
+    "-l",
+    type=POSITIVE_INT,
+    default=50,
     help="Maximum number of entries to show",
 )
 @click.option(
@@ -443,8 +452,8 @@ def cli_list(
         return
 
     if output_format == "json":
-
         from .export import entry_to_dict
+
         data = {"entries": [entry_to_dict(e) for e in entries], "count": len(entries)}
         emit_json(data)
     else:
@@ -462,11 +471,13 @@ def cli_list(
     help="Filter by action type (can be given more than once)",
 )
 @click.option(
-    "--start-date", "-s",
+    "--start-date",
+    "-s",
     help="Start date in UTC: YYYY-MM-DD, YYYYMMDD, or an ISO date and time",
 )
 @click.option(
-    "--end-date", "-e",
+    "--end-date",
+    "-e",
     help="End date in UTC, same forms; a date without a time means the end of that day",
 )
 @click.option(
@@ -523,8 +534,8 @@ def search(
         return
 
     if output_format == "json":
-
         from .export import entry_to_dict
+
         data = {"entries": [entry_to_dict(e) for e in entries], "count": len(entries)}
         emit_json(data)
     else:
@@ -553,11 +564,13 @@ def dashboard(ctx: click.Context, dashboard_id: str, limit: int, output_format: 
     if output_format == "json":
         from .export import entry_to_dict
 
-        emit_json({
-            "dashboard_id": dashboard_id,
-            "entries": [entry_to_dict(e) for e in entries],
-            "count": len(entries),
-        })
+        emit_json(
+            {
+                "dashboard_id": dashboard_id,
+                "entries": [entry_to_dict(e) for e in entries],
+                "count": len(entries),
+            }
+        )
         return
 
     if not entries:
@@ -602,8 +615,8 @@ def user(
         return
 
     if output_format == "json":
-
         from .export import entry_to_dict
+
         data = {
             "user": user_id,
             "entries": [entry_to_dict(e) for e in entries],
@@ -649,19 +662,21 @@ def component(
 
     if not entries:
         if output_format == "json":
-            emit_json({
-                "component_id": component_id,
-                "component_type": component_type,
-                "entries": [],
-                "count": 0,
-            })
+            emit_json(
+                {
+                    "component_id": component_id,
+                    "component_type": component_type,
+                    "entries": [],
+                    "count": 0,
+                }
+            )
         else:
             console.print(f"[dim]No audit logs found for component {literal(component_id)}[/dim]")
         return
 
     if output_format == "json":
-
         from .export import entry_to_dict
+
         data = {
             "component_id": component_id,
             "component_type": component_type,
@@ -694,11 +709,13 @@ def component(
     help="Output file path, or - for stdout",
 )
 @click.option(
-    "--start-date", "-s",
+    "--start-date",
+    "-s",
     help="Start date in UTC: YYYY-MM-DD, YYYYMMDD, or an ISO date and time",
 )
 @click.option(
-    "--end-date", "-e",
+    "--end-date",
+    "-e",
     help="End date in UTC, same forms; a date without a time means the end of that day",
 )
 @days_option("Number of days (if no date range)")
@@ -887,7 +904,8 @@ def stats(ctx: click.Context, days: int | None, top: int, output_format: str) ->
     ),
 )
 @click.option(
-    "--duration", type=POSITIVE_INT,
+    "--duration",
+    type=POSITIVE_INT,
     help="Duration in seconds (default: indefinite)",
 )
 @click.option("--alerts/--no-alerts", default=True, help="Enable alert detection")
@@ -921,9 +939,7 @@ def monitor(
                 enabled_webhooks = settings.notifications.enabled_webhook_count
                 if enabled_webhooks:
                     channel_summary.append(f"{enabled_webhooks} webhook(s)")
-                err_console.print(
-                    f"[dim]Notification channels: {', '.join(channel_summary)}[/dim]"
-                )
+                err_console.print(f"[dim]Notification channels: {', '.join(channel_summary)}[/dim]")
 
             monitor_instance = AuditLogMonitor(
                 client,
@@ -1197,7 +1213,7 @@ def verify(ctx: click.Context, output_format: str) -> None:
                 console.print("[green]✓[/green] Connection successful")
                 console.print(f"  Organization: {literal(str(result['org_id']))}")
                 console.print(f"  API URL: {literal(str(result['api_url']))}")
-                total_logs = result.get('total_logs_available', 'N/A')
+                total_logs = result.get("total_logs_available", "N/A")
                 console.print(f"  Total logs available: {literal(str(total_logs))}")
             elif not result["authenticated"]:
                 console.print(
@@ -1359,9 +1375,7 @@ def tail(
             if action:
                 filters_desc.append(f"actions={','.join(action)}")
 
-            filter_str = (
-                f" [dim]({literal(', '.join(filters_desc))})[/dim]" if filters_desc else ""
-            )
+            filter_str = f" [dim]({literal(', '.join(filters_desc))})[/dim]" if filters_desc else ""
 
             err_console.print(f"[green]Tailing audit logs{filter_str}[/green]")
 
@@ -1572,8 +1586,8 @@ def query(
         return
 
     if output_format == "json":
-
         from .export import entry_to_dict
+
         data = {"entries": [entry_to_dict(e) for e in entries], "count": len(entries)}
         emit_json(data)
     else:
@@ -1638,11 +1652,13 @@ def timeline(
     hourly = get_hourly_distribution(entries)
 
     if output_format == "json":
-        emit_json({
-            "days": days,
-            "daily": dict(sorted(daily.items())),
-            "hourly": {f"{hour:02d}": hourly.get(hour, 0) for hour in range(24)},
-        })
+        emit_json(
+            {
+                "days": days,
+                "daily": dict(sorted(daily.items())),
+                "hourly": {f"{hour:02d}": hourly.get(hour, 0) for hour in range(24)},
+            }
+        )
         return
 
     # Display daily activity
@@ -1698,12 +1714,14 @@ def find_action(
     if output_format == "json":
         from .export import entry_to_dict
 
-        emit_json({
-            "action": action,
-            "days": days,
-            "entries": [entry_to_dict(e) for e in entries],
-            "count": len(entries),
-        })
+        emit_json(
+            {
+                "action": action,
+                "days": days,
+                "entries": [entry_to_dict(e) for e in entries],
+                "count": len(entries),
+            }
+        )
         return
 
     if not entries:
@@ -1740,10 +1758,12 @@ def top_users(ctx: click.Context, days: int | None, top: int, output_format: str
     users = get_user_activity(entries)[:top] if entries else []
 
     if output_format == "json":
-        emit_json({
-            "days": days,
-            "users": [{"user": name, "count": count} for name, count in users],
-        })
+        emit_json(
+            {
+                "days": days,
+                "users": [{"user": name, "count": count} for name, count in users],
+            }
+        )
         return
 
     if not entries:
@@ -1786,8 +1806,7 @@ def show(ctx: click.Context, entry_id: str, max_entries: int) -> None:
     if not found_entry:
         err_console.print(f"[yellow]Entry not found: {literal(entry_id)}[/yellow]")
         err_console.print(
-            f"[dim]Searched {searched:,} entries; "
-            "raise --max-entries to look further back.[/dim]"
+            f"[dim]Searched {searched:,} entries; raise --max-entries to look further back.[/dim]"
         )
         sys.exit(1)
 

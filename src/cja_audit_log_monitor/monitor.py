@@ -151,14 +151,6 @@ class AuditLogMonitor:
         self.stopped_by_user = False
         self._on_new_entry: Callable[[AuditLogEntry], None] | None = None
 
-    def set_callback(self, callback: Callable[[AuditLogEntry], None]) -> None:
-        """Set callback for new entries.
-
-        Args:
-            callback: Function to call with each new entry.
-        """
-        self._on_new_entry = callback
-
     def _get_new_entries(self) -> list[AuditLogEntry]:
         """Fetch entries not seen before, oldest first.
 
@@ -213,9 +205,7 @@ class AuditLogMonitor:
                 self.console.print(fa.panel)
                 if self.notification_manager and self.notification_manager.is_configured():
                     try:
-                        self.notification_manager.notify_alert(
-                            fa.rule_name, fa.message, fa.entry
-                        )
+                        self.notification_manager.notify_alert(fa.rule_name, fa.message, fa.entry)
                     except Exception as e:
                         logger.error(
                             "Notification dispatch failed for rule %s: %s",
@@ -377,9 +367,11 @@ class AuditLogMonitor:
             self.console.print()
 
             # Initial fetch sets the baseline; show the newest few entries for context.
-            with suppress(KeyboardInterrupt), self.console.status(
-                "Waiting for first poll..."
-            ) as status, self._logs_around_status():
+            with (
+                suppress(KeyboardInterrupt),
+                self.console.status("Waiting for first poll...") as status,
+                self._logs_around_status(),
+            ):
                 self._status = status
                 # The duration counts from before the first poll, which can be slow.
                 start_time = time.monotonic()

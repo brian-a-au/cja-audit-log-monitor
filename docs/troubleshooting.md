@@ -8,7 +8,7 @@
 | `invalid_scope` | `SCOPES` is not the same as the string in the Developer Console. | Copy the scopes again, exactly as the OAuth Server-to-Server credential page shows them. |
 | `unauthorized_client` | The credential is not an OAuth Server-to-Server credential. | Check the credential type in the Developer Console. |
 | `401 Unauthorized` | The token has expired, or someone made a new secret. | Retrieve the client secret again. |
-| `403 Forbidden` | The project is missing the Experience Platform API, or the product profile is not assigned. | Add the Experience Platform API to the project. Check the product profile assignments in the Admin Console. |
+| `403 Forbidden` | The project is missing the Experience Platform API, or the service account is not in a product profile with CJA access. The CLI message says to check the product profile. | Add the Experience Platform API to the project. Check the product profile assignments in the Admin Console. |
 
 After you change permissions in the Admin Console, wait 5 to 10 minutes before you try again.
 
@@ -16,9 +16,11 @@ After you change permissions in the Admin Console, wait 5 to 10 minutes before y
 
 Each CLI error prints one line to stderr and exits 1. The line starts with the kind of error:
 
-- `Configuration error:` means the config file or a setting is wrong. The message names the file and the setting. It does not show the value, so it never shows a secret.
+- `Configuration error:` means the config file or a setting is wrong. The message names the setting, and the file or `environment or .env`, depending on where the bad value came from. It does not show the value, so it never shows a secret.
 - `Authentication error:` means login failed. See [OAuth errors](#oauth-errors).
-- `API error:` means Adobe returned an error. The message gives the status code.
+- `Network error: could not reach <host>` means the tool could not reach that Adobe host, to log in or to call the API. Check your network connection.
+- `API error:` means Adobe returned an error. The message gives the status code. For a 403, it also says to check the product profile.
+- `Unexpected error:` means something the tool did not expect. Run the command again with `-v` to see the full traceback, and include it in a bug report.
 - `File error:` means the tool could not write a file, e.g. the folder does not exist or the file already exists. For an existing file, add `--force` to replace it.
 
 The `verify` command is the exception. It prints failures such as `Connection failed` or `Authentication failed: ...` on stdout, and then exits 1.
@@ -37,14 +39,16 @@ The tool retries a 429 (rate limit) response and a 500, 502, 503 or 504 response
 
 When a view can't load data, it shows one of these messages with the error from Adobe:
 
-- **not connected** means that login failed, or the app could not reach Adobe. Check your credentials on the config screen (`c`), or run `cja-audit-log-monitor cli verify`.
+- **not connected** means that login failed, or the app could not reach Adobe. Check your credentials in the config view (`c`), or run `cja-audit-log-monitor cli verify`.
 - **access denied** means that Adobe returned 403. The API credential needs a CJA product profile and the right scopes.
 - **request rejected** means that Adobe returned 400. Check the filters or the number of days, then press `r`.
 - **could not load data** means any other error. Press `r` to try again.
 
 The header shows `disconnected` after a login or network failure in any view. It shows `connected` again after the next successful load.
 
-If the config file has an error, the TUI still starts. It uses only the environment variables and `.env`, and the header shows a short warning that names the file and the problem. Fix the file and press **reload settings** on the config screen.
+If the config file has an error, the TUI still starts. It uses only the environment variables and `.env`, and the header shows a short warning that names the file and the problem. Fix the file and press **reload settings** in the config view.
+
+The TUI has no log file, and `-v` does not change what it shows. Warnings that the CLI prints on stderr, e.g. about unknown settings, file permissions or failed deliveries, appear as toasts in the TUI.
 
 ## Setup checklist
 
@@ -58,7 +62,7 @@ If the config file has an error, the TUI still starts. It uses only the environm
 ## Security
 
 - Never commit `.env` or any other file with credentials. The repository's `.gitignore` already covers `.env` and `.env.*`.
-- Keep the config file private. `cli init` creates it with mode 0600. If other users can read it, the tool logs a warning that suggests `chmod 600`.
+- Keep the config file private. `cli init` creates it with mode 0600. If other users can read it, the tool gives a warning that suggests `chmod 600`.
 - Export files are also created with mode 0600. They can hold user emails and IP addresses, so take care where you share them.
 - Change the client secret from time to time in the Developer Console.
 - Give the service account only the product profile permissions it needs.
@@ -67,18 +71,18 @@ If the config file has an error, the TUI still starts. It uses only the environm
 
 | What you see | Likely cause | Fix |
 |---|---|---|
-| A toast that starts with `Notification delivery failed (slack,` | The Slack webhook URL is wrong or expired, or Slack is limiting requests. | Create the incoming webhook again in Slack and update `notifications.slack_webhook_url`. |
-| A toast such as `Notification delivery failed (https://example.com/…)` | The webhook returned a 4xx or 5xx error, or it did not reply in time. | Check the service that receives the webhook. The timeout is 30 seconds unless you set `webhooks[].timeout`. |
-| The first alert arrives, later ones do not, and you see no warning | The tool shows only the first failure on each channel in a session. | Look in the log for repeated `Failed to send` lines. The warning comes back after a send to that channel works. |
+| A warning that starts with `Notification delivery failed (slack (https://hooks.slack.com/…))` | The Slack webhook URL is wrong or expired, or Slack is limiting requests. | Create the incoming webhook again in Slack and update `notifications.slack_webhook_url`. |
+| A warning such as `Notification delivery failed (webhook 2 (https://example.com/…))` | The webhook returned a 4xx or 5xx error, or it did not reply in time. | Check the service that receives the webhook. The timeout is 30 seconds unless you set `webhooks[].timeout`. |
+| The first alert arrives, later ones do not, and the `Notification delivery failed` warning does not show again | The tool shows that warning once for each failing channel. It shows it again only if the channel fails after it works again. | Look for the `Failed to send` lines, which show for every failed send. The CLI prints them on stderr, and the TUI shows them as toasts. |
 | An alert fires in the TUI but nothing reaches Slack or the webhook | `notify_on_alerts` is `false`, or there is no `notifications:` block. | Set `notify_on_alerts: true`, and set `slack_webhook_url` or at least one entry in `webhooks`. |
 | Polls are slow when Slack is slow | A webhook timeout of 30 seconds is longer than a short polling interval. | Use a longer polling interval, or a shorter `timeout` for the webhook. |
 
-The failure messages and logs never show the full webhook or Slack URL. They show only `https://` and the host name, because the rest of the URL can hold a secret.
+The failure messages and logs never show the full webhook or Slack URL. They show only `https://` and the host name, e.g. `https://example.com/…`, because the rest of the URL can hold a secret.
 
 If `cja-audit-log-monitor cli anomalies` runs but nothing reaches Slack or the webhook, check that `notify_on_anomalies: true` is set in your `notifications:` block. The default is `false`.
 
-Anomalies use the same failure warnings as alerts. A Slack URL that fails shows one warning in a session, whether the send came from `cli monitor` or from `cli anomalies`. Later failures on that channel show no warning until a send to it works again.
+Anomalies use the same failure warnings as alerts. Each failing channel shows one warning. Later failures on that channel show no warning until a send to it works again. A channel that failed gets the anomaly again on the next scan.
 
 ## Where to look first
 
-If something is wrong and you don't know which screen to check, open the [config screen](screens/settings.md) in the TUI and click **verify connection**. The error it shows usually tells you more than an empty table on another screen.
+If something is wrong and you don't know which view to check, open the [config view](screens/settings.md) in the TUI and click **verify connection**. The error it shows usually tells you more than an empty table in another view.

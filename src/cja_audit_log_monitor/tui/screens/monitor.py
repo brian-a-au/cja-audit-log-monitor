@@ -128,12 +128,12 @@ class MonitorScreen(ContentView):
             False when no poll started; the user has been told why.
         """
         if not self._state.monitor.is_running:
-            self.app.notify("Monitor is stopped. Start monitoring to fetch live entries.")
+            self.app.notify("the monitor is stopped; press space to start it")
             return False
         if self._poll_lock.locked() or (
             self._refresh_worker is not None and self._refresh_worker.is_running
         ):
-            self.app.notify("Monitor poll already in progress.", severity="information")
+            self.app.notify("a poll is already running", severity="information")
             return False
         self._refresh_worker = self.run_worker(
             self._poll_once(self._stop_event),

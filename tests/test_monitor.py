@@ -104,12 +104,6 @@ class TestAuditLogMonitor:
         new_entries = monitor._get_new_entries()
         assert new_entries == []
 
-    def test_set_callback(self, monitor: AuditLogMonitor) -> None:
-        """Test setting entry callback."""
-        callback = MagicMock()
-        monitor.set_callback(callback)
-        assert monitor._on_new_entry == callback
-
     def test_stop(self, monitor: AuditLogMonitor) -> None:
         """Test stopping the monitor."""
         monitor._running = True
@@ -122,7 +116,7 @@ class TestAuditLogMonitor:
     ) -> None:
         """Test that _handle_entry calls the callback."""
         callback = MagicMock()
-        monitor.set_callback(callback)
+        monitor._on_new_entry = callback
 
         entry = AuditLogEntry(id="test-entry", action="CREATE")
         monitor._handle_entry(entry)
@@ -194,9 +188,7 @@ class TestAuditLogMonitor:
         assert pages_requested == [0, 1]
         assert [entry.id for entry in new_entries] == ["entry-1", "entry-2", "entry-3"]
 
-    def test_handle_entry_dispatches_to_notification_manager(
-        self, sample_audit_entry
-    ) -> None:
+    def test_handle_entry_dispatches_to_notification_manager(self, sample_audit_entry) -> None:
         """AuditLogMonitor._handle_entry calls notify_alert for each FiredAlert."""
         from cja_audit_log_monitor.alerts import FiredAlert
 
@@ -217,9 +209,7 @@ class TestAuditLogMonitor:
         monitor._handle_entry(sample_audit_entry)
         fake_nm.notify_alert.assert_called_once_with("r", "m", sample_audit_entry)
 
-    def test_handle_entry_works_without_notification_manager(
-        self, sample_audit_entry
-    ) -> None:
+    def test_handle_entry_works_without_notification_manager(self, sample_audit_entry) -> None:
         """AuditLogMonitor._handle_entry behavior unchanged when notification_manager is None."""
         from cja_audit_log_monitor.alerts import FiredAlert
 
@@ -230,9 +220,7 @@ class TestAuditLogMonitor:
         monitor = AuditLogMonitor(client=client, alert_engine=fake_engine)
         monitor._handle_entry(sample_audit_entry)  # must not raise
 
-    def test_handle_entry_suppresses_dispatch_exceptions(
-        self, sample_audit_entry
-    ) -> None:
+    def test_handle_entry_suppresses_dispatch_exceptions(self, sample_audit_entry) -> None:
         """An exception inside notify_alert does NOT prevent _handle_entry from completing."""
         from cja_audit_log_monitor.alerts import FiredAlert
 
@@ -716,7 +704,9 @@ class TestPollOrdering:
         minutes = [100, 40, 30, 20, 10, 0]
         api_order = [
             AuditLogEntry(
-                id=f"e{m}", action="DELETE", user_id="u1",
+                id=f"e{m}",
+                action="DELETE",
+                user_id="u1",
                 timestamp=base + timedelta(minutes=m),
             )
             for m in minutes
@@ -726,8 +716,10 @@ class TestPollOrdering:
             content=list(reversed(api_order)), last=True
         )
         rule = AlertRule(
-            name="five", actions=[ActionType.DELETE],
-            threshold_count=5, threshold_window_minutes=60,
+            name="five",
+            actions=[ActionType.DELETE],
+            threshold_count=5,
+            threshold_window_minutes=60,
         )
         monitor = AuditLogMonitor(
             mock_client, console=MagicMock(), interval=7, alert_engine=AlertEngine(rules=[rule])
@@ -762,9 +754,7 @@ class TestPollGuards:
             content=[_entry(f"d{i}", -i, action="DELETE") for i in range(10)], last=True
         )
         engine = MagicMock()
-        monitor = AuditLogMonitor(
-            mock_client, console=MagicMock(), interval=5, alert_engine=engine
-        )
+        monitor = AuditLogMonitor(mock_client, console=MagicMock(), interval=5, alert_engine=engine)
         monitor._run_poll(MagicMock())
         engine.check_entry.assert_not_called()
 
@@ -820,15 +810,14 @@ class _FakeAuditApi:
         self.calls += 1
         if self.fail_next:
             raise self.fail_next.pop(0)
-        hits = [
-            e for e in self.entries
-            if query.start_date <= e.timestamp <= query.end_date
-        ]
+        hits = [e for e in self.entries if query.start_date <= e.timestamp <= query.end_date]
         size = query.page_size
-        chunk = hits[query.page * size:(query.page + 1) * size]
+        chunk = hits[query.page * size : (query.page + 1) * size]
         pages = max(1, -(-len(hits) // size))
         return AuditLogResponse(
-            content=chunk, total_elements=len(hits), total_pages=pages,
+            content=chunk,
+            total_elements=len(hits),
+            total_pages=pages,
             last=query.page >= pages - 1,
         )
 
@@ -909,8 +898,10 @@ class TestBacklog:
         gap = _stream(T0 + timedelta(seconds=1), 480, 5)
         deletes = [
             AuditLogEntry(
-                id=f"del-{i}", timestamp=T0 + timedelta(minutes=200, seconds=i),
-                action="DELETE", user_email="mallory@example.com",
+                id=f"del-{i}",
+                timestamp=T0 + timedelta(minutes=200, seconds=i),
+                action="DELETE",
+                user_email="mallory@example.com",
             )
             for i in range(6)
         ]
@@ -1006,7 +997,9 @@ class TestCtrlC:
         nm.is_configured.return_value = True
         nm.pop_failures.return_value = []
         monitor = AuditLogMonitor(
-            mock_client, console=MagicMock(), interval=5,
+            mock_client,
+            console=MagicMock(),
+            interval=5,
             alert_engine=AlertEngine([AlertRule(name="any", actions=[ActionType.DELETE])]),
             notification_manager=nm,
         )
@@ -1119,9 +1112,7 @@ class TestMonitorDetails:
         ]
         engine = MagicMock()
         engine.check_entry.return_value = []
-        monitor = AuditLogMonitor(
-            mock_client, console=MagicMock(), interval=5, alert_engine=engine
-        )
+        monitor = AuditLogMonitor(mock_client, console=MagicMock(), interval=5, alert_engine=engine)
         monitor._run_poll(MagicMock())
         with patch("cja_audit_log_monitor.monitor.datetime") as fake_dt:
             fake_dt.now.return_value = datetime.now(UTC) + timedelta(minutes=1)
@@ -1138,7 +1129,9 @@ def test_cli_monitor_shows_every_channel_failure(mock_client: MagicMock) -> None
     nm.pop_failures.return_value = ["webhook 1 failed", "webhook 2 failed"]
     err_console = MagicMock()
     monitor = AuditLogMonitor(
-        mock_client, console=MagicMock(), err_console=err_console,
+        mock_client,
+        console=MagicMock(),
+        err_console=err_console,
         alert_engine=AlertEngine([AlertRule(name="any", actions=[ActionType.DELETE])]),
         notification_manager=nm,
     )

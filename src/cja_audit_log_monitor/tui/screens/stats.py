@@ -31,8 +31,6 @@ from .base import (
 STATS_SAMPLE = 5000
 
 
-
-
 class _DaysInput(Input):
     """The days box. Esc leaves it, so the view's keys (d, l, ?, q) work again."""
 
@@ -40,6 +38,8 @@ class _DaysInput(Input):
 
     def action_leave(self) -> None:
         self.screen.set_focus(None)
+
+
 class StatsScreen(ContentView):
     """Screen for viewing statistics and analytics."""
 
@@ -234,7 +234,3 @@ class StatsScreen(ContentView):
         for rank, (user, count) in enumerate(self._users, 1):
             user_lines.append(f"{rank:>2}. {literal(fit_cells(user, name_width))} {count:>5,}")
         ranking_widget.update("\n".join(user_lines) or no_activity_message(days))
-
-
-
-

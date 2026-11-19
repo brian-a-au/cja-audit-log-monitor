@@ -1,6 +1,6 @@
-# Alert Rules
+# Alerts
 
-The alert rules view lets you turn rules on and off, see what each rule watches, and test the rules. The live monitor in the TUI uses these rules. Press `a` to open it.
+The alerts view lets you turn rules on and off, see what each rule watches, and test the rules. The live monitor in the TUI uses these rules. Press `a` to open it.
 
 ![Alerts](../screenshots/alerts.svg)
 
@@ -13,7 +13,7 @@ The alert rules view lets you turn rules on and off, see what each rule watches,
   - One summary line with the threshold (`N events / M min`), the actions and the components the rule watches. It says `all actions` or `all components` when the rule watches all of them.
   - A border color that shows whether the rule is on or off.
 - **Two buttons**, `test rules` and `reset rules`.
-- **A results box** that fills in after a test. It gives the number of alerts that would have fired, or says `no alerts triggered`. If the test fails, the box shows the error.
+- **A results box** that fills in after a test. It gives the number of alerts that would have fired, or says `no alerts triggered`. It lists one line for each alert, e.g. `bulk_delete: 5 events in 60 minutes by someone@example.com`. When there are many, it says how many it shows. It also says when it read only the newest 1,000 entries of the last day. If the test fails, the box shows the error.
 
 A rule name can contain spaces and brackets. The view shows it as it is.
 
@@ -26,7 +26,7 @@ A rule name can contain spaces and brackets. The view shows it as it is.
 
 ## Changes last only until you quit
 
-Turning rules on and off here does not change the config file. The tool keeps the change only while the app runs. When you quit and start again, the rules come from the config file. To make a change that lasts, edit the config file. See [Alert Rules](../alert-rules.md) for the format.
+Turning rules on and off here does not change the config file. The tool keeps the change only while the app runs. A rule you turned off stays off after **reload settings** in the config view. When you quit and start again, the rules come from the config file. To make a change that lasts, edit the config file. See [Alert Rules](../alert-rules.md) for the format.
 
 ## When to use it
 

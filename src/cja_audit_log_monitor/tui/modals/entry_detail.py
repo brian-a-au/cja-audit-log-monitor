@@ -129,5 +129,3 @@ class EntryDetailPanel(VerticalScroll):
                 Text(json.dumps(entry.changes, indent=2, default=str)),
             )
         self.query_one("#detail-body", Static).update(body)
-
-

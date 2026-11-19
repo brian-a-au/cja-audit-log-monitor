@@ -23,8 +23,6 @@ class FilterState:
     user: str = ""
     actions: list[ActionType] = field(default_factory=list)
     components: list[ComponentType] = field(default_factory=list)
-    start_date: datetime | None = None
-    end_date: datetime | None = None
     search_text: str = ""
     page: int = 0
     page_size: int = 50
@@ -35,8 +33,6 @@ class FilterState:
             user_id=self.user if self.user else None,
             actions=self.actions if self.actions else None,
             components=self.components if self.components else None,
-            start_date=self.start_date,
-            end_date=self.end_date,
             description=self.search_text if self.search_text else None,
             page=self.page,
             page_size=self.page_size,
@@ -47,8 +43,6 @@ class FilterState:
         self.user = ""
         self.actions = []
         self.components = []
-        self.start_date = None
-        self.end_date = None
         self.search_text = ""
         self.page = 0
 

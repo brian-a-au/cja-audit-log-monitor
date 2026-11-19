@@ -1,4 +1,4 @@
-"""Configuration handling for CJA Audit CLI."""
+"""Configuration handling for CJA Audit Log Monitor."""
 
 import logging
 import os
@@ -311,9 +311,7 @@ def _warn_nested_unknown_keys(config: dict[str, Any], path: Path) -> None:
     _warn_unknown_keys(notifications, NotificationConfig, "notifications", path)
     if isinstance(notifications, dict) and isinstance(notifications.get("webhooks"), list):
         for index, webhook in enumerate(notifications["webhooks"]):
-            _warn_unknown_keys(
-                webhook, WebhookConfig, f"notifications.webhooks[{index}]", path
-            )
+            _warn_unknown_keys(webhook, WebhookConfig, f"notifications.webhooks[{index}]", path)
 
 
 def _warn_if_not_private(config_path: Path) -> None:

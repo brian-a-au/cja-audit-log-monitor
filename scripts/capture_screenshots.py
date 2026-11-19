@@ -59,24 +59,40 @@ def generate_mock_entries(count: int = 150) -> list[AuditLogEntry]:
 
     component_names = {
         ComponentType.PROJECT: [
-            "Q4 Sales Report", "Marketing Overview", "Customer Journey Analysis",
-            "Revenue Dashboard", "User Engagement Report", "Conversion Funnel",
+            "Q4 Sales Report",
+            "Marketing Overview",
+            "Customer Journey Analysis",
+            "Revenue Dashboard",
+            "User Engagement Report",
+            "Conversion Funnel",
         ],
         ComponentType.FILTER: [
-            "Returning Visitors", "Mobile Users", "High Value Customers",
-            "New Signups", "Enterprise Segment",
+            "Returning Visitors",
+            "Mobile Users",
+            "High Value Customers",
+            "New Signups",
+            "Enterprise Segment",
         ],
         ComponentType.CALCULATED_METRIC: [
-            "Conversion Rate", "Customer LTV", "Bounce Rate", "Session Duration",
+            "Conversion Rate",
+            "Customer LTV",
+            "Bounce Rate",
+            "Session Duration",
         ],
         ComponentType.DATA_VIEW: [
-            "Production View", "Staging View", "Analytics Sandbox",
+            "Production View",
+            "Staging View",
+            "Analytics Sandbox",
         ],
         ComponentType.ANNOTATION: [
-            "Black Friday Sale", "Site Outage", "New Feature Launch",
+            "Black Friday Sale",
+            "Site Outage",
+            "New Feature Launch",
         ],
         ComponentType.AUDIENCE: [
-            "Engaged Users", "At-Risk Customers", "VIP Segment",
+            "Engaged Users",
+            "At-Risk Customers",
+            "VIP Segment",
         ],
     }
 
@@ -128,59 +144,19 @@ def generate_mock_entries(count: int = 150) -> list[AuditLogEntry]:
 
 
 def create_mock_settings():
-    """Create mock settings."""
-    from cja_audit_log_monitor.models import AlertRule
+    """Real settings with fake credentials and the documented defaults.
 
-    mock_settings = MagicMock()
-    mock_settings.client_id = "demo_client_12345"
-    mock_settings.secret = "demo_secret"
-    mock_settings.org_id = "ABC123DEF@AdobeOrg"
-    mock_settings.api_base_url = "https://cja.adobe.io"
-    mock_settings.ims_base_url = "https://ims-na1.adobelogin.com"
-    mock_settings.default_page_size = 50
-    mock_settings.default_days = 7
-    mock_settings.monitor_interval = 60
-    mock_settings.scopes = "openid,AdobeID"
-    mock_settings.is_oauth_configured = lambda: True
-    mock_settings.alert_rules = [
-        AlertRule(
-            name="bulk_delete",
-            description="Alert on multiple delete operations",
-            enabled=True,
-            actions=[ActionType.DELETE],
-            threshold_count=5,
-            threshold_window_minutes=60,
-            per_user=True,
-        ),
-        AlertRule(
-            name="bulk_export",
-            description="Multiple export operations",
-            enabled=True,
-            actions=[ActionType.EXPORT],
-            threshold_count=3,
-            threshold_window_minutes=30,
-            per_user=True,
-        ),
-        AlertRule(
-            name="sensitive_component_delete",
-            description="Deletion of sensitive components",
-            enabled=True,
-            actions=[ActionType.DELETE],
-            components=[ComponentType.DATA_VIEW, ComponentType.CONNECTION],
-            threshold_count=1,
-            threshold_window_minutes=1,
-        ),
-        AlertRule(
-            name="bulk_share",
-            description="Bulk sharing activity",
-            enabled=True,
-            actions=[ActionType.SHARE],
-            threshold_count=10,
-            threshold_window_minutes=60,
-            per_user=True,
-        ),
-    ]
-    return mock_settings
+    No config file or .env is read, so the screenshots show the defaults a
+    new user gets: page size 100, the built-in alert rules and no notification channels.
+    """
+    from cja_audit_log_monitor.config import CJASettings
+
+    return CJASettings(
+        _env_file=None,
+        client_id="demo_client_12345",
+        secret="demo_secret",
+        org_id="ABC123DEF@AdobeOrg",
+    )
 
 
 def setup_mock_state(app, entries: list[AuditLogEntry]) -> None:
@@ -221,13 +197,15 @@ def setup_mock_state(app, entries: list[AuditLogEntry]) -> None:
     mock_client.get_logs = mock_get_logs
     mock_client.get_all_logs = mock_get_all_logs
     mock_client.get_logs_sample = mock_get_logs_sample
-    mock_client.verify_connection = MagicMock(return_value={
-        "connected": True,
-        "authenticated": True,
-        "org_id": "ABC123DEF@AdobeOrg",
-        "api_url": "https://cja.adobe.io",
-        "total_logs_available": len(entries),
-    })
+    mock_client.verify_connection = MagicMock(
+        return_value={
+            "connected": True,
+            "authenticated": True,
+            "org_id": "ABC123DEF@AdobeOrg",
+            "api_url": "https://cja.adobe.io",
+            "total_logs_available": len(entries),
+        }
+    )
     mock_client.close = MagicMock()
 
     app.state._settings = mock_settings

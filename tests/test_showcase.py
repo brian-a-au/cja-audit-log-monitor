@@ -17,7 +17,7 @@ pytestmark = pytest.mark.skipif(not SCRIPT.exists(), reason="scripts/ is not in 
 # Text that only the intended view shows, one per slide in make_showcase.SLIDES.
 EXPECTED = [
     "ACTION DISTRIBUTION",
-    "page 1 of 3",
+    "page 1 of 2",
     "component name",
     "LIVE LOG STREAM",
     "USER RANKING",

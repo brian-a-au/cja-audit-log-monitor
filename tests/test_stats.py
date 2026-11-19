@@ -1,7 +1,5 @@
 """Tests for statistics module."""
 
-
-
 from cja_audit_log_monitor.models import AuditLogEntry
 from cja_audit_log_monitor.stats import (
     calculate_stats,

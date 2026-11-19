@@ -86,8 +86,7 @@ def sample_note_text(shown: int, total: int) -> str | None:
     if total <= shown:
         return None
     return resolve_tcss_markup(
-        f"[$text-muted]charts and lists use the newest {shown:,} of {total:,} entries"
-        "[/$text-muted]"
+        f"[$text-muted]charts and lists use the newest {shown:,} of {total:,} entries[/$text-muted]"
     )
 
 
@@ -275,5 +274,8 @@ class ContentView(Vertical):
     def on_content_mounted(self) -> None:
         """Hook called once, the first time the view is shown."""
 
-    def refresh_data(self) -> None:
-        """Reload the view's data (bound to the ``r`` key)."""
+    def refresh_data(self) -> bool | None:
+        """Reload the view's data (bound to the ``r`` key).
+
+        A view may return False when there was nothing to reload (the monitor does).
+        """

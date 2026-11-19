@@ -35,7 +35,7 @@ These options go before `cli` or `tui`, e.g. `cja-audit-log-monitor -c ./config.
 
 | Option | Meaning |
 |---|---|
-| `-v`, `--verbose` | Turn on debug logging. The log lines go to stderr. They never contain the client secret. |
+| `-v`, `--verbose` | Turn on debug logging. The log lines go to stderr. They never contain the client secret. This option affects the CLI only. The TUI has no log file and shows warnings as toasts. |
 | `-c`, `--config PATH` | Read the config file at `PATH` instead of the default file. See [Configuration](configuration.md#where-the-config-file-lives). |
 | `--version` | Print the version and exit. |
 | `--help` | Print the help and exit. |
@@ -74,20 +74,27 @@ Data goes to stdout. Progress lines, warnings, errors and `-v` log lines go to s
 
 Names and other values from the API are shown exactly as they are. A component named `Q3 [/final] report` prints as `Q3 [/final] report`.
 
+Output works with any stdout encoding. If the console cannot show a character, it prints as `?`. `export -o -` always writes UTF-8, so the exported data is never changed.
+
 ### Exit codes
 
 | Code | Meaning |
 |---|---|
 | `0` | The command worked. |
-| `1` | The command failed. This covers config errors, login errors, API errors and file errors. It also covers a failed `verify`, a closed pipe (for example `| head`), a `show` that did not find the entry, and a `monitor` or `tail` run where no poll worked. |
+| `1` | The command failed. This covers config errors, login errors, API errors and file errors. It also covers a failed `verify`, a closed pipe (for example `| head`), a `show` that did not find the entry, and a `monitor` or `tail` run where no poll worked and you did not press Ctrl+C. |
 | `2` | The command line was wrong, e.g. an unknown flag, a value below the minimum, or a start date after the end date. Nothing is sent to the API. |
 
-Each error prints one line to stderr that starts with its kind, e.g. `Configuration error:` or `API error:`. The one exception is `verify`, which prints its failures on stdout as described above. If you pipe the output into a command that stops reading early, e.g. `head -1`, the CLI exits 1 and prints no message.
+Each error prints one line to stderr that starts with its kind, e.g. `Configuration error:` or `API error:`. The one exception is `verify`, which prints its failures on stdout as described above. Some messages say more:
+
+- A 403 response adds a hint to check that the service account is in a product profile with CJA access in the Admin Console.
+- When the tool cannot reach Adobe, to log in or to call the API, the line reads `Network error: could not reach <host>`.
+- A login failure in `verify` reads `Authentication failed:` and the reason.
+- An error the tool does not expect prints one line, `Unexpected error: <type>: <message>`. Add `-v` to see the full traceback. If you pipe the output into a command that stops reading early, e.g. `head -1`, the CLI exits 1 and prints no message.
 
 ### Dates and times
 
-- `-s` / `--start-date` and `-e` / `--end-date` take a date such as `2026-11-01`. They also take a date and time such as `2026-11-01T09:30:00`.
-- A value with no time zone is read as UTC.
+- `-s` / `--start-date` and `-e` / `--end-date` take a date as `YYYY-MM-DD`, e.g. `2026-11-01`, or as `YYYYMMDD`, e.g. `20261101`. They also take an ISO date and time such as `2026-11-01T09:30:00`. Any other form, e.g. `2026-1-5`, is a usage error and exits 2.
+- A value with no time zone is read as UTC. A value with a time zone is changed to UTC.
 - An end date with no time means the end of that day in UTC, so the whole day is included.
 - You can give only one of the two dates. A missing end date means now. A missing start date means 2000-01-01.
 - A start date after the end date is a usage error and exits 2.
@@ -95,7 +102,7 @@ Each error prints one line to stderr that starts with its kind, e.g. `Configurat
 
 ### Defaults that come from the config file
 
-When you leave `--days` off, a command uses `default_days` from the config file. It is 7 unless you change it. When you leave `--interval` off `monitor`, it uses `monitor_interval` from the config file. It is 60 unless you change it. The help shows these defaults as "from config".
+When you leave `--days` off, a command uses `default_days` from the config file. It is 7 unless you change it. When you leave `--interval` off `monitor`, it uses `monitor_interval` from the config file. It is 60 unless you change it. The help says that these defaults come from the config file.
 
 The `default_page_size` setting is used only by the TUI log browser. The CLI does not use it.
 
@@ -110,9 +117,9 @@ Other rules for flag values:
 
 - Choice values ignore case, so `find-action -a export` and `find-action -a EXPORT` are the same.
 - Action and component names given with `-a` and `-C` also ignore case.
-- Where the help says "can specify multiple", you can repeat the flag, e.g. `-a DELETE -a EXPORT`. The `-a` and `-C` flags of `search`, `export`, `query` and `timeline` can be repeated as well.
-- Number flags have a minimum, which the help shows as `x>=1` or `x>=5`. A smaller value exits 2.
-- A blank id, e.g. `-i ""`, exits 2.
+- Where the help says "can be given more than once", you can repeat the flag, e.g. `-a DELETE -a EXPORT`.
+- Number flags have limits, which the help shows, e.g. `x>=1` or `1<=x<=3650`. A value outside the limits exits 2. `--days` is at most 3,650 and `--lookback` is at most 87,600 hours.
+- A blank id or filter, e.g. `-i ""` or `--user " "`, exits 2. This covers the id flags and the `--user`, `--component-id` and `--description` filters. Spaces at either end of a filter value are removed.
 
 For valid action and component names, see the [Reference](reference.md), or run `cli actions` and `cli components`.
 
@@ -300,20 +307,25 @@ How each poll works:
 - The first poll reads the last 5 minutes. It shows the newest 5 entries as context. It does not alert on them or count them as new.
 - Each later poll reads from 5 minutes before the last good poll up to now. The tool skips entries it has already shown. This overlap catches events that the API indexed late.
 - New events are handled oldest first.
-- One poll reads at most 20 pages. If it reaches that limit, the tool logs a warning.
+- Each poll reads pages of 1,000 entries, so a normal poll is one request. One poll reads at most 50 pages, which is 50,000 events. After a long gap, e.g. a laptop asleep, the poll reads the whole gap up to that limit. Past it, the tool says how many older events were skipped.
+- An event that the API indexes more than 5 minutes late is missed.
+- Times on the entry lines and the status line are in UTC.
 - A status line shows the time of the last poll and how many entries were new. For the first poll, it says `Baseline` and shows how many existing entries it found. After that it says how many entries are new.
 
 How errors are handled:
 
-- A 400, 401, 403 or 404 response, or a login error, stops the monitor with exit code 1.
+- A 400, 401, 403 or 404 response, or a login error caused by bad or missing credentials, stops the monitor with exit code 1.
+- A login that fails for a moment, e.g. a network error or an IMS answer of 429 or 5xx, is tried again at the next poll.
 - Any other error is shown in the status line, and the monitor tries again at the next interval.
 - If no poll worked during the whole run, the monitor exits 1.
+
+Ctrl+C stops the monitor at once, even while a request or a webhook send is in progress. The entries of that poll are dropped. The command prints `Monitor stopped.` and exits 0.
 
 When the config file has a `notifications:` block, each alert that fires is also sent to Slack or to your webhooks. See [Delivery channels](alert-rules.md#delivery-channels).
 
 ### `tail`
 
-Works like `monitor`, but shows only the entries that match the filters.
+Works like `monitor`, but shows only the entries that match the filters. The filters apply before the alert rules, so events from other users or components never count toward a rule.
 
 | Flag | Default | Meaning |
 |---|---|---|
@@ -352,7 +364,7 @@ Exports audit logs to a file, or to stdout with `-o -`.
 
 | Flag | Default | Meaning |
 |---|---|---|
-| `-F`, `--format` | `json` | `json`, `csv` or `tsv`. |
+| `-F`, `--format` | from the file suffix | `json`, `csv` or `tsv`. Without `-F`, a `.csv` or `.tsv` file name chooses that format. Any other name gives JSON. |
 | `-o`, `--output` | required | The file to write, or `-` for stdout. |
 | `-s`, `--start-date` | none | The start date. When you give a date, `--days` is not used. |
 | `-e`, `--end-date` | none | The end date. |
@@ -360,17 +372,23 @@ Exports audit logs to a file, or to stdout with `-o -`.
 | `-a`, `--action` | all | An action type. You can repeat it. |
 | `-C`, `--component` | all | A component type. You can repeat it. |
 | `--pretty` / `--compact` | `--pretty` | Indent the JSON, or write it on one line. |
-| `--max-entries` | no limit | The most entries to export. |
+| `--max-entries` | no limit | The most entries to export. If more entries matched, the tool says so on stderr. |
 | `--force` | off | Overwrite the file if it exists. |
 
 How the file is written:
 
-- The tool checks the output path before it calls the API. It refuses a file that already exists unless you pass `--force`. It also refuses a folder that does not exist, and a folder given as the file name. Each of these prints one line and exits 1.
+- A `~` at the start of the path is read as your home folder.
+- The tool checks the output path before it calls the API. It refuses a file that already exists unless you pass `--force`. It also refuses a folder that does not exist or that you cannot write to, a folder given as the file name, a path that ends with `/`, and a file name longer than 255 bytes. Each of these prints one line and exits 1.
+- If a file appears at the path during the export, the tool stops with an error that names the file and `--force`.
+- When no entries match, the tool still writes the file. A JSON file has no entries, and a CSV or TSV file has only the header row. So a scheduled export never leaves an older file in place.
 - The tool writes to a temporary file in the same folder and then moves it into place. If the export fails partway, no partial file is left, and an existing file stays as it was.
-- A new file can be read only by you (mode 0600). It is written as UTF-8.
+- A new file can be read only by you (mode 0600). It is written as UTF-8. JSON keeps text that is not ASCII as it is, and it ends with a newline.
 - If the target is a symbolic link, the tool replaces the link with the file. It does not write to the file the link points to.
 - In CSV and TSV files, a cell that starts with `=`, `+`, `-`, `@`, a tab or a carriage return gets a `'` in front. This stops a spreadsheet from running the cell as a formula. A value such as `-5` also gets the `'`.
-- `exported_at` in the JSON is in UTC.
+- CSV and TSV files have these columns, in this order: `id`, `timestamp`, `user_id`, `user_email`, `user_name`, `action`, `component_type`, `component_id`, `component_name`, `description`, `org_id`, `ip_address` and `changes`.
+- `changes` is a JSON object in a JSON file. In CSV and TSV it is one cell of compact JSON.
+- TSV is plain. It uses no quotes, and a tab or a line break inside a cell becomes a space.
+- `exported_at` and the timestamps in the JSON are in UTC.
 
 With `-o -`, the data goes to stdout and every notice goes to stderr, e.g. `cja-audit-log-monitor cli export -F csv -o - > logs.csv`.
 

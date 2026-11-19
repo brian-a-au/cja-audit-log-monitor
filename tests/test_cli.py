@@ -721,9 +721,7 @@ class TestTailCommand:
         )
         assert result.exit_code == 0
 
-    def test_tail_command_constructs_notification_manager(
-        self, monkeypatch
-    ) -> None:
+    def test_tail_command_constructs_notification_manager(self, monkeypatch) -> None:
         """`cja-audit-log-monitor cli tail` opens NotificationManager as a `with` block."""
         runner = CliRunner()
         fake_nm = MagicMock()
@@ -737,9 +735,11 @@ class TestTailCommand:
         fake_settings.notifications.slack_webhook_url = None
         fake_settings.notifications.webhooks = []
 
-        with patch("cja_audit_log_monitor.cli.get_client") as gc, \
-             patch("cja_audit_log_monitor.cli.NotificationManager", return_value=fake_nm), \
-             patch("cja_audit_log_monitor.cli.AuditLogMonitor") as mon_cls:
+        with (
+            patch("cja_audit_log_monitor.cli.get_client") as gc,
+            patch("cja_audit_log_monitor.cli.NotificationManager", return_value=fake_nm),
+            patch("cja_audit_log_monitor.cli.AuditLogMonitor") as mon_cls,
+        ):
             gc.return_value = (MagicMock(), fake_settings)
             mon = MagicMock()
             mon_cls.return_value = mon
@@ -766,9 +766,7 @@ class TestTuiCommand:
 class TestMonitorCommand:
     """Tests for monitor command NotificationManager wiring."""
 
-    def test_monitor_command_constructs_notification_manager(
-        self, monkeypatch
-    ) -> None:
+    def test_monitor_command_constructs_notification_manager(self, monkeypatch) -> None:
         """`cja-audit-log-monitor cli monitor` opens NotificationManager as a `with` block."""
         runner = CliRunner()
         fake_nm = MagicMock()
@@ -782,9 +780,11 @@ class TestMonitorCommand:
         fake_settings.notifications.slack_webhook_url = None
         fake_settings.notifications.webhooks = []
 
-        with patch("cja_audit_log_monitor.cli.get_client") as gc, \
-             patch("cja_audit_log_monitor.cli.NotificationManager", return_value=fake_nm), \
-             patch("cja_audit_log_monitor.cli.AuditLogMonitor") as mon_cls:
+        with (
+            patch("cja_audit_log_monitor.cli.get_client") as gc,
+            patch("cja_audit_log_monitor.cli.NotificationManager", return_value=fake_nm),
+            patch("cja_audit_log_monitor.cli.AuditLogMonitor") as mon_cls,
+        ):
             gc.return_value = (MagicMock(), fake_settings)
             mon = MagicMock()
             mon_cls.return_value = mon
@@ -925,7 +925,10 @@ class TestAnomaliesCommand:
         client.get_all_logs = MagicMock(return_value=iter([]))
 
         settings = CJASettings(
-            org_id="x@AdobeOrg", client_id="cid", client_secret="cs", scopes="openid",
+            org_id="x@AdobeOrg",
+            client_id="cid",
+            client_secret="cs",
+            scopes="openid",
             notifications=NotificationConfig(),
         )
         mock_get_client.return_value = (client, settings)
@@ -966,7 +969,10 @@ class TestAnomaliesCommand:
         client.get_all_logs = MagicMock(return_value=iter([MagicMock()]))
 
         settings = CJASettings(
-            org_id="x@AdobeOrg", client_id="cid", client_secret="cs", scopes="openid",
+            org_id="x@AdobeOrg",
+            client_id="cid",
+            client_secret="cs",
+            scopes="openid",
             notifications=NotificationConfig(
                 slack_webhook_url="https://hooks.slack.com/x",
                 notify_on_anomalies=True,
@@ -987,10 +993,14 @@ class TestAnomaliesCommand:
         mock_nm_cls.return_value = nm_instance
 
         mock_analyze.return_value = [
-            {"type": "high_activity_user", "user": "a@x.com", "action_count": 50,
-             "average": 10.0, "description": "..."},
-            {"type": "off_hours_activity", "hour": 3, "action_count": 25,
-             "description": "..."},
+            {
+                "type": "high_activity_user",
+                "user": "a@x.com",
+                "action_count": 50,
+                "average": 10.0,
+                "description": "...",
+            },
+            {"type": "off_hours_activity", "hour": 3, "action_count": 25, "description": "..."},
         ]
 
         result = runner.invoke(main, ["cli", "anomalies"])
@@ -1017,7 +1027,10 @@ class TestAnomaliesCommand:
         client.get_all_logs = MagicMock(return_value=iter([MagicMock()]))
 
         settings = CJASettings(
-            org_id="x@AdobeOrg", client_id="cid", client_secret="cs", scopes="openid",
+            org_id="x@AdobeOrg",
+            client_id="cid",
+            client_secret="cs",
+            scopes="openid",
             notifications=NotificationConfig(
                 slack_webhook_url="https://hooks.slack.com/x",
                 notify_on_anomalies=False,
@@ -1038,8 +1051,13 @@ class TestAnomaliesCommand:
         mock_nm_cls.return_value = nm_instance
 
         mock_analyze.return_value = [
-            {"type": "high_activity_user", "user": "a@x.com", "action_count": 50,
-             "average": 10.0, "description": "..."},
+            {
+                "type": "high_activity_user",
+                "user": "a@x.com",
+                "action_count": 50,
+                "average": 10.0,
+                "description": "...",
+            },
         ]
 
         result = runner.invoke(main, ["cli", "anomalies"])
@@ -1066,7 +1084,10 @@ class TestAnomaliesCommand:
         client.get_all_logs = MagicMock(return_value=iter([MagicMock()]))
 
         settings = CJASettings(
-            org_id="x@AdobeOrg", client_id="cid", client_secret="cs", scopes="openid",
+            org_id="x@AdobeOrg",
+            client_id="cid",
+            client_secret="cs",
+            scopes="openid",
             notifications=NotificationConfig(),
         )
         mock_get_client.return_value = (client, settings)
@@ -1084,8 +1105,13 @@ class TestAnomaliesCommand:
         mock_nm_cls.return_value = nm_instance
 
         mock_analyze.return_value = [
-            {"type": "high_activity_user", "user": "a@x.com", "action_count": 50,
-             "average": 10.0, "description": "..."},
+            {
+                "type": "high_activity_user",
+                "user": "a@x.com",
+                "action_count": 50,
+                "average": 10.0,
+                "description": "...",
+            },
         ]
 
         result = runner.invoke(main, ["cli", "anomalies"])
@@ -1197,7 +1223,10 @@ class TestAnomaliesCommand:
         client.get_all_logs = MagicMock(return_value=iter([MagicMock()]))
 
         settings = CJASettings(
-            org_id="x@AdobeOrg", client_id="cid", client_secret="cs", scopes="openid",
+            org_id="x@AdobeOrg",
+            client_id="cid",
+            client_secret="cs",
+            scopes="openid",
             notifications=NotificationConfig(
                 slack_webhook_url="https://hooks.slack.com/x",
                 notify_on_anomalies=True,
@@ -1218,15 +1247,18 @@ class TestAnomaliesCommand:
         mock_nm_cls.return_value = nm_instance
 
         # Same anomaly returned on both cycles
-        anomaly = {"type": "high_activity_user", "user": "a@x.com",
-                   "action_count": 50, "average": 10.0, "description": "..."}
+        anomaly = {
+            "type": "high_activity_user",
+            "user": "a@x.com",
+            "action_count": 50,
+            "average": 10.0,
+            "description": "...",
+        }
         mock_analyze.return_value = [anomaly]
 
         # Allow exactly two cycles, then simulate Ctrl-C during the second wait.
         with patch("cja_audit_log_monitor.cli.time.sleep", side_effect=[None, KeyboardInterrupt]):
-            result = runner.invoke(
-                main, ["cli", "anomalies", "--watch", "--interval", "5"]
-            )
+            result = runner.invoke(main, ["cli", "anomalies", "--watch", "--interval", "5"])
 
         assert result.exit_code == 0
         # Two cycles ran (analyze called twice); dedup suppressed the second
@@ -1254,7 +1286,10 @@ class TestAnomaliesCommand:
         client.get_all_logs = MagicMock(return_value=iter([]))
 
         settings = CJASettings(
-            org_id="x@AdobeOrg", client_id="cid", client_secret="cs", scopes="openid",
+            org_id="x@AdobeOrg",
+            client_id="cid",
+            client_secret="cs",
+            scopes="openid",
             notifications=NotificationConfig(),
         )
         mock_get_client.return_value = (client, settings)
@@ -1273,9 +1308,7 @@ class TestAnomaliesCommand:
         mock_analyze.return_value = []
 
         with patch("cja_audit_log_monitor.cli.time.sleep", side_effect=KeyboardInterrupt):
-            result = runner.invoke(
-                main, ["cli", "anomalies", "--watch", "--interval", "5"]
-            )
+            result = runner.invoke(main, ["cli", "anomalies", "--watch", "--interval", "5"])
 
         assert result.exit_code == 0
         # Exactly one cycle ran before the interrupted sleep stopped the loop.
@@ -1302,7 +1335,10 @@ class TestAnomaliesCommand:
         client.get_all_logs = MagicMock(return_value=iter([MagicMock()]))
 
         settings = CJASettings(
-            org_id="x@AdobeOrg", client_id="cid", client_secret="cs", scopes="openid",
+            org_id="x@AdobeOrg",
+            client_id="cid",
+            client_secret="cs",
+            scopes="openid",
             notifications=NotificationConfig(
                 slack_webhook_url="https://hooks.slack.com/x",
                 notify_on_anomalies=True,
@@ -1314,9 +1350,7 @@ class TestAnomaliesCommand:
         nm_instance.__enter__ = MagicMock(return_value=nm_instance)
         nm_instance.__exit__ = MagicMock(return_value=False)
         nm_instance.is_configured = MagicMock(return_value=True)
-        nm_instance.notify_anomaly = MagicMock(
-            side_effect=[RuntimeError("boom"), {"slack"}]
-        )
+        nm_instance.notify_anomaly = MagicMock(side_effect=[RuntimeError("boom"), {"slack"}])
         nm_instance.pop_failures = MagicMock(return_value=[])
         nm_instance.config = settings.notifications
         nm_instance.channels = MagicMock(
@@ -1325,10 +1359,19 @@ class TestAnomaliesCommand:
         mock_nm_cls.return_value = nm_instance
 
         mock_analyze.return_value = [
-            {"type": "high_activity_user", "user": "a@x.com", "action_count": 50,
-             "average": 10.0, "description": "..."},
-            {"type": "bulk_delete_single_user", "user": "b@x.com", "delete_count": 12,
-             "description": "..."},
+            {
+                "type": "high_activity_user",
+                "user": "a@x.com",
+                "action_count": 50,
+                "average": 10.0,
+                "description": "...",
+            },
+            {
+                "type": "bulk_delete_single_user",
+                "user": "b@x.com",
+                "delete_count": 12,
+                "description": "...",
+            },
         ]
 
         result = runner.invoke(main, ["cli", "anomalies"])
@@ -1338,16 +1381,16 @@ class TestAnomaliesCommand:
     @patch("cja_audit_log_monitor.cli.NotificationManager")
     @patch("cja_audit_log_monitor.cli.analyze_for_anomalies")
     @patch("cja_audit_log_monitor.cli.get_client")
-    def test_pop_first_failure_drained_to_console(
+    def test_delivery_failures_drained_to_console(
         self,
         mock_get_client: MagicMock,
         mock_analyze: MagicMock,
         mock_nm_cls: MagicMock,
         runner: CliRunner,
     ) -> None:
-        """Whatever pop_first_failure returns is printed to console as a warning.
+        """Whatever pop_failures returns is printed to console as a warning.
 
-        This test mocks pop_first_failure's side_effect directly — it verifies the
+        This test mocks pop_failures directly — it verifies the
         CLI's drain-and-print loop, not end-to-end Slack-failure → warning wiring.
         The wiring is symmetric to the alert path tested in test_notifications.py.
         """
@@ -1360,7 +1403,10 @@ class TestAnomaliesCommand:
         client.get_all_logs = MagicMock(return_value=iter([MagicMock()]))
 
         settings = CJASettings(
-            org_id="x@AdobeOrg", client_id="cid", client_secret="cs", scopes="openid",
+            org_id="x@AdobeOrg",
+            client_id="cid",
+            client_secret="cs",
+            scopes="openid",
             notifications=NotificationConfig(
                 slack_webhook_url="https://hooks.slack.com/x",
                 notify_on_anomalies=True,
@@ -1381,8 +1427,13 @@ class TestAnomaliesCommand:
         mock_nm_cls.return_value = nm_instance
 
         mock_analyze.return_value = [
-            {"type": "high_activity_user", "user": "a@x.com", "action_count": 50,
-             "average": 10.0, "description": "..."},
+            {
+                "type": "high_activity_user",
+                "user": "a@x.com",
+                "action_count": 50,
+                "average": 10.0,
+                "description": "...",
+            },
         ]
 
         result = runner.invoke(main, ["cli", "anomalies"])
@@ -1442,7 +1493,10 @@ class TestAnomaliesCommand:
         client.__exit__ = MagicMock(return_value=False)
 
         settings = CJASettings(
-            org_id="x@AdobeOrg", client_id="cid", client_secret="cs", scopes="openid",
+            org_id="x@AdobeOrg",
+            client_id="cid",
+            client_secret="cs",
+            scopes="openid",
             notifications=NotificationConfig(),
         )
         mock_get_client.return_value = (client, settings)
@@ -1460,9 +1514,7 @@ class TestAnomaliesCommand:
         ]
 
         with patch("cja_audit_log_monitor.cli.time.sleep", side_effect=[None, KeyboardInterrupt]):
-            result = runner.invoke(
-                main, ["cli", "anomalies", "--watch", "--interval", "5"]
-            )
+            result = runner.invoke(main, ["cli", "anomalies", "--watch", "--interval", "5"])
 
         assert result.exit_code == 0
         assert mock_cycle.call_count == 2
@@ -1503,9 +1555,7 @@ class TestAnomaliesCommand:
         mock_cycle.side_effect = RateLimitError(retry_after=60)
 
         with patch("cja_audit_log_monitor.cli.time.sleep", side_effect=KeyboardInterrupt) as sleep:
-            result = runner.invoke(
-                main, ["cli", "anomalies", "--watch", "--interval", "5"]
-            )
+            result = runner.invoke(main, ["cli", "anomalies", "--watch", "--interval", "5"])
 
         assert result.exit_code == 0
         sleep.assert_called_once_with(60)
@@ -1546,9 +1596,7 @@ class TestAnomaliesCommand:
         mock_nm_cls.return_value = nm_instance
         mock_cycle.side_effect = APIError("terminal", status_code=status_code)
 
-        result = runner.invoke(
-            main, ["cli", "anomalies", "--watch", "--interval", "5"]
-        )
+        result = runner.invoke(main, ["cli", "anomalies", "--watch", "--interval", "5"])
 
         assert result.exit_code == 1
         assert mock_cycle.call_count == 1
@@ -1628,7 +1676,10 @@ class TestAnomaliesCommand:
         client.__exit__ = MagicMock(return_value=False)
 
         settings = CJASettings(
-            org_id="x@AdobeOrg", client_id="cid", client_secret="cs", scopes="openid",
+            org_id="x@AdobeOrg",
+            client_id="cid",
+            client_secret="cs",
+            scopes="openid",
             notifications=NotificationConfig(),
         )
         mock_get_client.return_value = (client, settings)
@@ -1700,10 +1751,18 @@ class TestMonitorFatalAndTailFilter:
         client = MagicMock()
         client.get_logs.return_value = AuditLogResponse(
             content=[
-                AuditLogEntry(id="1", action="CREATE", user_email="alice@example.com",
-                              component_name="mine-comp"),
-                AuditLogEntry(id="2", action="CREATE", user_email="bob@example.com",
-                              component_name="other-comp"),
+                AuditLogEntry(
+                    id="1",
+                    action="CREATE",
+                    user_email="alice@example.com",
+                    component_name="mine-comp",
+                ),
+                AuditLogEntry(
+                    id="2",
+                    action="CREATE",
+                    user_email="bob@example.com",
+                    component_name="other-comp",
+                ),
             ],
             last=True,
         )
@@ -1748,13 +1807,18 @@ class TestJsonOutputIsMachineSafe:
             (["report"], False),
         ],
         ids=[
-            "list", "search", "user", "component", "query", "verify", "stats", "alerts-list",
+            "list",
+            "search",
+            "user",
+            "component",
+            "query",
+            "verify",
+            "stats",
+            "alerts-list",
             "report",
         ],
     )
-    def test_stdout_is_valid_json(
-        self, runner: CliRunner, args: list[str], has_name: bool
-    ) -> None:
+    def test_stdout_is_valid_json(self, runner: CliRunner, args: list[str], has_name: bool) -> None:
         entry = AuditLogEntry(
             id="entry-1",
             timestamp=datetime(2024, 1, 15, 10, 30, 0, tzinfo=UTC),
@@ -1879,9 +1943,7 @@ class TestHandleCliErrors:
         target = tmp_path / "out.json"
         client.get_all_logs.return_value = [MagicMock()]
 
-        with patch(
-            "cja_audit_log_monitor.cli.export_entries", side_effect=OSError("disk [/full]")
-        ):
+        with patch("cja_audit_log_monitor.cli.export_entries", side_effect=OSError("disk [/full]")):
             result = runner.invoke(main, ["cli", "export", "-o", str(target)])
 
         assert result.exit_code == 1
@@ -2059,9 +2121,7 @@ class TestDateRangeValidation:
 
     @pytest.mark.parametrize("command", [["search"], ["export", "-o", "x.json"]])
     def test_start_after_end_exits_2(self, runner: CliRunner, command: list[str]) -> None:
-        result = runner.invoke(
-            main, ["cli", *command, "-s", "2026-02-01", "-e", "2026-01-01"]
-        )
+        result = runner.invoke(main, ["cli", *command, "-s", "2026-02-01", "-e", "2026-01-01"])
         assert result.exit_code == 2
 
 
@@ -2133,9 +2193,7 @@ class TestEmptyResultsAndStreams:
         assert json.loads(out.read_text())["anomalies"] == []
 
     @patch("cja_audit_log_monitor.cli.get_client")
-    def test_broken_pipe_is_quiet(
-        self, mock_get_client: MagicMock, runner: CliRunner
-    ) -> None:
+    def test_broken_pipe_is_quiet(self, mock_get_client: MagicMock, runner: CliRunner) -> None:
         mock_get_client.side_effect = BrokenPipeError(32, "Broken pipe")
 
         result = runner.invoke(main, ["cli", "list", "-F", "json"])
@@ -2391,7 +2449,10 @@ class TestConsistentFlags:
     @patch("cja_audit_log_monitor.cli.NotificationManager")
     @patch("cja_audit_log_monitor.cli.get_client")
     def test_tail_component_id_long_flag_works(
-        self, mock_get_client: MagicMock, mock_nm: MagicMock, mock_monitor: MagicMock,
+        self,
+        mock_get_client: MagicMock,
+        mock_nm: MagicMock,
+        mock_monitor: MagicMock,
         runner: CliRunner,
     ) -> None:
         mock_get_client.return_value = (_fake_client([]), _settings())
@@ -2403,7 +2464,10 @@ class TestConsistentFlags:
     @patch("cja_audit_log_monitor.cli.NotificationManager")
     @patch("cja_audit_log_monitor.cli.get_client")
     def test_monitor_duration_long_flag_works(
-        self, mock_get_client: MagicMock, mock_nm: MagicMock, mock_monitor: MagicMock,
+        self,
+        mock_get_client: MagicMock,
+        mock_nm: MagicMock,
+        mock_monitor: MagicMock,
         runner: CliRunner,
     ) -> None:
         mock_get_client.return_value = (_fake_client([]), _settings())
@@ -2414,9 +2478,7 @@ class TestConsistentFlags:
 
     @pytest.mark.parametrize("command", ["stats", "top-users"])
     @patch("cja_audit_log_monitor.cli.get_client")
-    def test_top_uses_n(
-        self, mock_get_client: MagicMock, runner: CliRunner, command: str
-    ) -> None:
+    def test_top_uses_n(self, mock_get_client: MagicMock, runner: CliRunner, command: str) -> None:
         mock_get_client.return_value = (_fake_client([]), _settings())
         result = runner.invoke(main, ["cli", command, "-n", "3"])
         assert result.exit_code == 0
@@ -2433,9 +2495,7 @@ class TestConsistentFlags:
         assert old.exit_code == 2
 
     @patch("cja_audit_log_monitor.cli.get_client")
-    def test_choices_ignore_case(
-        self, mock_get_client: MagicMock, runner: CliRunner
-    ) -> None:
+    def test_choices_ignore_case(self, mock_get_client: MagicMock, runner: CliRunner) -> None:
         mock_get_client.return_value = (_fake_client([]), _settings())
         result = runner.invoke(main, ["cli", "find-action", "-a", "export"])
         assert result.exit_code == 0
@@ -2792,8 +2852,17 @@ class TestFlagsReachTheRequest:
         _, query = self._run(
             runner,
             [
-                "search", "-u", "a@example.com", "-a", "DELETE", "-C", "PROJECT",
-                "--component-id", "c-1", "--desc", "words",
+                "search",
+                "-u",
+                "a@example.com",
+                "-a",
+                "DELETE",
+                "-C",
+                "PROJECT",
+                "--component-id",
+                "c-1",
+                "--desc",
+                "words",
             ],
         )
         params = query.to_query_params()
@@ -2834,10 +2903,12 @@ def test_tail_filters_by_component_and_action(runner: CliRunner, flags, shown, h
     client = MagicMock()
     client.get_logs.return_value = AuditLogResponse(
         content=[
-            AuditLogEntry(id="1", action="DELETE", component_id="c-mine",
-                          component_name="mine-comp"),
-            AuditLogEntry(id="2", action="CREATE", component_id="c-other",
-                          component_name="other-comp"),
+            AuditLogEntry(
+                id="1", action="DELETE", component_id="c-mine", component_name="mine-comp"
+            ),
+            AuditLogEntry(
+                id="2", action="CREATE", component_id="c-other", component_name="other-comp"
+            ),
         ],
         last=True,
     )
@@ -3014,8 +3085,12 @@ class TestAnomalyDeliveryPerChannel:
     def _deletes(user="mallory@example.com", count=12):
         now = datetime(2026, 3, 1, 12, 30, tzinfo=UTC)  # midday: no off-hours anomaly
         return [
-            AuditLogEntry(id=f"{user}-{i}", action="DELETE", user_email=user,
-                          timestamp=now - timedelta(minutes=i))
+            AuditLogEntry(
+                id=f"{user}-{i}",
+                action="DELETE",
+                user_email=user,
+                timestamp=now - timedelta(minutes=i),
+            )
             for i in range(count)
         ]
 
@@ -3024,9 +3099,13 @@ class TestAnomalyDeliveryPerChannel:
         from cja_audit_log_monitor.notifications import NotificationManager
 
         hooks = [WebhookConfig(url=self.HOOK)] if webhook else []
-        return NotificationManager(NotificationConfig(
-            slack_webhook_url=self.SLACK, webhooks=hooks, notify_on_anomalies=True,
-        ))
+        return NotificationManager(
+            NotificationConfig(
+                slack_webhook_url=self.SLACK,
+                webhooks=hooks,
+                notify_on_anomalies=True,
+            )
+        )
 
     def _cycles(self, nm, entries_by_cycle, monkeypatch=None, days=None):
         from cja_audit_log_monitor.cli import _run_anomalies_cycle
@@ -3055,8 +3134,10 @@ class TestAnomalyDeliveryPerChannel:
     def test_same_anomaly_not_resent_at_midnight(self, httpx_mock, monkeypatch) -> None:
         httpx_mock.add_response(url=self.SLACK, status_code=200)
         self._cycles(
-            self._manager(), [self._deletes(), self._deletes()],
-            monkeypatch, ["2026-03-01", "2026-03-02"],
+            self._manager(),
+            [self._deletes(), self._deletes()],
+            monkeypatch,
+            ["2026-03-01", "2026-03-02"],
         )
         assert len(self._posts(httpx_mock, self.SLACK)) == 1
 
@@ -3085,7 +3166,10 @@ def test_verbose_does_not_log_httpcore_internals(fake_api, tmp_path) -> None:
     result = subprocess.run(
         [*command(), "-v", "cli", "list", "-F", "json"],
         env=fake_api.env(tmp_path / "missing.yaml"),
-        cwd=tmp_path, capture_output=True, text=True, timeout=60,
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=60,
     )
     assert result.returncode == 0, result.stderr
     assert "receive_response_headers" not in result.stderr
@@ -3246,21 +3330,32 @@ HOSTILE_NAME = "\x1b]0;PWNED\x07\x1b[2J[/b] 日本 \ud83d"
 
 
 def _hostile_entry() -> AuditLogEntry:
-    return AuditLogEntry.model_validate({
-        "id": "h1",
-        "dateCreated": "2026-01-15T10:00:00Z",
-        "action": "DELETE",
-        "componentName": HOSTILE_NAME,
-        "componentType": "PROJECT",
-        "user": {"id": "U1", "name": HOSTILE_NAME, "email": "h@example.com"},
-        "description": HOSTILE_NAME,
-    })
+    return AuditLogEntry.model_validate(
+        {
+            "id": "h1",
+            "dateCreated": "2026-01-15T10:00:00Z",
+            "action": "DELETE",
+            "componentName": HOSTILE_NAME,
+            "componentType": "PROJECT",
+            "user": {"id": "U1", "name": HOSTILE_NAME, "email": "h@example.com"},
+            "description": HOSTILE_NAME,
+        }
+    )
 
 
 @pytest.mark.parametrize(
     "args",
-    [["list"], ["list", "-D"], ["search"], ["show", "h1"], ["stats"], ["timeline"],
-     ["top-users"], ["user", "-u", "h@example.com"], ["list", "-F", "json"]],
+    [
+        ["list"],
+        ["list", "-D"],
+        ["search"],
+        ["show", "h1"],
+        ["stats"],
+        ["timeline"],
+        ["top-users"],
+        ["user", "-u", "h@example.com"],
+        ["list", "-F", "json"],
+    ],
     ids=lambda a: " ".join(a),
 )
 def test_hostile_names_on_every_output(args) -> None:
@@ -3302,8 +3397,16 @@ def test_hostile_names_in_slack() -> None:
 @pytest.mark.parametrize("encoding", ["cp1252", "ascii"])
 @pytest.mark.parametrize(
     "args",
-    [["list"], ["search"], ["query", "--today"], ["stats"], ["verify"], ["alerts", "list"],
-     ["timeline"], ["show", "id-1"]],
+    [
+        ["list"],
+        ["search"],
+        ["query", "--today"],
+        ["stats"],
+        ["verify"],
+        ["alerts", "list"],
+        ["timeline"],
+        ["show", "id-1"],
+    ],
     ids=lambda a: " ".join(a),
 )
 def test_commands_run_on_a_narrow_stdout(fake_api, tmp_path, encoding, args) -> None:
@@ -3315,8 +3418,11 @@ def test_commands_run_on_a_narrow_stdout(fake_api, tmp_path, encoding, args) -> 
     env = fake_api.env(tmp_path / "missing.yaml")
     env["PYTHONIOENCODING"] = encoding
     result = subprocess.run(
-        [*command(), "cli", *args], env=env, cwd=tmp_path,
-        capture_output=True, timeout=60,
+        [*command(), "cli", *args],
+        env=env,
+        cwd=tmp_path,
+        capture_output=True,
+        timeout=60,
     )
     assert result.returncode == 0, result.stderr.decode(errors="replace")
     assert b"UnicodeEncodeError" not in result.stderr
@@ -3331,8 +3437,11 @@ def test_csv_to_stdout_is_utf8_on_cp1252(fake_api, tmp_path) -> None:
     env = fake_api.env(tmp_path / "missing.yaml")
     env["PYTHONIOENCODING"] = "cp1252"
     result = subprocess.run(
-        [*command(), "cli", "export", "-F", "csv", "-o", "-"], env=env, cwd=tmp_path,
-        capture_output=True, timeout=60,
+        [*command(), "cli", "export", "-F", "csv", "-o", "-"],
+        env=env,
+        cwd=tmp_path,
+        capture_output=True,
+        timeout=60,
     )
     assert result.returncode == 0, result.stderr.decode(errors="replace")
     assert "日本 report" in result.stdout.decode("utf-8")
@@ -3340,8 +3449,12 @@ def test_csv_to_stdout_is_utf8_on_cp1252(fake_api, tmp_path) -> None:
 
 class TestOneLineErrors:
     @pytest.mark.parametrize(
-        "args", [["list", "-d", "100000000"], ["anomalies", "--lookback", "100000000"],
-                 ["stats", "-d", "4000"]],
+        "args",
+        [
+            ["list", "-d", "100000000"],
+            ["anomalies", "--lookback", "100000000"],
+            ["stats", "-d", "4000"],
+        ],
         ids=["list", "anomalies", "stats"],
     )
     def test_huge_days_is_a_usage_error(self, runner, args) -> None:
@@ -3386,9 +3499,15 @@ class TestFiltersAndDates:
 
     @pytest.mark.parametrize(
         "args",
-        [["search", "-u", ""], ["search", "--component-id", " "], ["search", "--desc", ""],
-         ["query", "-u", ""], ["timeline", "-u", " "], ["tail", "-u", ""],
-         ["tail", "--component-id", ""]],
+        [
+            ["search", "-u", ""],
+            ["search", "--component-id", " "],
+            ["search", "--desc", ""],
+            ["query", "-u", ""],
+            ["timeline", "-u", " "],
+            ["tail", "-u", ""],
+            ["tail", "--component-id", ""],
+        ],
         ids=lambda a: " ".join(a),
     )
     def test_blank_filter_is_a_usage_error(self, args) -> None:
@@ -3443,8 +3562,9 @@ class TestMessagesAndHelp:
         return client
 
     def test_empty_stats_json_has_user_count(self, runner) -> None:
-        with patch("cja_audit_log_monitor.cli.get_client",
-                   return_value=(self._client(), _settings())):
+        with patch(
+            "cja_audit_log_monitor.cli.get_client", return_value=(self._client(), _settings())
+        ):
             result = runner.invoke(main, ["cli", "stats", "-F", "json"])
         assert result.exit_code == 0, result.output
         assert json.loads(result.stdout)["statistics"]["user_count"] == 0
@@ -3457,8 +3577,9 @@ class TestMessagesAndHelp:
         assert result.exit_code == 1
 
     def test_show_prints_ids_and_dashes(self, runner) -> None:
-        entry = AuditLogEntry(id="e1", user_id="U1@AdobeID", user_name="Una",
-                              component_id="c-9", action="EDIT")
+        entry = AuditLogEntry(
+            id="e1", user_id="U1@AdobeID", user_name="Una", component_id="c-9", action="EDIT"
+        )
         client = self._client()
         client.get_logs_paginated.side_effect = lambda *a, **k: iter([entry])
         client.get_all_logs.return_value = [entry]
@@ -3506,9 +3627,15 @@ class TestMessagesAndHelp:
 
     @pytest.mark.parametrize(
         ("command", "option"),
-        [("search", "--component"), ("export", "--action"), ("export", "--component"),
-         ("query", "--action"), ("query", "--component"), ("timeline", "--action"),
-         ("timeline", "--component")],
+        [
+            ("search", "--component"),
+            ("export", "--action"),
+            ("export", "--component"),
+            ("query", "--action"),
+            ("query", "--component"),
+            ("timeline", "--action"),
+            ("timeline", "--component"),
+        ],
     )
     def test_repeatable_options_say_so(self, runner, command, option) -> None:
         result = runner.invoke(main, ["cli", command, "--help"], terminal_width=200)
@@ -3536,7 +3663,10 @@ def test_verify_says_authentication_failed_for_an_ims_failure(runner) -> None:
     client.__enter__ = MagicMock(return_value=client)
     client.__exit__ = MagicMock(return_value=False)
     client.verify_connection.return_value = {
-        "connected": False, "authenticated": False, "org_id": "o", "api_url": "u",
+        "connected": False,
+        "authenticated": False,
+        "org_id": "o",
+        "api_url": "u",
         "error": "invalid_client",
     }
     with patch("cja_audit_log_monitor.cli.get_client", return_value=(client, _settings())):
@@ -3561,3 +3691,25 @@ def test_cli_config_shows_the_org_id_in_full(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("ORG_ID", "ABCDEF0123456789@AdobeOrg")
     result = CliRunner().invoke(main, ["-c", str(tmp_path / "x.yaml"), "cli", "config"])
     assert "ABCDEF0123456789@AdobeOrg" in result.stdout
+
+
+@pytest.mark.parametrize("command", ["monitor", "tail"])
+def test_interval_has_the_config_upper_limit(runner, command) -> None:
+    """G56: the CLI --interval takes at most 86,400 seconds, like monitor_interval."""
+    result = runner.invoke(main, ["cli", command, "-i", "86401"])
+    assert result.exit_code == 2
+
+
+def test_api_network_failure_is_a_network_error(runner) -> None:
+    """G57: an API call that cannot reach the host reads like the login step does."""
+    from cja_audit_log_monitor.client import APIError
+
+    client = MagicMock()
+    client.__enter__ = MagicMock(return_value=client)
+    client.__exit__ = MagicMock(return_value=False)
+    client.get_all_logs.side_effect = APIError(
+        "could not reach cja.adobe.io (ConnectError)", network=True
+    )
+    with patch("cja_audit_log_monitor.cli.get_client", return_value=(client, _settings())):
+        result = runner.invoke(main, ["cli", "list"])
+    assert result.stderr.startswith("Network error: could not reach cja.adobe.io")

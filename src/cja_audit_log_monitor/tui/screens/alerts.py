@@ -45,9 +45,7 @@ class AlertsScreen(ContentView):
                     "[$text-muted]toggle rules on/off or test against recent data[/$text-muted]"
                 )
             ),
-            Static(
-                resolve_tcss_markup("[$text-muted]changes last until you quit[/$text-muted]")
-            ),
+            Static(resolve_tcss_markup("[$text-muted]changes last until you quit[/$text-muted]")),
             rules_list,
             buttons,
             Static("TEST RESULTS", classes="section-label"),
@@ -105,14 +103,8 @@ class AlertsScreen(ContentView):
             Container with rule card content.
         """
         enabled_class = "rule-enabled" if rule.enabled else "rule-disabled"
-        actions = (
-            ", ".join(rule.actions).lower() if rule.actions else "all actions"
-        )
-        components = (
-            ", ".join(rule.components).lower()
-            if rule.components
-            else "all components"
-        )
+        actions = ", ".join(rule.actions).lower() if rule.actions else "all actions"
+        components = ", ".join(rule.components).lower() if rule.components else "all components"
         if len(components) > 40:
             components = components[:39] + "…"
         name = literal(rule.name)
@@ -166,7 +158,7 @@ class AlertsScreen(ContentView):
     def _reset_rules(self) -> None:
         """Rebuild the rules from settings, undoing this session's toggles."""
         self._state.reset_alert_rules()
-        self.app.notify("Rules reset", severity="information")
+        self.app.notify("rules reset", severity="information")
         self.refresh_data()
 
     def _test_rules(self) -> str:
@@ -174,7 +166,9 @@ class AlertsScreen(ContentView):
         query = build_date_range_query(1)
         entries = self._state.client.get_all_logs(query, max_entries=TEST_RULES_MAX_ENTRIES)
         if not entries:
-            return "[dim]No audit logs found to test against[/dim]"
+            return resolve_tcss_markup(
+                "[$text-muted]no audit logs found to test against[/$text-muted]"
+            )
 
         fired = self._state.new_test_engine().check_batch(entries)
         if len(entries) >= TEST_RULES_MAX_ENTRIES:

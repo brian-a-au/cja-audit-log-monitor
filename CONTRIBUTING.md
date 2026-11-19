@@ -6,7 +6,7 @@ Thank you for your interest in this project. Bug reports, ideas, and pull reques
 
 Open an issue on GitHub. For a bug, please include these details:
 
-- The command you ran, or the TUI screen you were on.
+- The command you ran, or the TUI view you were on.
 - What you expected to happen and what happened instead.
 - Your Python version and operating system.
 
@@ -42,7 +42,7 @@ Before you merge, run the full CI checks on your machine:
 scripts/ci.sh
 ```
 
-This script runs the linter and the tests on Python 3.11 to 3.14, builds the package, and checks that the wheel installs. It runs the same steps as `.github/workflows/ci.yml`. The GitHub CI jobs are skipped while the repository is private, so this script is the CI check until then.
+This script runs the linter and the tests on Python 3.11 to 3.14. Then it runs the floors step, which runs the tests with the lowest versions of the direct dependencies that `pyproject.toml` allows. Last, it builds the package and checks that the wheel installs. The script will also gain a step that runs the tests with the newest dependency versions, and a step that runs `ruff format --check`. `uv.lock` is tracked in the repository. It runs the same steps as `.github/workflows/ci.yml`. The GitHub CI jobs are skipped while the repository is private, so this script is the CI check until then.
 
 If you change how the TUI looks, regenerate the screenshots and include them in your pull request:
 
@@ -50,7 +50,7 @@ If you change how the TUI looks, regenerate the screenshots and include them in 
 uv run python scripts/capture_screenshots.py
 ```
 
-See [docs/development.md](docs/development.md) for the project layout.
+See [docs/development.md](docs/development.md) for the project layout. The core modules are `cli.py`, `auth.py`, `client.py`, `config.py`, `models.py`, `alerts.py`, `monitor.py`, `notifications.py`, `formatters.py`, `stats.py`, `export.py` and `utils.py`.
 
 ## Open a pull request
 

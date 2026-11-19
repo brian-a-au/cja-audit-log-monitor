@@ -22,7 +22,7 @@ At 160 columns or wider, the dashboard fills the screen and the hourly chart gro
 - Press `r` or click `refresh` to load the window again.
 - Check the connection. If the header shows `disconnected`, the dashboard shows the error and points you to the config view (`c`) or to `cja-audit-log-monitor cli verify`.
 - See anomalies without writing any rules first.
-- Press `l` for the log browser, `s` for statistics, `m` for the monitor, or `a` for the alert rules.
+- Press `l` for the log browser, `s` for statistics, `m` for the monitor, or `a` for the alerts view.
 
 ## When to use it
 

@@ -48,8 +48,11 @@ scripts/ci.sh 3.11 3.14
 
 The script runs the same steps as `.github/workflows/ci.yml`:
 - lint and tests on each Python version, each in its own environment under `.ci/`
+- the floors step, which installs the lowest versions of the direct dependencies that `pyproject.toml` allows and runs the tests on Python 3.11
 - a build of the sdist and wheel
 - a test install of the wheel, which then runs `cja-audit-log-monitor --help`
+
+The script will also gain two steps: one that runs the tests with the newest versions of the dependencies, and one that runs `ruff format --check`. `uv.lock` is tracked in the repository, so `uv sync` installs the same versions on every machine.
 
 Your normal `.venv` is not changed. uv downloads any Python version you do not have.
 
@@ -57,7 +60,7 @@ The GitHub CI jobs are skipped while the repository is private, because Actions 
 
 ## Project layout
 
-The package lives in `src/cja_audit_log_monitor/`. Core modules: `cli.py`, `auth.py`, `client.py`, `config.py`, `models.py`, `alerts.py`, `monitor.py`, `formatters.py`, `stats.py`, `export.py`. The TUI lives under `src/cja_audit_log_monitor/tui/` (app, state, styles, screens, widgets, modals).
+The package lives in `src/cja_audit_log_monitor/`. Core modules: `cli.py`, `auth.py`, `client.py`, `config.py`, `models.py`, `alerts.py`, `monitor.py`, `notifications.py`, `formatters.py`, `stats.py`, `export.py`, `utils.py`. The TUI lives under `src/cja_audit_log_monitor/tui/` (app, state, styles, screens, widgets, modals).
 
 Each TUI view (`tui/screens/*.py`) subclasses `ContentView`, a plain widget that the app mounts once, on first visit, into a `ContentSwitcher`. Views are not Textual `Screen` objects. A `Screen` mounted as a child gets no space on the screen and shows nothing.
 

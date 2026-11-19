@@ -355,14 +355,15 @@ class TestControlCharacters:
         assert "\nline" in text  # a line break stays
 
     def test_entry_text_fields_are_printable(self) -> None:
-        entry = AuditLogEntry.model_validate({
-            "id": "1",
-            "componentName": self.HOSTILE,
-            "description": self.HOSTILE,
-            "user": {"id": "U1", "name": self.HOSTILE, "email": "e\x1b@example.com"},
-        })
-        for value in (entry.component_name, entry.description, entry.user_name,
-                      entry.user_email):
+        entry = AuditLogEntry.model_validate(
+            {
+                "id": "1",
+                "componentName": self.HOSTILE,
+                "description": self.HOSTILE,
+                "user": {"id": "U1", "name": self.HOSTILE, "email": "e\x1b@example.com"},
+            }
+        )
+        for value in (entry.component_name, entry.description, entry.user_name, entry.user_email):
             assert "\x1b" not in value
 
 

@@ -24,7 +24,7 @@ Each page has `default_page_size` rows, which is 100 unless you change it in the
   - Press `Esc` to leave the search or user box. What you typed stays in the box.
   - Press `/` to jump to the search box.
 - **Reset the filters** with the `reset` button.
-- **Page through the results** with `n` and `p`, or with the buttons.
+- **Page through the results** with `n` and `p`, or with the buttons. The footer does not list `n` and `p`, but they still work.
 - **Look at one entry** with `Enter`. When you move the cursor, the panel shows the new entry. Press `Esc` or `Enter` again to close it. Press `Tab` to move into the panel, and then scroll it with the arrow keys.
 - **Export** with `e` to JSON, CSV or TSV. You can export the page you see, or every entry that matches the filters, up to 10,000 entries.
 
@@ -32,10 +32,13 @@ Each page has `default_page_size` rows, which is 100 unless you change it in the
 
 The export dialog asks for a format and a file path.
 
+- The dialog checks the path before it exports. A `~` at the start is read as your home folder. It refuses a path that ends with `/` or names a folder, a folder that does not exist or that you cannot write to, and a file name longer than 255 bytes. It shows the reason in the dialog.
 - If the file already exists, the dialog asks you to press export a second time to replace it.
 - Press `Enter` in the path box to export.
 - The file is written the same safe way as the CLI `export` command. The tool writes a temporary file first and then moves it into place, so a failed export leaves no partial file. Only you can read the new file (mode 0600). In CSV and TSV, cells that a spreadsheet could run as a formula get a `'` in front. See [`export`](../cli.md#export) for the details.
-- When it is done, the dialog shows the full path. When the 10,000 limit applies, it says so, e.g. "exported 10,000 of 12,345 (limit reached)".
+- When it is done, the dialog shows the full path. If the dialog is already closed, a toast shows the result. When the 10,000 limit cut the export, it says so, e.g. "exported 10,000 of 12,345 (limit reached)".
+- The export has the same fields and columns as the CLI `export` command, including `changes`.
+- The command palette (`ctrl+p`) is turned off in the app.
 - Before the log browser has loaded, or after a failed load, the "this page" choice is turned off.
 
 ## When to use it

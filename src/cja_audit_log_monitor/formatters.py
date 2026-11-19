@@ -141,11 +141,6 @@ def get_action_color(action: str) -> str:
     return TCSS_TOKEN_HEX.get(token, token)
 
 
-def get_action_color_token(action: str) -> str:
-    """Get the action's severity as a Textual tcss token (`$danger`, etc.)."""
-    return ACTION_COLORS.get(action, "$text-muted")
-
-
 def get_action_icon(action: str) -> str:
     """Get severity glyph for an action type."""
     return ACTION_ICONS.get(action, "·")
@@ -190,9 +185,7 @@ def format_logs_table(
     # Core columns. Time and action never shrink or wrap; the text columns
     # give way (with an ellipsis) on narrow terminals.
     table.add_column("Time (UTC)", style="dim", no_wrap=True, min_width=19)
-    table.add_column(
-        "User", ratio=2, min_width=10, no_wrap=True, overflow="ellipsis"
-    )
+    table.add_column("User", ratio=2, min_width=10, no_wrap=True, overflow="ellipsis")
     table.add_column("Action", no_wrap=True, min_width=13)
     table.add_column(
         "Component",
@@ -207,9 +200,7 @@ def format_logs_table(
         # leaves the user column room at 80 columns.
         table.add_column("Details", ratio=3, min_width=17, overflow="fold")
     else:
-        table.add_column(
-            "Name", ratio=3, min_width=8, no_wrap=True, overflow="ellipsis"
-        )
+        table.add_column("Name", ratio=3, min_width=8, no_wrap=True, overflow="ellipsis")
 
     for entry in entries:
         action_str = entry.action or "-"

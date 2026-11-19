@@ -65,7 +65,7 @@ The config file holds alert rules, notification channels and default values. Cre
 cja-audit-log-monitor cli init
 ```
 
-The command writes a config file with the default settings, the alert rules (commented out) and a commented example `notifications:` block for Slack and webhooks. If the file already exists, it asks before it replaces it.
+The command writes a config file with the default settings, the four built-in alert rules (commented out) and a commented example `notifications:` block for Slack and webhooks. If the file already exists, it asks before it replaces it.
 
 See [Alert Rules](alert-rules.md) for the rule format and [Delivery channels](alert-rules.md#delivery-channels) for notifications. The default for `notify_on_anomalies` is `false`. Set it to `true` to let `cja-audit-log-monitor cli anomalies` send anomalies.
 
@@ -74,16 +74,16 @@ See [Alert Rules](alert-rules.md) for the rule format and [Delivery channels](al
 The tool looks for the config file in this order:
 
 1. The path you give with `-c` / `--config`, e.g. `cja-audit-log-monitor -c ./config.yaml cli list`. The option goes before `cli` or `tui`.
-2. The path in the `CJA_CONFIG_PATH` environment variable.
+2. The path in the `CJA_CONFIG_PATH` environment variable. A `~` at the start is read as your home folder.
 3. `~/.cja-audit-log-monitor/config.yaml`.
 
-`cli init` writes to the same path that the tool reads. `cli config` shows which path is in use.
+`cli init` writes to the same path that the tool reads. `cli config` shows which path is in use, and adds "(not found)" when the file does not exist. If the file you give with `-c` does not exist, the tool gives a warning and uses the environment variables and `.env` only.
 
 ### The file is private
 
-`cli init` creates the folder so that only you can open it (mode 0700). It creates the file so that only you can read it (mode 0600). The file can hold webhook URLs and `Authorization` headers, so keep it that way.
+When `cli init` creates the folder, it makes it so that only you can open it (mode 0700). It does not change a folder that already exists. It refuses to write through a symbolic link. It creates the file so that only you can read it (mode 0600). The file can hold webhook URLs and `Authorization` headers, so keep it that way.
 
-If other users can read the file, the tool logs a warning each time it loads the file. The warning suggests `chmod 600` with the file's path.
+If other users can read the file, the tool gives a warning each time it loads the file. The warning suggests `chmod 600` with the file's path.
 
 ### Which value wins
 
@@ -103,20 +103,24 @@ So a value in an environment variable or in `.env` always beats the same value i
 | `api_base_url` | `https://cja.adobe.io` | An https URL | Every API call. You can also set it with the `API_BASE_URL` environment variable. |
 | `ims_base_url` | `https://ims-na1.adobelogin.com` | An https URL | Login. You can also set it with the `IMS_BASE_URL` environment variable. |
 | `default_page_size` | 100 | 1 to 1000 | Rows per page in the TUI log browser. The CLI does not use it. |
-| `default_days` | 7 | 1 or more | The TUI dashboard and stats views. It is also the default for `--days` when you leave it off (`user`, `export`, `stats`, `report`, `timeline`, `find-action` and `top-users`). |
-| `monitor_interval` | 60 | 5 or more | The starting value of the TUI monitor interval box. It is also the default for `cli monitor --interval`. |
-| `alert_rules` | the built-in rules | A list of rules | See [Alert Rules](alert-rules.md). |
+| `default_days` | 7 | 1 to 3,650 | The TUI dashboard and stats views. It is also the default for `--days` when you leave it off (`user`, `export`, `stats`, `report`, `timeline`, `find-action` and `top-users`). |
+| `monitor_interval` | 60 | 5 to 86,400 | The starting value of the TUI monitor interval box. It is also the default for `cli monitor --interval`. |
+| `alert_rules` | the built-in rules | A list of rules | See [Alert Rules](alert-rules.md). Leave the key out to use the built-in rules. `alert_rules: []` means no rules. |
 | `notifications` | none | A block of channels | See [Delivery channels](alert-rules.md#delivery-channels). |
 
-The two URLs must use https. Plain http is allowed only for `localhost` and `127.0.0.1`, which is useful for tests. Any other http URL stops the settings from loading.
+The config file can also hold the credentials, with the keys `org_id`, `client_id`, `secret` and `scopes`. An environment variable or `.env` still wins over the file.
 
-A value below its minimum, or a `default_page_size` above 1000, stops the config file from loading. The error names the key and does not show the value. An older file that still has `output_format:` keeps working. The tool ignores that key and logs a warning. It also logs a warning for any other key it does not know.
+The two URLs must use https. Plain http is allowed only for `localhost` and `127.0.0.1`, which is useful for tests. Any other http URL stops the settings from loading. So does a URL that holds a user name or a password.
+
+A value outside its allowed range stops the config file from loading. The error names the key and does not show the value. An older file that still has `output_format:` keeps working. The tool ignores that key and gives a warning. It also gives a warning for any other key it does not know. This includes keys inside a rule, inside the `notifications:` block and inside a webhook. The warning names where the key is, e.g. `alert_rules[0]: ignoring unknown setting 'treshold_count'`.
+
+The CLI prints these warnings on stderr. The TUI shows them as toasts. The TUI has no log file.
 
 ### When the config file has an error
 
-The CLI prints one line that starts with `Configuration error:` and names the file and the problem. Then it exits 1.
+The CLI prints one line that starts with `Configuration error:` and names the problem. When the bad value came from the config file, the line names the file. When it came from an environment variable or `.env`, the line says `environment or .env`. Then it exits 1.
 
-The TUI still starts. It loads settings from the environment variables and `.env` only. The header shows a short warning about the file, so you can fix it and use **reload settings** on the config screen.
+The TUI still starts. It loads settings from the environment variables and `.env` only. The header shows a short warning about the file, so you can fix it and use **reload settings** in the config view. If the file is still broken when you reload, the TUI keeps the settings it has and says why.
 
 ## 5. Verify
 
