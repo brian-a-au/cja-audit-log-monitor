@@ -13,7 +13,6 @@ import pytest
 from cja_audit_log_monitor.export import (
     entry_to_dict,
     export_entries,
-    export_stats_to_json,
     export_to_csv,
     export_to_json,
     export_to_tsv,
@@ -521,12 +520,3 @@ class TestStreamOutput:
         count = export_entries([sample_audit_entry], out, "tsv")
         assert count == 1
         assert out.getvalue().splitlines()[0].startswith("id\ttimestamp")
-
-
-class TestExportStatsToStream:
-    def test_stream_output_ends_with_a_newline(self) -> None:
-        buffer = StringIO()
-        export_stats_to_json({"total_entries": 1}, buffer)
-        text = buffer.getvalue()
-        assert text.endswith("}\n")
-        assert json.loads(text)["statistics"] == {"total_entries": 1}

@@ -254,31 +254,3 @@ def export_entries(
         raise ValueError(
             f"Unsupported export format: {output_format}. Use 'json', 'csv', or 'tsv'."
         )
-
-
-def export_stats_to_json(
-    stats: dict[str, Any],
-    output: Path | TextIO,
-    pretty: bool = True,
-) -> None:
-    """Export statistics to JSON file.
-
-    Args:
-        stats: Statistics dictionary.
-        output: Output file path or file object.
-        pretty: Whether to format JSON with indentation.
-    """
-    data = {
-        "exported_at": datetime.now(UTC).isoformat(),
-        "statistics": stats,
-    }
-
-    if isinstance(output, Path):
-        with atomic_write(output) as f:
-            if pretty:
-                json.dump(data, f, indent=2, default=str)
-            else:
-                json.dump(data, f, default=str)
-    else:
-        json.dump(data, output, indent=2 if pretty else None, default=str)
-        output.write("\n")

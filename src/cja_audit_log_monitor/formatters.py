@@ -379,30 +379,3 @@ def format_alert(
         title=Text(f"⚠️  ALERT: {alert_name}"),
         border_style="red",
     )
-
-
-def print_logs(
-    entries: list[AuditLogEntry],
-    console: Console | None = None,
-    show_details: bool = False,
-) -> None:
-    """Print audit logs to console."""
-    if console is None:
-        console = Console()
-
-    if not entries:
-        console.print("[dim]No audit logs found.[/dim]")
-        return
-
-    table = format_logs_table(entries, console, show_details)
-    console.print(table)
-    console.print(f"\n[dim]Showing {len(entries)} entries[/dim]")
-
-
-def print_stats(stats: dict[str, Any], console: Console | None = None) -> None:
-    """Print statistics to console."""
-    if console is None:
-        console = Console()
-
-    panel = format_stats_panel(stats)
-    console.print(panel)
