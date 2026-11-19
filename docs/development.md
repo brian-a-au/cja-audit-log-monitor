@@ -24,14 +24,16 @@ uv run pytest tests/test_client.py::TestAuditLogsClient::test_get_logs
 
 Tests use `pytest-httpx` to mock HTTP calls. When testing the client, mock both the IMS token endpoint and the CJA API endpoint. CLI tests use Click's `CliRunner` and must prefix subgroup commands with `["cli", ...]`.
 
-## Linting
+## Linting and formatting
 
 ```bash
 # Check
 uv run ruff check src tests scripts
+uv run ruff format --check src tests scripts
 
-# Auto-fix
+# Fix
 uv run ruff check src tests scripts --fix
+uv run ruff format src tests scripts
 ```
 
 Ruff checks lines up to 100 characters and targets Python 3.11. It uses the rule sets `E`, `F`, `I`, `N`, `W` and `UP`.
@@ -49,14 +51,28 @@ scripts/ci.sh 3.11 3.14
 The script runs the same steps as `.github/workflows/ci.yml`:
 - lint and tests on each Python version, each in its own environment under `.ci/`
 - the floors step, which installs the lowest versions of the direct dependencies that `pyproject.toml` allows and runs the tests on Python 3.11
+- the newest step, which installs the newest versions of the dependencies and runs the tests on Python 3.14
 - a build of the sdist and wheel
 - a test install of the wheel, which then runs `cja-audit-log-monitor --help`
 
-The script will also gain two steps: one that runs the tests with the newest versions of the dependencies, and one that runs `ruff format --check`. `uv.lock` is tracked in the repository, so `uv sync` installs the same versions on every machine.
+Each version step runs `ruff check`, `ruff format --check` and the tests. `uv.lock` is tracked in the repository, so `uv sync` installs the same versions on every machine. Your normal `.venv` is not changed. uv downloads any Python version you do not have.
 
-Your normal `.venv` is not changed. uv downloads any Python version you do not have.
+GitHub runs the same jobs on every pull request and every push to `main`, and you can start them by hand from the Actions tab.
 
-The GitHub CI jobs are skipped while the repository is private, because Actions minutes are limited for private repositories. Run `scripts/ci.sh` before you merge to `main`. The GitHub jobs run again on their own once the repository is public.
+## Before you open a pull request
+
+- Write a test that fails without your change, and check that it passes with it.
+- Run `scripts/ci.sh`, or at least the tests and both ruff commands.
+- If you change how the TUI looks, regenerate the screenshots (see below) and look at them.
+- Never put credentials, org IDs, real names or emails in code, tests, screenshots or commit messages. Test data uses example.com.
+
+## Releases
+
+1. Set the new version in `pyproject.toml` and add a dated section to `CHANGELOG.md`.
+2. Merge that change to `main`.
+3. Push a tag that matches the version, e.g. `git tag v0.2.0 && git push origin v0.2.0`.
+
+The tag starts `.github/workflows/release.yml`. It runs CI, checks that the tag matches the version, builds the package, and waits for the maintainer to approve the `pypi` environment. It then publishes to PyPI through trusted publishing, with no stored token, and creates the GitHub release.
 
 ## Project layout
 

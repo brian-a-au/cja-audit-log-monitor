@@ -1,57 +1,9 @@
-# Contributing
+# Contributing to cja-audit-log-monitor
 
-Thank you for your interest in this project. Bug reports, ideas, and pull requests are welcome.
+Bug reports, ideas and pull requests are welcome. [docs/development.md](docs/development.md) is the main guide for people and coding agents. It covers setup, the checks that must pass, where the code is, and how releases work.
 
-## Report a bug or ask for a feature
+To report a bug, open an issue with the command you ran or the TUI view you were on, what you expected and what happened, and your Python version and operating system. Remove credentials, org IDs and user emails from anything you paste.
 
-Open an issue on GitHub. For a bug, please include these details:
+Open an issue to discuss a large feature before you write it. For a bug fix, write a test that fails without your change. In the pull request, describe the change and say how you checked it, and keep each pull request to one topic. You do not need Adobe credentials to run the tests, because they mock every API call.
 
-- The command you ran, or the TUI view you were on.
-- What you expected to happen and what happened instead.
-- Your Python version and operating system.
-
-Please remove credentials, org IDs, and user emails from any logs you paste.
-
-## Set up a development environment
-
-You need Python 3.11 or newer and [uv](https://docs.astral.sh/uv/).
-
-```bash
-git clone https://github.com/brian-a-au/cja-audit-log-monitor
-cd cja-audit-log-monitor
-uv sync --all-extras
-```
-
-You do not need Adobe credentials to run the tests. The tests mock every API call.
-
-## Make a change
-
-1. Create a branch from `main`.
-2. Write a test that fails without your change.
-3. Make the change.
-4. Run the tests and the linter. Both must pass.
-
-```bash
-uv run pytest
-uv run ruff check src tests scripts
-```
-
-Before you merge, run the full CI checks on your machine:
-
-```bash
-scripts/ci.sh
-```
-
-This script runs the linter and the tests on Python 3.11 to 3.14. Then it runs the floors step, which runs the tests with the lowest versions of the direct dependencies that `pyproject.toml` allows. Last, it builds the package and checks that the wheel installs. The script will also gain a step that runs the tests with the newest dependency versions, and a step that runs `ruff format --check`. `uv.lock` is tracked in the repository. It runs the same steps as `.github/workflows/ci.yml`. The GitHub CI jobs are skipped while the repository is private, so this script is the CI check until then.
-
-If you change how the TUI looks, regenerate the screenshots and include them in your pull request:
-
-```bash
-uv run python scripts/capture_screenshots.py
-```
-
-See [docs/development.md](docs/development.md) for the project layout. The core modules are `cli.py`, `auth.py`, `client.py`, `config.py`, `models.py`, `alerts.py`, `monitor.py`, `notifications.py`, `formatters.py`, `stats.py`, `export.py` and `utils.py`.
-
-## Open a pull request
-
-Describe what the change does and why. Link the issue if there is one. Keep each pull request to one topic, so it is easy to review.
+By taking part, you agree to follow the [code of conduct](CODE_OF_CONDUCT.md). Report security issues privately, as [SECURITY.md](SECURITY.md) describes.
