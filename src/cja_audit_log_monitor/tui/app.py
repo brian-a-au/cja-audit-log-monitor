@@ -13,6 +13,7 @@ from textual.screen import ModalScreen
 from textual.widgets import ContentSwitcher, Footer, Static
 
 from ..formatters import literal, resolve_tcss_markup
+from . import log_toasts
 from .screens.base import ContentView, classify_error
 from .state import AppState
 
@@ -125,6 +126,17 @@ class CJAAuditApp(App):
         self._screens: dict[str, ContentView] = {}
         self._mounted_views: set[str] = set()
         self._nav_narrow: bool | None = None
+        self._log_toasts: log_toasts.ToastLogHandler | None = None
+
+    def on_load(self) -> None:
+        """Before anything loads settings, start showing logged warnings as toasts."""
+        self._log_toasts = log_toasts.install(self)
+
+    def on_unmount(self) -> None:
+        """Stop sending log records to this app."""
+        if self._log_toasts is not None:
+            log_toasts.uninstall(self._log_toasts)
+            self._log_toasts = None
 
     NAV_KEYS = {
         "nav-dashboard": "d",
@@ -246,6 +258,8 @@ class CJAAuditApp(App):
 
         # Show dashboard by default
         await self._show_screen("dashboard")
+        if self._log_toasts is not None:
+            self._log_toasts.flush_pending()
 
     def on_resize(self, event: events.Resize) -> None:
         """Re-render the sidebar labels when the width crosses the narrow breakpoint.

@@ -134,7 +134,8 @@ def handle_cli_errors(func: Callable[P, R]) -> Callable[P, R]:
         except OSError as e:
             label = "File error"
             error = e
-        err_console.print(f"[red]{label}:[/red] {escape(str(error))}")
+        # soft_wrap: one logical line, however long the path, so the terminal wraps it.
+        err_console.print(f"[red]{label}:[/red] {escape(str(error))}", soft_wrap=True)
         sys.exit(1)
 
     return wrapper
@@ -263,7 +264,8 @@ def parse_components(components: tuple[str, ...] | None) -> list[ComponentType] 
 @click.option(
     "--config",
     "-c",
-    type=click.Path(exists=False, path_type=Path),
+    # readable=False: the config loader reports an unreadable file in its own one line form.
+    type=click.Path(exists=False, readable=False, path_type=Path),
     help="Path to config file",
 )
 @click.version_option(version=__version__)
@@ -984,8 +986,7 @@ def init(ctx: click.Context) -> None:
     console.print("  ORG_ID=your_org_id@AdobeOrg")
     console.print("  CLIENT_ID=your_client_id")
     console.print("  SECRET=your_client_secret")
-    console.print("  SCOPES=<copy from Developer Console>")
-    console.print("\n[dim]Or add them to a .env file. See .env.example for details.[/dim]")
+    console.print("\n[dim]Or add them to a .env file in the folder you run from.[/dim]")
 
 
 @cli.command()
@@ -999,7 +1000,8 @@ def config(ctx: click.Context) -> None:
 
     console.print("[bold]Current Configuration[/bold]\n")
     effective_config_path = config_path or get_config_path()
-    console.print(f"Config file: {escape(str(effective_config_path))}")
+    missing = "" if effective_config_path.exists() else " (not found)"
+    console.print(f"Config file: {escape(str(effective_config_path))}{missing}")
     console.print(f"API base URL: {escape(str(settings.api_base_url))}")
     console.print(f"IMS base URL: {escape(str(settings.ims_base_url))}")
     console.print(f"Log browser page size (TUI): {settings.default_page_size}")

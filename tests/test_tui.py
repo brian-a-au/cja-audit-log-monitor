@@ -10,6 +10,7 @@ from textual.color import Color
 from textual.widgets import Button, Checkbox, Static
 
 from cja_audit_log_monitor.alerts import FiredAlert
+from cja_audit_log_monitor.config import ConfigError
 from cja_audit_log_monitor.models import AlertRule
 from cja_audit_log_monitor.notifications import NotificationManager
 from cja_audit_log_monitor.tui.app import CJAAuditApp, HelpScreen
@@ -1441,6 +1442,23 @@ class TestMonitorStream:
             assert len(warnings) == 1 and "60" in warnings[0]
             screen._stop_monitoring()
 
+    async def test_huge_interval_is_refused(self, mock_app_state, monkeypatch):
+        from textual.widgets import Input
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40), notifications=True) as pilot:
+            screen = await _start_monitor_without_loop(app, pilot, monkeypatch)
+            screen._stop_monitoring()
+            await pilot.pause()
+            box = screen.query_one("#interval-input", Input)
+            box.value = "9999999999"
+            await pilot.pause()
+            screen._start_monitoring()
+            await pilot.pause()
+            assert mock_app_state.monitor.interval == 60
+            assert any("86,400" in n.message for n in app._notifications)
+            screen._stop_monitoring()
+
     async def test_good_interval_applies_on_enter(self, mock_app_state):
         from textual.widgets import Input
 
@@ -1908,8 +1926,10 @@ class TestSettingsScreen:
         state.settings
         assert state.config_error_summary is None
         config.write_text("monitor_interval: [unclosed\n")
-        state.reload_settings()
+        with pytest.raises(ConfigError):
+            state.reload_settings()
         assert state.config_error_summary
+        assert state.settings.monitor_interval == 30
         config.write_text("monitor_interval: 45\n")
         state.reload_settings()
         assert state.config_error_summary is None
@@ -3409,7 +3429,7 @@ def test_state_survives_bad_config_file_and_bad_env(tmp_path, monkeypatch) -> No
     assert str(path) in (state.config_error or "")
     summary = state.config_error_summary or ""
     assert summary.startswith("config.yaml: ")
-    assert "environment: monitor_interval" in summary
+    assert "environment or .env: monitor_interval" in summary
 
 
 async def test_header_keeps_connection_status_with_bad_config(mock_app_state, tmp_path) -> None:
@@ -4221,3 +4241,144 @@ async def test_app_loads_dashboard_on_start(mock_app_state):
         view = app._screens["dashboard"]
         assert isinstance(view, DashboardScreen)
         assert await _wait_for(lambda: "user" in _plain(view.query_one("#top-users")), pilot)
+
+
+async def test_tui_starts_on_any_bad_config(bad_config) -> None:
+    """The TUI starts on any config mistake and shows a one line summary."""
+    from .conftest import SECRET_MARK
+
+    state = AppState(bad_config)
+    app = _make_app(state)
+    async with app.run_test(size=(140, 40)) as pilot:
+        await pilot.pause()
+        assert app.is_running
+        assert state.config_error_summary
+        assert SECRET_MARK not in (state.config_error or "")
+        assert state.config_error_summary.split(":")[0] in _status_text(app)
+
+
+async def test_tui_reload_on_any_bad_config(bad_config, tmp_path) -> None:
+    """Reload settings onto any config mistake keeps the app running and says why."""
+    good = tmp_path / "good.yaml"
+    good.write_text("monitor_interval: 30\n")
+    good.chmod(0o600)
+    state = AppState(good)
+    app = _make_app(state)
+    async with app.run_test(size=(140, 40), notifications=True) as pilot:
+        await pilot.press("c")
+        await pilot.pause()
+        state._config_path = bad_config
+        view = app._screens["settings"]
+        await view._reload_settings()
+        await pilot.pause()
+        assert app.is_running
+        assert state.config_error_summary
+
+
+# ---------------------------------------------------------------------------
+# Logged warnings show as toasts (G12)
+# ---------------------------------------------------------------------------
+
+
+async def test_tui_shows_config_permission_warning(tmp_path) -> None:
+    path = tmp_path / "config.yaml"
+    path.write_text("monitor_interval: 30\n")
+    path.chmod(0o644)
+    app = _make_app(AppState(path))
+    async with app.run_test(size=(140, 40), notifications=True) as pilot:
+        assert await _wait_for(
+            lambda: any("chmod 600" in n.message for n in app._notifications), pilot
+        )
+
+
+async def test_tui_shows_unknown_key_warning(tmp_path) -> None:
+    path = tmp_path / "config.yaml"
+    path.write_text("monitor_intervall: 30\n")
+    path.chmod(0o600)
+    app = _make_app(AppState(path))
+    async with app.run_test(size=(140, 40), notifications=True) as pilot:
+        assert await _wait_for(
+            lambda: any("monitor_intervall" in n.message for n in app._notifications), pilot
+        )
+
+
+async def test_tui_shows_a_warning_logged_on_a_worker_thread(mock_app_state) -> None:
+    import asyncio
+    import logging
+
+    app = _make_app(mock_app_state)
+    async with app.run_test(size=(140, 40), notifications=True) as pilot:
+        await pilot.pause()
+        log = logging.getLogger("cja_audit_log_monitor.notifications")
+        await asyncio.to_thread(log.error, "Failed to send webhook to example.com/…")
+        assert await _wait_for(
+            lambda: any("Failed to send webhook" in n.message for n in app._notifications),
+            pilot,
+        )
+
+
+async def test_toast_log_handler_is_removed_after_the_app_ends(mock_app_state) -> None:
+    import logging
+
+    from cja_audit_log_monitor.tui.log_toasts import ToastLogHandler
+
+    app = _make_app(mock_app_state)
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+    handlers = logging.getLogger("cja_audit_log_monitor").handlers
+    assert not any(isinstance(h, ToastLogHandler) for h in handlers)
+
+
+class TestReloadKeepsWhatWorks:
+    """A failed reload keeps the working settings; toggles survive a reload (G40)."""
+
+    @staticmethod
+    def _state(tmp_path):
+        path = tmp_path / "config.yaml"
+        path.write_text("client_id: from-file\nmonitor_interval: 30\n")
+        path.chmod(0o600)
+        state = AppState(path)
+        assert state.settings.client_id == "from-file"
+        return state, path
+
+    def test_reload_onto_a_broken_config_keeps_working_settings(self, tmp_path):
+        from cja_audit_log_monitor.config import ConfigError
+
+        state, path = self._state(tmp_path)
+        path.write_text("monitor_interval: [unclosed\n")
+        with pytest.raises(ConfigError):
+            state.reload_settings()
+        assert state.settings.client_id == "from-file"
+        assert state.settings.monitor_interval == 30
+        assert state.config_error_summary
+
+    def test_reload_keeps_rule_toggles(self, tmp_path):
+        state, path = self._state(tmp_path)
+        state.alert_engine.rules[0].enabled = False
+        name = state.alert_engine.rules[0].name
+        path.write_text("client_id: from-file\nmonitor_interval: 45\n")
+        state.reload_settings()
+        assert state.settings.monitor_interval == 45
+        rules = {rule.name: rule for rule in state.alert_engine.rules}
+        assert rules[name].enabled is False
+
+    def test_reset_rules_turns_toggles_back_on(self, tmp_path):
+        state, path = self._state(tmp_path)
+        state.alert_engine.rules[0].enabled = False
+        state.reload_settings()
+        state.reset_alert_rules()
+        assert all(rule.enabled for rule in state.alert_engine.rules)
+
+    async def test_reload_button_with_a_broken_config_warns(self, tmp_path):
+        state, path = self._state(tmp_path)
+        app = _make_app(state)
+        async with app.run_test(size=(140, 40), notifications=True) as pilot:
+            await pilot.press("c")
+            await pilot.pause()
+            path.write_text("monitor_interval: [unclosed\n")
+            await app._screens["settings"]._reload_settings()
+            await pilot.pause()
+            assert any(
+                "keeping the current settings" in n.message for n in app._notifications
+            )
+            assert state.settings.client_id == "from-file"

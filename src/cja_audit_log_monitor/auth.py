@@ -38,8 +38,8 @@ class TokenManager:
 
             if not self.settings.is_oauth_configured():
                 raise AuthenticationError(
-                    "OAuth not configured. Set ORG_ID, CLIENT_ID, SECRET, and SCOPES "
-                    "environment variables. See .env.example for details."
+                    "OAuth not configured. Set ORG_ID, CLIENT_ID and SECRET as environment "
+                    "variables or in a .env file."
                 )
 
             token = self._get_oauth_token()

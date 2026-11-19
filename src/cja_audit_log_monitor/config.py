@@ -2,6 +2,7 @@
 
 import logging
 import os
+import re
 import stat
 import sys
 from contextvars import ContextVar
@@ -10,7 +11,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 import yaml
-from pydantic import Field, SecretStr, ValidationError, field_validator
+from pydantic import BaseModel, Field, SecretStr, ValidationError, field_validator
 from pydantic.fields import FieldInfo
 from pydantic_settings import (
     BaseSettings,
@@ -18,12 +19,21 @@ from pydantic_settings import (
     SettingsConfigDict,
 )
 
-from .models import AlertRule, NotificationConfig
+try:
+    from pydantic_settings import SettingsError
+except ImportError:  # pydantic-settings 2.0 keeps it in the sources module
+    from pydantic_settings.sources import SettingsError  # type: ignore[no-redef,attr-defined]
+
+from .models import AlertRule, NotificationConfig, WebhookConfig
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_CONFIG_DIR = Path.home() / ".cja-audit-log-monitor"
 DEFAULT_CONFIG_FILE = DEFAULT_CONFIG_DIR / "config.yaml"
+
+# Upper limits, so a typo cannot overflow a date or a timer.
+MAX_MONITOR_INTERVAL = 86_400  # one day, in seconds
+MAX_DAYS = 3_650  # about ten years
 
 # Parsed YAML for the load_config call in progress; read by ConfigFileSource.
 _config_file_data: ContextVar[dict[str, Any]] = ContextVar("_config_file_data", default={})
@@ -99,12 +109,15 @@ class CJASettings(BaseSettings):
         default=100, ge=1, le=1000, description="Default page size for queries (1 to 1000)"
     )
     default_days: int = Field(
-        default=7, ge=1, description="Default number of days for date range"
+        default=7, ge=1, le=MAX_DAYS, description="Default number of days for date range"
     )
 
     # Monitoring settings
     monitor_interval: int = Field(
-        default=60, ge=5, description="Polling interval in seconds (at least 5)"
+        default=60,
+        ge=5,
+        le=MAX_MONITOR_INTERVAL,
+        description="Polling interval in seconds (5 to 86,400)",
     )
 
     # Alert settings
@@ -144,6 +157,8 @@ class CJASettings(BaseSettings):
     def validate_endpoint_url(cls, v: str) -> str:
         """Require https, allowing plain http only for localhost (tests, local mocks)."""
         parsed = urlparse(v)
+        if parsed.username is not None or parsed.password is not None:
+            raise ValueError("must not hold a user name or password")
         if parsed.scheme == "https" and parsed.hostname:
             return v
         if parsed.scheme == "http" and parsed.hostname in ("localhost", "127.0.0.1"):
@@ -174,41 +189,120 @@ def load_config(config_path: Path | None = None, *, use_file: bool = True) -> CJ
     config_data: dict[str, Any] = {}
 
     # Determine config file path
+    explicit = config_path is not None
     if config_path is None:
         config_path = get_config_path()
 
     # Load from YAML config file if it exists
     if use_file and config_path.exists():
-        _warn_if_not_private(config_path)
-        with open(config_path) as f:
-            try:
-                yaml_config = yaml.safe_load(f)
-            except yaml.YAMLError as e:
-                detail = (str(e).strip().splitlines() or ["unknown error"])[0]
-                raise ConfigError(
-                    f"{config_path}: not valid YAML ({detail})",
-                    f"{config_path.name}: not valid YAML ({detail})",
-                ) from e
-        if yaml_config is not None and not isinstance(yaml_config, dict):
-            raise ConfigError(
-                f"{config_path}: expected a mapping of settings at the top level",
-                f"{config_path.name}: expected a mapping of settings at the top level",
-            )
-        if yaml_config:
-            config_data.update(yaml_config)
-            for key in config_data:
-                if key not in CJASettings.model_fields:
-                    logger.warning("%s: ignoring unknown setting %r", config_path, key)
+        config_data.update(_read_config_file(config_path))
+    elif use_file and explicit and not config_path.is_symlink():
+        logger.warning("config file %s not found; using environment only", config_path)
 
     token = _config_file_data.set(config_data)
     try:
         return CJASettings()
     except ValidationError as e:
-        source = str(config_path) if use_file else "environment"
-        short = config_path.name if use_file else "environment"
-        raise ConfigError(f"{source}: {e}", _validation_summary(short, e)) from e
+        field = str(e.errors()[0]["loc"][0]) if e.errors()[0]["loc"] else ""
+        if use_file and field in config_data and not _set_outside_file(field):
+            source, short = str(config_path), config_path.name
+        else:
+            source = short = "environment or .env"
+        raise ConfigError(_validation_summary(source, e), _validation_summary(short, e)) from None
+    except SettingsError as e:
+        # A JSON-valued env var or .env line (e.g. NOTIFICATIONS) that does not parse.
+        # The message never holds the value; keep only the field name.
+        field = _settings_error_field(e)
+        text = f"environment or .env: {field}: not valid JSON"
+        raise ConfigError(text, text) from None
     finally:
         _config_file_data.reset(token)
+
+
+def _set_outside_file(field: str) -> bool:
+    """Whether an env var or the .env file sets ``field`` (they win over the config file)."""
+    if any(name.lower() == field for name in os.environ):
+        return True
+    env_file = Path(".env")
+    if not env_file.is_file():
+        return False
+    try:
+        from dotenv import dotenv_values
+
+        return any(str(name).lower() == field for name in dotenv_values(env_file))
+    except Exception:  # an unreadable .env fails later with its own error
+        return False
+
+
+def _settings_error_field(error: Exception) -> str:
+    """The field name from pydantic-settings' 'error parsing value for field "x"' text."""
+    match = re.search(r'field "([^"]+)"', str(error))
+    return match.group(1) if match else "a setting"
+
+
+def _read_config_file(config_path: Path) -> dict[str, Any]:
+    """Parse the YAML config file. Every failure is a ConfigError that never shows content.
+
+    Each error is raised ``from None``: a chained exception would carry the parsed data
+    (and the secret) into a traceback.
+    """
+
+    def fail(problem: str) -> ConfigError:
+        return ConfigError(f"{config_path}: {problem}", f"{config_path.name}: {problem}")
+
+    try:
+        _warn_if_not_private(config_path)
+        with open(config_path, encoding="utf-8") as f:
+            yaml_config = yaml.safe_load(f)
+    except yaml.YAMLError as e:
+        detail = (str(e).strip().splitlines() or ["unknown error"])[0]
+        raise fail(f"not valid YAML ({detail})") from None
+    except UnicodeDecodeError:
+        raise fail("not valid UTF-8 text") from None
+    except IsADirectoryError:
+        raise fail("is a folder, not a file") from None
+    except PermissionError:
+        raise fail("cannot be read (permission denied)") from None
+    except OSError as e:
+        raise fail(f"cannot be read ({e.strerror or type(e).__name__})") from None
+    except RecursionError:
+        raise fail("nested too deeply") from None
+    if yaml_config is None:
+        return {}
+    if not isinstance(yaml_config, dict):
+        raise fail("expected a mapping of settings at the top level")
+    bad_keys = [key for key in yaml_config if not isinstance(key, str)]
+    if bad_keys:
+        raise fail(f"setting names must be text (found {type(bad_keys[0]).__name__})")
+    for key in yaml_config:
+        if key not in CJASettings.model_fields:
+            logger.warning("%s: ignoring unknown setting %r", config_path, key)
+    _warn_nested_unknown_keys(yaml_config, config_path)
+    return yaml_config
+
+
+def _warn_unknown_keys(data: Any, model: type[BaseModel], where: str, path: Path) -> None:
+    """Warn about keys of ``data`` that ``model`` does not have. Non-dicts are left to pydantic."""
+    if not isinstance(data, dict):
+        return
+    for key in data:
+        if key not in model.model_fields:
+            logger.warning("%s: %s: ignoring unknown setting %r", path, where, key)
+
+
+def _warn_nested_unknown_keys(config: dict[str, Any], path: Path) -> None:
+    """Warn about typos inside rules, the notifications block and each webhook."""
+    rules = config.get("alert_rules")
+    if isinstance(rules, list):
+        for index, rule in enumerate(rules):
+            _warn_unknown_keys(rule, AlertRule, f"alert_rules[{index}]", path)
+    notifications = config.get("notifications")
+    _warn_unknown_keys(notifications, NotificationConfig, "notifications", path)
+    if isinstance(notifications, dict) and isinstance(notifications.get("webhooks"), list):
+        for index, webhook in enumerate(notifications["webhooks"]):
+            _warn_unknown_keys(
+                webhook, WebhookConfig, f"notifications.webhooks[{index}]", path
+            )
 
 
 def _warn_if_not_private(config_path: Path) -> None:
@@ -226,14 +320,67 @@ def _warn_if_not_private(config_path: Path) -> None:
 
 
 def create_default_config(config_path: Path | None = None) -> Path:
-    """Create a default configuration file."""
+    """Create a default configuration file.
+
+    Only a folder that this call creates is made private (0700); an existing folder keeps
+    its mode. A symlink at ``config_path`` is refused, never followed.
+    """
     if config_path is None:
         config_path = get_config_path()
 
+    created_folder = not config_path.parent.exists()
     config_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    config_path.parent.chmod(0o700)
+    if created_folder:
+        config_path.parent.chmod(0o700)  # mkdir's mode is masked by the umask
 
-    default_config = """# CJA Audit Log Monitor Configuration
+    if config_path.is_symlink():
+        raise ConfigError(f"{config_path} is a symlink; give the path of a real file")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(config_path, flags, 0o600)
+    except OSError as e:
+        raise ConfigError(f"{config_path}: cannot write ({e.strerror})") from None
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(_TEMPLATE_HEAD + _alert_rules_template() + "\n" + _TEMPLATE_NOTIFICATIONS)
+    config_path.chmod(0o600)  # os.open's mode is ignored when the file already exists
+    return config_path
+
+
+def _alert_rules_template() -> str:
+    """The built-in rules as a commented YAML block, so uncommenting keeps all of them."""
+    from .alerts import DEFAULT_ALERT_RULES
+
+    rules = [
+        rule.model_dump(mode="json", exclude_none=True, exclude={"enabled"})
+        for rule in DEFAULT_ALERT_RULES
+    ]
+    block = yaml.safe_dump({"alert_rules": rules}, sort_keys=False, indent=2)
+    lines = [
+        "# Alert rules. These are the built-in rules. If you define any rules here, they",
+        "# replace the built-in rules, so keep the ones you want. To use the block, remove",
+        "# the '# ' marks from the alert_rules lines.",
+        "# Fields: name (required), description, enabled (default true), actions, components,",
+        "# users, threshold_count (default 1), threshold_window_minutes (default 60),",
+        "# per_user (default false). Action and component names are not case sensitive.",
+        "# Off-hours activity (midnight to 5am) is an anomaly check, not a rule.",
+    ]
+    for line in block.splitlines():
+        # safe_dump puts list items at the key's indent; nest them under alert_rules:.
+        lines.append("# " + (line if line.startswith("alert_rules") else "  " + line))
+    lines += [
+        "#",
+        "# An example of an extra rule. To use it, add it under alert_rules: above.",
+        "#   - name: named_account_deletes",
+        "#     actions:",
+        "#     - DELETE",
+        "#     users:   # user id, email, or display name",
+        "#     - someone@example.com",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+_TEMPLATE_HEAD = """\
+# CJA Audit Log Monitor Configuration
 # See .env.example for authentication credentials
 
 # API settings
@@ -250,34 +397,9 @@ monitor_interval: 60
 # OAuth scopes
 scopes: openid,AdobeID,read_organizations,additional_info.projectedProductContext
 
-# Alert rules (example). If you define any rules here, they replace the built-in rules.
-# Fields: name (required), description, enabled (default true), actions, components,
-# users, threshold_count (default 1), threshold_window_minutes (default 60),
-# per_user (default false). Action and component names are not case sensitive.
-# Off-hours activity (midnight to 5am) is an anomaly check, not a rule.
-# alert_rules:
-#   - name: bulk_delete
-#     description: Alert on multiple delete operations
-#     enabled: true
-#     actions:
-#       - DELETE
-#     threshold_count: 5
-#     threshold_window_minutes: 60
-#     per_user: true   # count each user's events separately
-#   - name: bulk_export
-#     description: Multiple export operations
-#     enabled: true
-#     actions:
-#       - EXPORT
-#     threshold_count: 3
-#     threshold_window_minutes: 30
-#     per_user: true
-#   - name: named_account_deletes
-#     actions:
-#       - DELETE
-#     users:   # user id, email, or display name
-#       - someone@example.com
+"""
 
+_TEMPLATE_NOTIFICATIONS = """\
 # Notification channels (uncomment to enable delivery to Slack and/or webhooks)
 # notifications:
 #   slack_webhook_url: https://hooks.slack.com/services/XXX/YYY/ZZZ
@@ -293,18 +415,11 @@ scopes: openid,AdobeID,read_organizations,additional_info.projectedProductContex
 #       include_entry_details: true
 """
 
-    fd = os.open(config_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as f:
-        f.write(default_config)
-    config_path.chmod(0o600)  # os.open's mode is ignored when the file already exists
-
-    return config_path
-
 
 def get_config_path() -> Path:
     """Get the default config file path."""
     # Check environment variable first
     env_path = os.getenv("CJA_CONFIG_PATH")
     if env_path:
-        return Path(env_path)
+        return Path(env_path).expanduser()
     return DEFAULT_CONFIG_FILE

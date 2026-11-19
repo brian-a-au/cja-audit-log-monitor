@@ -389,3 +389,140 @@ class TestAlertRuleConfig:
         with pytest.raises(ConfigError) as excinfo:
             load_config(path)
         assert "input_value" not in str(excinfo.value)
+
+
+def test_no_config_mistake_crashes_or_leaks(bad_config) -> None:
+    """Review Focus 2: every config mistake is a ConfigError that shows no secret."""
+    from .conftest import SECRET_MARK
+
+    with pytest.raises(ConfigError) as info:
+        load_config(bad_config)
+    assert SECRET_MARK not in str(info.value)
+    assert SECRET_MARK not in info.value.summary
+    assert "\n" not in info.value.summary
+
+
+@pytest.mark.parametrize(
+    ("yaml_text", "where", "key"),
+    [
+        ("alert_rules:\n  - name: r\n    treshold_count: 5\n", "alert_rules[0]", "treshold_count"),
+        ("alert_rules:\n  - name: r\n    per-user: true\n", "alert_rules[0]", "per-user"),
+        ("notifications:\n  slack_webhook: https://x.example.com\n", "notifications",
+         "slack_webhook"),
+        ("notifications:\n  webhooks:\n    - url: https://x.example.com\n      time_out: 5\n",
+         "notifications.webhooks[0]", "time_out"),
+    ],
+    ids=["rule-typo", "rule-dash", "slack-typo", "webhook-typo"],
+)
+def test_nested_typo_warns(tmp_path, caplog, yaml_text, where, key) -> None:
+    path = tmp_path / "config.yaml"
+    path.write_text(yaml_text)
+    path.chmod(0o600)
+    with caplog.at_level(logging.WARNING):
+        load_config(path)
+    expected = f"{path}: {where}: ignoring unknown setting {key!r}"
+    assert expected in caplog.text
+
+
+def _uncomment_rules(text: str) -> str:
+    """Remove the '# ' marks from the commented alert_rules block, as the docs say to."""
+    out, inside = [], False
+    for line in text.splitlines():
+        if line.startswith("# alert_rules:"):
+            inside = True
+        elif inside and not line.startswith("#   "):
+            inside = False
+        out.append(line[2:] if inside else line)
+    return "\n".join(out) + "\n"
+
+
+def test_uncommented_template_keeps_the_builtin_rules(tmp_path) -> None:
+    from cja_audit_log_monitor.alerts import DEFAULT_ALERT_RULES
+
+    path = create_default_config(tmp_path / "config.yaml")
+    path.write_text(_uncomment_rules(path.read_text()))
+    names = [rule.name for rule in load_config(path).alert_rules]
+    assert names == [rule.name for rule in DEFAULT_ALERT_RULES]
+    loaded = {rule.name: rule for rule in load_config(path).alert_rules}
+    for rule in DEFAULT_ALERT_RULES:
+        assert loaded[rule.name] == rule
+
+
+def test_init_leaves_an_existing_folder_mode(tmp_path) -> None:
+    folder = tmp_path / "shared"
+    folder.mkdir()
+    folder.chmod(0o755)
+    create_default_config(folder / "config.yaml")
+    assert stat.S_IMODE(folder.stat().st_mode) == 0o755
+
+
+def test_init_makes_a_new_folder_private(tmp_path) -> None:
+    folder = tmp_path / "new"
+    create_default_config(folder / "config.yaml")
+    assert stat.S_IMODE(folder.stat().st_mode) == 0o700
+
+
+def test_init_refuses_a_symlink(tmp_path) -> None:
+    target = tmp_path / "important.txt"
+    target.write_text("keep me")
+    link = tmp_path / "config.yaml"
+    link.symlink_to(target)
+    with pytest.raises(ConfigError):
+        create_default_config(link)
+    assert target.read_text() == "keep me"
+
+
+@pytest.mark.parametrize(
+    ("text", "field"),
+    [("monitor_interval: 86401\n", "monitor_interval"), ("default_days: 3651\n", "default_days")],
+)
+def test_upper_limits(tmp_path, text, field) -> None:
+    path = tmp_path / "config.yaml"
+    path.write_text(text)
+    path.chmod(0o600)
+    with pytest.raises(ConfigError, match=field):
+        load_config(path)
+
+
+def test_values_at_the_upper_limits_load(tmp_path) -> None:
+    path = tmp_path / "config.yaml"
+    path.write_text("monitor_interval: 86400\ndefault_days: 3650\n")
+    path.chmod(0o600)
+    settings = load_config(path)
+    assert (settings.monitor_interval, settings.default_days) == (86400, 3650)
+
+
+def test_endpoint_with_userinfo_is_rejected() -> None:
+    with pytest.raises(ValidationError):
+        CJASettings(api_base_url="https://user:pass@cja.adobe.io")
+
+
+def test_tilde_config_path_is_expanded(monkeypatch) -> None:
+    from cja_audit_log_monitor.config import get_config_path
+
+    monkeypatch.setenv("CJA_CONFIG_PATH", "~/x.yaml")
+    assert get_config_path() == Path.home() / "x.yaml"
+
+
+def test_missing_explicit_config_warns(tmp_path, caplog) -> None:
+    missing = tmp_path / "missing.yaml"
+    with caplog.at_level(logging.WARNING):
+        load_config(missing)
+    assert f"config file {missing} not found; using environment only" in caplog.text
+
+
+def test_missing_default_config_is_quiet(caplog) -> None:
+    with caplog.at_level(logging.WARNING):
+        load_config()
+    assert "not found" not in caplog.text
+
+
+def test_first_message_names_only_the_needed_credentials(sample_settings) -> None:
+    from cja_audit_log_monitor.auth import AuthenticationError, TokenManager
+
+    with pytest.raises(AuthenticationError) as info:
+        TokenManager(CJASettings(_env_file=None)).get_token()
+    text = str(info.value)
+    assert "ORG_ID" in text and "CLIENT_ID" in text and "SECRET" in text
+    assert "SCOPES" not in text
+    assert ".env.example" not in text

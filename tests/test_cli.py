@@ -2821,3 +2821,63 @@ def test_delimited_export_does_not_clobber_a_file_created_during_fetch(
         result = runner.invoke(main, ["cli", "export", "-F", fmt, "-o", str(target)])
     assert result.exit_code == 1
     assert target.read_text() == "someone else"
+
+
+def test_cli_bad_config_is_one_line(bad_config) -> None:
+    from .conftest import SECRET_MARK
+
+    result = CliRunner().invoke(main, ["-c", str(bad_config), "cli", "list"])
+    assert result.exit_code == 1
+    assert result.exception is None or isinstance(result.exception, SystemExit)
+    lines = [line for line in result.stderr.splitlines() if line.strip()]
+    assert len(lines) == 1, result.stderr
+    assert lines[0].startswith("Configuration error:")
+    assert SECRET_MARK not in result.output
+
+
+def test_config_error_is_one_line(tmp_path) -> None:
+    path = tmp_path / "config.yaml"
+    path.write_text("monitor_interval: 4\n")
+    path.chmod(0o600)
+    result = CliRunner().invoke(main, ["-c", str(path), "cli", "list"])
+    assert result.exit_code == 1
+    lines = [line for line in result.stderr.splitlines() if line.strip()]
+    assert len(lines) == 1, result.stderr
+    assert str(path) in lines[0]
+    assert "monitor_interval" in lines[0]
+    assert "pydantic.dev" not in result.stderr
+
+
+def test_env_error_names_the_environment(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("API_BASE_URL", "http://example.com")
+    result = CliRunner().invoke(main, ["-c", str(tmp_path / "missing.yaml"), "cli", "list"])
+    assert result.exit_code == 1
+    line = result.stderr.strip()
+    assert line.startswith("Configuration error: environment or .env: api_base_url")
+    assert "missing.yaml" not in line
+
+
+def test_env_value_overriding_a_file_value_is_blamed_on_the_environment(tmp_path, monkeypatch):
+    path = tmp_path / "config.yaml"
+    path.write_text("monitor_interval: 30\n")
+    path.chmod(0o600)
+    monkeypatch.setenv("monitor_interval", "4")
+    with pytest.raises(Exception) as info:
+        from cja_audit_log_monitor.config import load_config
+
+        load_config(path)
+    assert str(info.value).startswith("environment or .env: monitor_interval")
+
+
+def test_cli_config_marks_a_missing_file(tmp_path) -> None:
+    missing = tmp_path / "missing.yaml"
+    result = CliRunner().invoke(main, ["-c", str(missing), "cli", "config"])
+    assert result.exit_code == 0
+    assert "(not found)" in result.stdout
+
+
+def test_init_message_does_not_ask_for_scopes(tmp_path) -> None:
+    result = CliRunner().invoke(main, ["-c", str(tmp_path / "c.yaml"), "cli", "init"])
+    assert result.exit_code == 0
+    assert "SCOPES" not in result.stdout
+    assert ".env.example" not in result.stdout
