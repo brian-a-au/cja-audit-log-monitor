@@ -3,7 +3,7 @@
 import io
 import os
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from textual.color import Color
@@ -1104,48 +1104,37 @@ class TestMonitorScreen:
             assert monitor_screen._state.monitor.is_running is False
 
     async def test_poll_once_skips_when_stopped(self, mock_app_state):
+        import threading
+
         app = _make_app(mock_app_state)
         async with app.run_test() as pilot:
             await pilot.press("m")
             await pilot.pause()
             monitor_screen = app._screens["monitor"]
             monitor_screen._state.monitor.is_running = False
-            monitor_screen._poll_for_new_entries = AsyncMock()
+            polls: list[object] = []
+            monitor_screen._guarded_poll = polls.append
 
-            await monitor_screen._poll_once()
+            await monitor_screen._poll_once(threading.Event())
 
-            monitor_screen._poll_for_new_entries.assert_not_awaited()
+            assert polls == []
 
-    def test_monitor_surfaces_pop_first_failure_warning(self):
-        """When pop_first_failure returns a string, _show_warning is dispatched."""
-        from cja_audit_log_monitor.tui.screens.monitor import MonitorScreen
-
-        expected_warning = (
-            "Notification delivery failed (slack);"
-            " subsequent failures suppressed for this session — check logs."
-        )
-
-        state = MagicMock()
-        state.notification_manager.pop_first_failure.return_value = expected_warning
-
-        screen = MonitorScreen(state=state)
-        mock_app = MagicMock()
-
-        with patch.object(
-            MonitorScreen, "app", new_callable=lambda: property(lambda self: mock_app)
-        ):
-            # Directly exercise the warning-surface idiom as it appears in production code.
-            warning = screen._state.notification_manager.pop_first_failure()
-            if warning:
-                screen.app.call_from_thread(screen._show_warning, warning)
-
-            mock_app.call_from_thread.assert_called_once_with(
-                screen._show_warning, expected_warning
+    async def test_monitor_shows_a_delivery_failure_warning(self, mock_app_state, monkeypatch):
+        """A queued delivery failure is drained after a poll and shown as a toast."""
+        expected = "Notification delivery failed (slack, hooks.slack.com/...)"
+        nm = MagicMock()
+        nm.pop_first_failure.side_effect = [None, expected, None, None]
+        nm.is_configured.return_value = False
+        mock_app_state._notification_manager = nm
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40), notifications=True) as pilot:
+            screen = await _start_monitor_without_loop(app, pilot, monkeypatch)
+            await _drive_poll(screen, pilot)  # baseline
+            await _drive_poll(screen, pilot)
+            assert await _wait_for(
+                lambda: any(expected in n.message for n in app._notifications), pilot
             )
-
-        # Confirm the warning string contains the expected channel name
-        call_args = mock_app.call_from_thread.call_args
-        assert "slack" in call_args.args[1].lower()
+            screen._stop_monitoring()
 
     def test_monitor_show_alert_uses_rule_name(self):
         """_show_alert renders 'rule_name: message' (not the literal 'Alert triggered')."""
