@@ -50,8 +50,11 @@ class TokenManager:
 
             token = self._get_oauth_token()
 
-            # Set expiry with 5 minute buffer
-            expiry = datetime.now(UTC) + timedelta(seconds=token.expires_in - 300)
+            # Refresh 5 minutes early, or at half the lifetime for a short-lived token.
+            # A lifetime is capped at a day, so an odd value cannot overflow the date.
+            lifetime = min(max(token.expires_in, 0), 86_400)
+            margin = 300 if lifetime > 600 else lifetime // 2
+            expiry = datetime.now(UTC) + timedelta(seconds=lifetime - margin)
             token.expires_at = expiry
             self._token = token
             self._token_expiry = expiry
@@ -87,6 +90,8 @@ class TokenManager:
                 except ValueError:
                     raise AuthenticationError("IMS returned a non-JSON response") from None
 
+                if not isinstance(token_data, dict) or not token_data.get("access_token"):
+                    raise AuthenticationError("IMS response had no access_token")
                 try:
                     return TokenInfo(
                         access_token=token_data["access_token"],
@@ -106,8 +111,11 @@ class TokenManager:
         """Parse OAuth error response and return helpful message."""
         try:
             error_data = e.response.json()
-            error_code = error_data.get("error", "")
-            error_desc = error_data.get("error_description", "")
+            error_code = str(error_data.get("error", ""))[:100]
+            error_desc = re.sub(
+                r"client_secret=[^&\s]+", "client_secret=***",
+                str(error_data.get("error_description", "")),
+            )[:200]
 
             if error_code == "invalid_client":
                 return (

@@ -3336,3 +3336,25 @@ def test_csv_to_stdout_is_utf8_on_cp1252(fake_api, tmp_path) -> None:
     )
     assert result.returncode == 0, result.stderr.decode(errors="replace")
     assert "日本 report" in result.stdout.decode("utf-8")
+
+
+class TestOneLineErrors:
+    @pytest.mark.parametrize(
+        "args", [["list", "-d", "100000000"], ["anomalies", "--lookback", "100000000"],
+                 ["stats", "-d", "4000"]],
+        ids=["list", "anomalies", "stats"],
+    )
+    def test_huge_days_is_a_usage_error(self, runner, args) -> None:
+        result = runner.invoke(main, ["cli", *args])
+        assert result.exit_code == 2
+
+    def test_unexpected_error_is_one_line(self, runner) -> None:
+        client = MagicMock()
+        client.__enter__ = MagicMock(return_value=client)
+        client.__exit__ = MagicMock(return_value=False)
+        client.get_all_logs.side_effect = ZeroDivisionError("odd")
+        with patch("cja_audit_log_monitor.cli.get_client", return_value=(client, _settings())):
+            result = runner.invoke(main, ["cli", "list"])
+        assert result.exit_code == 1
+        lines = [line for line in result.stderr.splitlines() if line.strip()]
+        assert lines == ["Unexpected error: ZeroDivisionError: odd"]

@@ -28,6 +28,7 @@ from .alerts import AlertEngine, analyze_for_anomalies, engine_rules
 from .auth import AuthenticationError, TokenManager
 from .client import MAX_PAGE_SIZE, APIError, AuditLogsClient, RateLimitError
 from .config import (
+    MAX_DAYS,
     CJASettings,
     ConfigError,
     create_default_config,
@@ -53,13 +54,16 @@ R = TypeVar("R")
 
 # Shared validators: counts must be at least 1; polling intervals at least 5 seconds.
 POSITIVE_INT = click.IntRange(min=1)
+# A day count, up to about ten years, so a typo cannot overflow a date.
+DAYS = click.IntRange(min=1, max=MAX_DAYS)
+LOOKBACK_HOURS = click.IntRange(min=1, max=MAX_DAYS * 24)
 INTERVAL_SECONDS = click.IntRange(min=5)
 
 
 def days_option(what: str) -> Callable[[Callable[P, R]], Callable[P, R]]:
     """The --days option. Left unset, the command uses the configured default_days."""
     return click.option(
-        "--days", "-d", type=POSITIVE_INT, default=None,
+        "--days", "-d", type=DAYS, default=None,
         help=f"{what} (default: from config (7))",
     )
 
@@ -138,6 +142,17 @@ def handle_cli_errors(func: Callable[P, R]) -> Callable[P, R]:
         except OSError as e:
             label = "File error"
             error = e
+        except (click.ClickException, click.exceptions.Abort, click.exceptions.Exit):
+            raise  # usage errors and Ctrl+C keep Click's own handling and exit codes
+        except Exception as e:
+            # A bug or an odd answer the tool did not expect: one line, and the
+            # traceback only with -v.
+            logging.getLogger(__name__).debug("Unexpected error", exc_info=True)
+            err_console.print(
+                f"[red]Unexpected error:[/red] {escape(type(e).__name__)}: {escape(str(e))}",
+                soft_wrap=True,
+            )
+            sys.exit(1)
         # soft_wrap: one logical line, however long the path, so the terminal wraps it.
         err_console.print(f"[red]{label}:[/red] {escape(str(error))}", soft_wrap=True)
         sys.exit(1)
@@ -909,7 +924,7 @@ def monitor(
 )
 @click.option(
     "--lookback",
-    type=POSITIVE_INT,
+    type=LOOKBACK_HOURS,
     default=24,
     help="Hours of history to scan per cycle",
 )
@@ -1389,7 +1404,7 @@ def alerts_list(ctx: click.Context, output_format: str) -> None:
 
 
 @alerts.command("test")
-@click.option("--days", "-d", type=POSITIVE_INT, default=1, help="Number of days to analyze")
+@click.option("--days", "-d", type=DAYS, default=1, help="Number of days to analyze")
 @click.pass_context
 @handle_cli_errors
 def alerts_test(ctx: click.Context, days: int) -> None:

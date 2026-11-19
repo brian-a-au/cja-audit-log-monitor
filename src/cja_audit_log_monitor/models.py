@@ -192,7 +192,7 @@ class AuditLogQuery(BaseModel):
     component_id: str | None = None
     description: str | None = None
     page: int = 0
-    page_size: int = 100
+    page_size: int = Field(100, ge=1, le=1000)  # the API's largest page is 1,000
 
     def to_query_params(self) -> dict[str, Any]:
         """Convert to API query parameters."""

@@ -702,3 +702,58 @@ class TestClose:
             client.get_logs()
         api_calls = [r for r in httpx_mock.get_requests() if "/auditlogs" in str(r.url)]
         assert len(api_calls) == 1
+
+
+class TestOddResponses:
+    """Odd API answers are skipped or reported, never a traceback (G27, G46)."""
+
+    URL = "https://cja.adobe.io/auditlogs/api/v1/auditlogs"
+
+    @pytest.mark.parametrize(
+        "bad", [{"id": 5, "action": "CREATE"}, {"id": "x", "dateCreated": "not a date"}, None],
+        ids=["int-id", "bad-date", "null"],
+    )
+    def test_bad_entry_is_skipped(self, client, httpx_mock, caplog, bad) -> None:
+        good = {"id": "good", "action": "CREATE", "dateCreated": "2026-01-01T00:00:00Z"}
+        httpx_mock.add_response(url=self.URL, json={"content": [bad, good], "last": True})
+        with client:
+            response = client.get_logs()
+        assert [e.id for e in response.content] == ["good"]
+        assert "skipped 1 entry" in caplog.text
+
+    def test_missing_content_is_an_api_error(self, client, httpx_mock) -> None:
+        httpx_mock.add_response(url=self.URL, json={"error_code": "500"})
+        with client, pytest.raises(APIError, match="unexpected response"):
+            client.get_logs()
+
+    def test_5xx_honors_retry_after(self, client, httpx_mock, monkeypatch, sample_api_response):
+        sleeps: list[float] = []
+        monkeypatch.setattr("cja_audit_log_monitor.client.time.sleep", sleeps.append)
+        httpx_mock.add_response(url=self.URL, status_code=503, headers={"Retry-After": "7"})
+        httpx_mock.add_response(url=self.URL, json=sample_api_response)
+        with client:
+            client.get_logs()
+        assert sleeps == [7]
+
+    def test_paging_continues_past_a_page_of_seen_ids(self, client, httpx_mock) -> None:
+        def page(entries, number):
+            return {"content": entries, "totalPages": 3, "number": number, "last": number == 2}
+
+        a = {"id": "a", "action": "CREATE"}
+        b = {"id": "b", "action": "CREATE"}
+        for number, entries in enumerate([[a], [a], [b]]):
+            httpx_mock.add_response(
+                url=re.compile(re.escape(self.URL) + rf".*pageNumber={number}\b.*"),
+                json=page(entries, number),
+            )
+        with client:
+            ids = [e.id for e in client.get_logs_paginated(AuditLogQuery(page_size=1))]
+        assert ids == ["a", "b"]
+
+
+@pytest.mark.parametrize("size", [0, 1001])
+def test_page_size_is_bounded(size) -> None:
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        AuditLogQuery(page_size=size)
