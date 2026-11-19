@@ -38,11 +38,11 @@ class _DashboardLoad:
     error: Exception | None = None
 
 
-class DashboardScreen(ContentView):
+class DashboardView(ContentView):
     """Dashboard screen with summary view."""
 
     def __init__(self, state: AppState, **kwargs) -> None:
-        """Initialize DashboardScreen.
+        """Initialize DashboardView.
 
         Args:
             state: Application state.

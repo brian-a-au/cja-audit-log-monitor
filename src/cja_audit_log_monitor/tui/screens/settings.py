@@ -12,8 +12,8 @@ from ...utils import display_path
 from .base import ContentView
 
 
-class SettingsScreen(ContentView):
-    """Screen for viewing and managing settings."""
+class SettingsView(ContentView):
+    """View for viewing and managing settings."""
 
     def compose_content(self) -> Iterator[Widget]:
         """Yield widgets for embedding in main content area.

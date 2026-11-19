@@ -1,17 +1,17 @@
 """TUI screens for CJA Audit Log Monitor."""
 
-from .alerts import AlertsScreen
-from .dashboard import DashboardScreen
-from .log_browser import LogBrowserScreen
-from .monitor import MonitorScreen
-from .settings import SettingsScreen
-from .stats import StatsScreen
+from .alerts import AlertsView
+from .dashboard import DashboardView
+from .log_browser import LogBrowserView
+from .monitor import MonitorView
+from .settings import SettingsView
+from .stats import StatsView
 
 __all__ = [
-    "AlertsScreen",
-    "DashboardScreen",
-    "LogBrowserScreen",
-    "MonitorScreen",
-    "SettingsScreen",
-    "StatsScreen",
+    "AlertsView",
+    "DashboardView",
+    "LogBrowserView",
+    "MonitorView",
+    "SettingsView",
+    "StatsView",
 ]

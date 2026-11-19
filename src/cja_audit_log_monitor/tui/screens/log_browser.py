@@ -15,8 +15,8 @@ from ..widgets import FilterBar, LogTable
 from .base import ContentView, error_message
 
 
-class LogBrowserScreen(ContentView):
-    """Screen for browsing and filtering audit logs."""
+class LogBrowserView(ContentView):
+    """View for browsing and filtering audit logs."""
 
     # Page count from the last load; bounds the n key like the next button.
     _total_pages: int = 1

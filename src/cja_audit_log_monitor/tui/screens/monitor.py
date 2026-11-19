@@ -48,8 +48,8 @@ class _IntervalInput(Input):
         return key != "space" and super().check_consume_key(key, character)
 
 
-class MonitorScreen(ContentView):
-    """Screen for real-time audit log monitoring."""
+class MonitorView(ContentView):
+    """View for real-time audit log monitoring."""
 
     # Priority, so space reaches this binding before the focused interval box handles it.
     BINDINGS = [
@@ -60,11 +60,11 @@ class MonitorScreen(ContentView):
     can_focus = True
 
     def __init__(self, state: AppState, **kwargs) -> None:
-        """Initialize MonitorScreen.
+        """Initialize MonitorView.
 
         Args:
             state: Application state.
-            **kwargs: Additional arguments for Screen.
+            **kwargs: Additional arguments for the view.
         """
         super().__init__(state, **kwargs)
         self._monitor_worker: Worker | None = None

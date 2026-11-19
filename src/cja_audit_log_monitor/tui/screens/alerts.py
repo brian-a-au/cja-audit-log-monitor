@@ -15,8 +15,8 @@ TEST_RULES_MAX_ENTRIES = 1000
 _SHOWN_ALERTS = 10
 
 
-class AlertsScreen(ContentView):
-    """Screen for managing alert rules."""
+class AlertsView(ContentView):
+    """View for managing alert rules."""
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
