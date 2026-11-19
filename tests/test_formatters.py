@@ -11,7 +11,6 @@ from cja_audit_log_monitor.formatters import (
     format_stats_panel,
     format_timestamp,
     get_action_color,
-    get_action_color_token,
 )
 from cja_audit_log_monitor.models import AuditLogEntry
 
@@ -20,8 +19,7 @@ class TestActionColors:
     """Tests for action severity color mapping (3-tier + neutral).
 
     ``get_action_color`` now returns hex values so Rich/CLI consumers get real
-    ANSI colour codes.  ``get_action_color_token`` returns the original tcss
-    tokens for callers that need them.
+    ANSI colour codes.
     """
 
     def test_destructive_actions_use_danger_hex(self) -> None:
@@ -53,17 +51,6 @@ class TestActionColors:
         assert len(set(ACTION_COLORS.values())) == 4
 
     # --- token accessor ---
-
-    def test_get_action_color_token_returns_tcss_tokens(self) -> None:
-        assert get_action_color_token("DELETE") == "$danger"
-        assert get_action_color_token("EXPORT") == "$warning"
-        assert get_action_color_token("CREATE") == "$success"
-        assert get_action_color_token("EDIT") == "$text-muted"
-        assert get_action_color_token("UNKNOWN") == "$text-muted"
-
-
-class TestActionIcons:
-    """Tests for action severity icons."""
 
     def test_destructive_actions_use_cross(self) -> None:
         from cja_audit_log_monitor.formatters import get_action_icon

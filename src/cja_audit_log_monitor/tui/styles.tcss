@@ -30,10 +30,6 @@ Screen {
     color: $text-muted;
 }
 
-#status-row .status-dot-ok    { color: $success; }
-#status-row .status-dot-warn  { color: $warning; }
-#status-row .status-dot-down  { color: $danger; }
-
 /* ---- Footer (toad treatment) ---- */
 /* Textual 7.5+ renders each binding as a FooterKey widget with component
  * classes `footer-key--key` and `footer-key--description`. The default theme
@@ -140,11 +136,6 @@ Screen.-narrow #sidebar .nav-item.active {
     background: $surface;
     border-left: heavy $primary;
 }
-
-.card.-danger, .stat-card.severity-danger { border-left: heavy $danger; }
-.card.-warning, .stat-card.severity-warning { border-left: heavy $warning; }
-.card.-success, .stat-card.severity-success { border-left: heavy $success; }
-.card.-muted { border-left: heavy #6e7480; }
 
 /* Section labels that open a card sit on its first row. */
 .settings-section > .section-label {
@@ -262,11 +253,6 @@ Screen.-narrow FilterBar #filter-component { width: 1fr; }
     width: 1fr;
     height: auto;
     margin: 0 2 0 0;
-}
-
-.bar-chart {
-    height: auto;
-    margin: 1 0;
 }
 
 AlertSummary {
@@ -604,7 +590,7 @@ ContentView LoadingIndicator {
     overflow-y: auto;
 }
 
-#settings-container, #alerts-container, #stats-container {
+#settings-container, #alerts-container {
     height: auto;
 }
 
@@ -645,11 +631,6 @@ Screen.-wide #hourly-chart {
     height: 1fr;
     min-height: 7;
 }
-
-/* ---- Status indicators (used in dashboard/connection text) ---- */
-.status-connected     { color: $success; }
-.status-disconnected  { color: $danger; }
-.status-warning       { color: $warning; }
 
 /* Shown under the stat cards when charts use only the newest entries */
 .sample-note {

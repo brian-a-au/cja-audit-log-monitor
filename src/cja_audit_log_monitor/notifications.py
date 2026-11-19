@@ -32,12 +32,6 @@ def _cut(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "\u2026"
 
 
-class NotificationError(Exception):
-    """Raised when notification delivery fails."""
-
-    pass
-
-
 class _RedactWebhookUrls(logging.Filter):
     """Replace configured webhook URLs in httpx's own request log lines.
 
@@ -470,17 +464,6 @@ class NotificationManager:
         """Return and consume every pending failure warning (one per failing channel)."""
         warnings, self._pending_warnings = self._pending_warnings, []
         return warnings
-
-    def pop_first_failure(self) -> str | None:
-        """Return and consume the next pending failure warning, or None.
-
-        Returns:
-            Warning string the first time per-session per-channel a failure occurred,
-            otherwise None. Call after each notify_alert / notify_anomaly batch.
-        """
-        if self._pending_warnings:
-            return self._pending_warnings.pop(0)
-        return None
 
     def is_configured(self) -> bool:
         """Check if any active notification channels are configured.

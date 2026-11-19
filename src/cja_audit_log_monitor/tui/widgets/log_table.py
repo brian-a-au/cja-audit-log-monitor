@@ -28,7 +28,6 @@ class LogTable(DataTable):
     MIN_WIDTHS = {"timestamp": 19, "user": 16, "action": 13, "component": 12, "name": 12}
     HIDE_ORDER = ("name", "component")
     # Columns whose text is cut to the column width, so the cut ends with an ellipsis.
-    TRUNCATED = ("user", "component", "name")
     NAME_FLOOR = 6
 
     def __init__(self, show_details: bool = False, **kwargs) -> None:

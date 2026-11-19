@@ -396,12 +396,3 @@ class RefreshData(Message):
 
     pass
 
-
-def run_tui(config_path: Path | None = None) -> None:
-    """Run the TUI application.
-
-    Args:
-        config_path: Optional path to config file.
-    """
-    app = CJAAuditApp(config_path)
-    app.run()

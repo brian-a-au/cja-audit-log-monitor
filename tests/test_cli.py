@@ -1338,16 +1338,16 @@ class TestAnomaliesCommand:
     @patch("cja_audit_log_monitor.cli.NotificationManager")
     @patch("cja_audit_log_monitor.cli.analyze_for_anomalies")
     @patch("cja_audit_log_monitor.cli.get_client")
-    def test_pop_first_failure_drained_to_console(
+    def test_delivery_failures_drained_to_console(
         self,
         mock_get_client: MagicMock,
         mock_analyze: MagicMock,
         mock_nm_cls: MagicMock,
         runner: CliRunner,
     ) -> None:
-        """Whatever pop_first_failure returns is printed to console as a warning.
+        """Whatever pop_failures returns is printed to console as a warning.
 
-        This test mocks pop_first_failure's side_effect directly — it verifies the
+        This test mocks pop_failures directly — it verifies the
         CLI's drain-and-print loop, not end-to-end Slack-failure → warning wiring.
         The wiring is symmetric to the alert path tested in test_notifications.py.
         """

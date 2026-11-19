@@ -104,12 +104,6 @@ class TestAuditLogMonitor:
         new_entries = monitor._get_new_entries()
         assert new_entries == []
 
-    def test_set_callback(self, monitor: AuditLogMonitor) -> None:
-        """Test setting entry callback."""
-        callback = MagicMock()
-        monitor.set_callback(callback)
-        assert monitor._on_new_entry == callback
-
     def test_stop(self, monitor: AuditLogMonitor) -> None:
         """Test stopping the monitor."""
         monitor._running = True
@@ -122,7 +116,7 @@ class TestAuditLogMonitor:
     ) -> None:
         """Test that _handle_entry calls the callback."""
         callback = MagicMock()
-        monitor.set_callback(callback)
+        monitor._on_new_entry = callback
 
         entry = AuditLogEntry(id="test-entry", action="CREATE")
         monitor._handle_entry(entry)

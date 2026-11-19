@@ -190,7 +190,6 @@ class AuditLogQuery(BaseModel):
     actions: list[ActionType] | None = None
     components: list[ComponentType] | None = None
     user_id: str | None = None
-    user_type: str | None = None
     component_id: str | None = None
     description: str | None = None
     page: int = 0
@@ -222,8 +221,6 @@ class AuditLogQuery(BaseModel):
             key = "userId" if is_ims_user_id(self.user_id) else "userEmail"
             params[key] = self.user_id
 
-        if self.user_type:
-            params["userType"] = self.user_type
 
         if self.component_id:
             params["componentId"] = self.component_id

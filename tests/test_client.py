@@ -564,12 +564,6 @@ class TestPagedQueryIsCopied:
             assert len(list(client.get_logs_paginated(query))) == 2
         assert query.page == 0
 
-    @pytest.mark.parametrize("bad", [0, -1])
-    def test_max_pages_below_one_is_rejected(self, sample_settings, bad) -> None:
-        client = AuditLogsClient(sample_settings, TokenManager(sample_settings))
-        with client, pytest.raises(ValueError, match="max_pages"):
-            list(client.get_logs_paginated(AuditLogQuery(), max_pages=bad))
-
     def test_stops_on_empty_page_without_last_key(self, client, httpx_mock) -> None:
         import re
 

@@ -141,11 +141,6 @@ def get_action_color(action: str) -> str:
     return TCSS_TOKEN_HEX.get(token, token)
 
 
-def get_action_color_token(action: str) -> str:
-    """Get the action's severity as a Textual tcss token (`$danger`, etc.)."""
-    return ACTION_COLORS.get(action, "$text-muted")
-
-
 def get_action_icon(action: str) -> str:
     """Get severity glyph for an action type."""
     return ACTION_ICONS.get(action, "·")

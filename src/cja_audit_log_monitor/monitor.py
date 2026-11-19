@@ -151,14 +151,6 @@ class AuditLogMonitor:
         self.stopped_by_user = False
         self._on_new_entry: Callable[[AuditLogEntry], None] | None = None
 
-    def set_callback(self, callback: Callable[[AuditLogEntry], None]) -> None:
-        """Set callback for new entries.
-
-        Args:
-            callback: Function to call with each new entry.
-        """
-        self._on_new_entry = callback
-
     def _get_new_entries(self) -> list[AuditLogEntry]:
         """Fetch entries not seen before, oldest first.
 

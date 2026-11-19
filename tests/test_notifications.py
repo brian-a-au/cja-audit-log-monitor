@@ -12,6 +12,11 @@ from cja_audit_log_monitor.models import AuditLogEntry, NotificationConfig, Webh
 from cja_audit_log_monitor.notifications import NotificationManager, slack_escape
 
 
+def _first_failure(manager: NotificationManager) -> str | None:
+    """The first queued delivery warning (the queue is drained)."""
+    return (manager.pop_failures() or [None])[0]
+
+
 @pytest.fixture(autouse=True)
 def _fresh_url_redactor():
     """Each test starts with no remembered webhook URLs, so no test depends on test order."""
@@ -250,7 +255,7 @@ class TestFailureWarning:
         httpx_mock.add_response(url="https://hooks.slack.com/x", status_code=500)
 
         manager.send_slack("rule", "msg")
-        warning = manager.pop_first_failure()
+        warning = _first_failure(manager)
         assert warning is not None
         assert "slack" in warning.lower()
 
@@ -262,9 +267,9 @@ class TestFailureWarning:
         httpx_mock.add_response(url="https://hooks.slack.com/x", status_code=500)
 
         manager.send_slack("rule", "msg")
-        manager.pop_first_failure()  # consumes the first warning
+        _first_failure(manager)  # consumes the first warning
         manager.send_slack("rule", "msg")
-        assert manager.pop_first_failure() is None
+        assert _first_failure(manager) is None
 
     def test_recovery_clears_flag(self, httpx_mock):
         """A successful send clears the warned flag so next failure surfaces again."""
@@ -275,10 +280,10 @@ class TestFailureWarning:
         httpx_mock.add_response(url="https://hooks.slack.com/x", status_code=500)
 
         manager.send_slack("rule", "msg")
-        manager.pop_first_failure()  # consume
+        _first_failure(manager)  # consume
         manager.send_slack("rule", "msg")  # success → clears flag
         manager.send_slack("rule", "msg")  # fails again
-        assert manager.pop_first_failure() is not None
+        assert _first_failure(manager) is not None
 
     def test_per_channel_isolation(self, httpx_mock):
         """Slack failure flag does not affect webhook failure tracking."""
@@ -292,9 +297,9 @@ class TestFailureWarning:
         httpx_mock.add_response(url="https://hook.example.com/h", status_code=500)
 
         manager.send_slack("rule", "msg")
-        manager.pop_first_failure()  # consume Slack warning
+        _first_failure(manager)  # consume Slack warning
         manager.send_webhook(webhook, {"x": 1})
-        warning = manager.pop_first_failure()
+        warning = _first_failure(manager)
         assert warning is not None
         assert "hook.example.com" in warning
 
@@ -308,7 +313,7 @@ class TestFailureWarning:
         httpx_mock.add_response(url="https://hooks.slack.com/x", status_code=500)
 
         manager.notify_anomaly({"type": "test", "description": "test anomaly"})
-        warning = manager.pop_first_failure()
+        warning = _first_failure(manager)
         assert warning is not None
         assert "slack" in warning.lower()
 
@@ -446,7 +451,7 @@ class TestNoSecretLeaks:
         with caplog.at_level(logging.DEBUG):
             manager.send_slack("rule", "msg")
         assert "SECRET" not in caplog.text
-        warning = manager.pop_first_failure()
+        warning = _first_failure(manager)
         assert warning is not None and "SECRET" not in warning
 
     def test_webhook_failure_hides_secret(self, httpx_mock, caplog):
@@ -458,7 +463,7 @@ class TestNoSecretLeaks:
         with caplog.at_level(logging.DEBUG):
             manager.send_webhook(webhook, {"x": 1})
         assert "SECRET" not in caplog.text
-        warning = manager.pop_first_failure()
+        warning = _first_failure(manager)
         assert warning is not None and "SECRET" not in warning
         assert "hook.example.com" in warning
 
@@ -471,7 +476,7 @@ class TestNoSecretLeaks:
         with caplog.at_level(logging.DEBUG):
             assert manager.send_webhook(webhook, {"x": 1}) is False
         assert "SECRET" not in caplog.text
-        assert "SECRET" not in (manager.pop_first_failure() or "")
+        assert "SECRET" not in (_first_failure(manager) or "")
 
 
 class TestSlackEscaping:
@@ -582,7 +587,7 @@ class TestLogFilterAndBadUrls:
         with caplog.at_level(logging.DEBUG):
             assert manager.send_webhook(webhook, {"x": 1}) is False
         assert "SECRET" not in caplog.text
-        warning = manager.pop_first_failure()
+        warning = _first_failure(manager)
         assert warning is not None and "SECRET" not in warning
 
     def test_invalid_slack_url_is_a_failure_without_leak(self, caplog):
@@ -595,7 +600,7 @@ class TestLogFilterAndBadUrls:
         with caplog.at_level(logging.DEBUG):
             assert manager.send_slack("r", "m") is False
         assert "SECRET" not in caplog.text
-        assert "SECRET" not in (manager.pop_first_failure() or "")
+        assert "SECRET" not in (_first_failure(manager) or "")
 
 
 class TestDeliveryDetails:

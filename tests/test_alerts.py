@@ -43,44 +43,6 @@ class TestAlertEngine:
         engine = AlertEngine(rules=[])
         assert len(engine.rules) == 0
 
-    def test_add_rule(self, alert_engine: AlertEngine) -> None:
-        """Test adding a rule."""
-        initial_count = len(alert_engine.rules)
-        new_rule = AlertRule(name="new_rule", threshold_count=3)
-        alert_engine.add_rule(new_rule)
-        assert len(alert_engine.rules) == initial_count + 1
-
-    def test_remove_rule(self, alert_engine: AlertEngine) -> None:
-        """Test removing a rule."""
-        initial_count = len(alert_engine.rules)
-        result = alert_engine.remove_rule("bulk_delete")
-        assert result is True
-        assert len(alert_engine.rules) == initial_count - 1
-
-    def test_remove_nonexistent_rule(self, alert_engine: AlertEngine) -> None:
-        """Test removing non-existent rule returns False."""
-        result = alert_engine.remove_rule("nonexistent")
-        assert result is False
-
-    def test_enable_disable_rule(self, alert_engine: AlertEngine) -> None:
-        """Test enabling and disabling rules."""
-        alert_engine.disable_rule("bulk_delete")
-        rule = next(r for r in alert_engine.rules if r.name == "bulk_delete")
-        assert rule.enabled is False
-
-        alert_engine.enable_rule("bulk_delete")
-        assert rule.enabled is True
-
-    def test_enable_nonexistent_rule(self, alert_engine: AlertEngine) -> None:
-        """Test enabling non-existent rule returns False."""
-        result = alert_engine.enable_rule("nonexistent")
-        assert result is False
-
-    def test_disable_nonexistent_rule(self, alert_engine: AlertEngine) -> None:
-        """Test disabling non-existent rule returns False."""
-        result = alert_engine.disable_rule("nonexistent")
-        assert result is False
-
     def test_matches_rule_action(self) -> None:
         """Test rule matching by action."""
         engine = AlertEngine(rules=[])
@@ -626,7 +588,7 @@ class TestEngineCopiesRules:
     def test_toggling_a_rule_leaves_the_callers_rule_alone(self):
         original = AlertRule(name="mine", enabled=True)
         engine = AlertEngine([original])
-        engine.disable_rule("mine")
+        engine.rules[0].enabled = False
         assert original.enabled is True
 
 

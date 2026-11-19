@@ -153,59 +153,6 @@ class AlertEngine:
             defaultdict(list)
         )
 
-    def add_rule(self, rule: AlertRule) -> None:
-        """Add an alert rule.
-
-        Args:
-            rule: Alert rule to add.
-        """
-        self.rules.append(rule)
-
-    def remove_rule(self, name: str) -> bool:
-        """Remove an alert rule by name.
-
-        Args:
-            name: Name of rule to remove.
-
-        Returns:
-            True if rule was found and removed.
-        """
-        for i, rule in enumerate(self.rules):
-            if rule.name == name:
-                self.rules.pop(i)
-                return True
-        return False
-
-    def enable_rule(self, name: str) -> bool:
-        """Enable an alert rule by name.
-
-        Args:
-            name: Name of rule to enable.
-
-        Returns:
-            True if rule was found.
-        """
-        for rule in self.rules:
-            if rule.name == name:
-                rule.enabled = True
-                return True
-        return False
-
-    def disable_rule(self, name: str) -> bool:
-        """Disable an alert rule by name.
-
-        Args:
-            name: Name of rule to disable.
-
-        Returns:
-            True if rule was found.
-        """
-        for rule in self.rules:
-            if rule.name == name:
-                rule.enabled = False
-                return True
-        return False
-
     def _clean_old_events(self, key: tuple[str, str], window: timedelta, now: datetime) -> None:
         """Remove events older than the window, measured back from ``now``.
 
