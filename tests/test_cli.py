@@ -1668,6 +1668,7 @@ class TestJsonOutputIsMachineSafe:
     """-F json writes only valid JSON to stdout, whatever the data contains."""
 
     NAME = "[red]x[/red] [/oops]"
+    USER = "[bold]u[/bold]@example.com"
 
     @pytest.mark.parametrize(
         ("args", "has_name"),
@@ -1678,7 +1679,7 @@ class TestJsonOutputIsMachineSafe:
             (["component", "-i", "comp-1", "-F", "json"], True),
             (["query", "--today", "-F", "json"], True),
             (["verify", "-F", "json"], False),
-            (["stats", "-F", "json"], False),
+            (["stats", "-F", "json"], "user"),
             (["alerts", "list", "-F", "json"], False),
             (["report"], False),
         ],
@@ -1694,7 +1695,7 @@ class TestJsonOutputIsMachineSafe:
             id="entry-1",
             timestamp=datetime(2024, 1, 15, 10, 30, 0, tzinfo=UTC),
             user_id="user-1",
-            user_email="user@example.com",
+            user_email=self.USER,
             action="CREATE",
             component_type="PROJECT",
             component_id="comp-1",
@@ -1724,7 +1725,9 @@ class TestJsonOutputIsMachineSafe:
 
         assert result.exit_code == 0, result.output
         data = json.loads(result.stdout)
-        if has_name:
+        if has_name == "user":
+            assert self.USER in json.dumps(data)
+        elif has_name:
             assert data["entries"][0]["component_name"] == self.NAME
 
 
@@ -2674,3 +2677,136 @@ class TestWatchJsonAndHelpDefaults:
             ).output.split()
         )
         assert "with --watch, one JSON object per line" in out
+
+
+# ---------------------------------------------------------------------------
+# Guards that check what is sent and printed, not only the exit code (G38)
+# ---------------------------------------------------------------------------
+
+
+def test_verbose_logs_go_to_stderr_in_a_real_process(fake_api, tmp_path):
+    """In a real process (where logging is really configured) -v never touches stdout."""
+    import subprocess
+
+    from .fakeapi import command, raw_entry
+
+    fake_api.entries = [raw_entry(i) for i in range(3)]
+    result = subprocess.run(
+        [*command(), "-v", "cli", "list", "-F", "json"],
+        env=fake_api.env(tmp_path / "missing.yaml"),
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 0, result.stderr
+    assert len(json.loads(result.stdout)["entries"]) == 3
+    assert result.stderr.strip()  # the debug lines went somewhere: stderr
+
+
+class TestFlagsReachTheRequest:
+    """Each filter flag ends up in the query the client is asked for."""
+
+    @staticmethod
+    def _client():
+        client = MagicMock()
+        client.get_all_logs.return_value = []
+        client.get_logs_paginated.return_value = iter([])
+        client.__enter__ = MagicMock(return_value=client)
+        client.__exit__ = MagicMock(return_value=False)
+        return client
+
+    def _run(self, runner, args):
+        client = self._client()
+        with patch("cja_audit_log_monitor.cli.get_client", return_value=(client, _settings())):
+            result = runner.invoke(main, ["cli", *args])
+        assert result.exit_code == 0, result.output
+        return client, client.get_all_logs.call_args.args[0]
+
+    def test_search_sends_every_filter(self, runner: CliRunner) -> None:
+        _, query = self._run(
+            runner,
+            [
+                "search", "-u", "a@example.com", "-a", "DELETE", "-C", "PROJECT",
+                "--component-id", "c-1", "--desc", "words",
+            ],
+        )
+        params = query.to_query_params()
+        assert params["userEmail"] == "a@example.com"
+        assert params["action"] == ["DELETE"]
+        assert params["component"] == ["PROJECT"]
+        assert params["componentId"] == "c-1"
+        assert params["description"] == "words"
+
+    def test_user_sends_the_user(self, runner: CliRunner) -> None:
+        _, query = self._run(runner, ["user", "-u", "a@example.com"])
+        assert query.to_query_params()["userEmail"] == "a@example.com"
+
+    def test_query_yesterday_is_the_day_before_today(self, runner: CliRunner) -> None:
+        _, query = self._run(runner, ["query", "--yesterday"])
+        today = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+        assert query.start_date == today - timedelta(days=1)
+        assert query.end_date <= today
+
+    def test_top_users_honors_top(self, runner: CliRunner, sample_audit_entries) -> None:
+        client = self._client()
+        client.get_all_logs.return_value = sample_audit_entries
+        with patch("cja_audit_log_monitor.cli.get_client", return_value=(client, _settings())):
+            result = runner.invoke(main, ["cli", "top-users", "-n", "1", "-F", "json"])
+        assert result.exit_code == 0, result.output
+        assert len(json.loads(result.stdout)["users"]) == 1
+
+
+@pytest.mark.parametrize(
+    ("flags", "shown", "hidden"),
+    [
+        (["--component-id", "c-mine"], "mine-comp", "other-comp"),
+        (["-a", "DELETE"], "mine-comp", "other-comp"),
+    ],
+    ids=["component-id", "action"],
+)
+def test_tail_filters_by_component_and_action(runner: CliRunner, flags, shown, hidden) -> None:
+    client = MagicMock()
+    client.get_logs.return_value = AuditLogResponse(
+        content=[
+            AuditLogEntry(id="1", action="DELETE", component_id="c-mine",
+                          component_name="mine-comp"),
+            AuditLogEntry(id="2", action="CREATE", component_id="c-other",
+                          component_name="other-comp"),
+        ],
+        last=True,
+    )
+
+    def fake_start(self, *args, **kwargs):
+        for entry in self._get_new_entries():
+            self._display_entry(entry)
+
+    with (
+        patch("cja_audit_log_monitor.cli.get_client") as gc,
+        patch("cja_audit_log_monitor.cli.AuditLogMonitor.start", fake_start),
+    ):
+        gc.return_value = (client, MagicMock(alert_rules=[]))
+        result = runner.invoke(main, ["cli", "tail", *flags, "--no-alerts"])
+    assert result.exit_code == 0, result.output
+    assert shown in result.output
+    assert hidden not in result.output
+
+
+@pytest.mark.parametrize("fmt", ["csv", "tsv"])
+def test_delimited_export_does_not_clobber_a_file_created_during_fetch(
+    runner: CliRunner, sample_audit_entries, tmp_path, fmt
+) -> None:
+    target = tmp_path / f"out.{fmt}"
+
+    def entries_then_appear(*args, **kwargs):
+        target.write_text("someone else")
+        yield from sample_audit_entries
+
+    client = MagicMock()
+    client.get_logs_paginated.side_effect = entries_then_appear
+    client.__enter__ = MagicMock(return_value=client)
+    client.__exit__ = MagicMock(return_value=False)
+    with patch("cja_audit_log_monitor.cli.get_client", return_value=(client, _settings())):
+        result = runner.invoke(main, ["cli", "export", "-F", fmt, "-o", str(target)])
+    assert result.exit_code == 1
+    assert target.read_text() == "someone else"

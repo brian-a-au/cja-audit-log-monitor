@@ -9,6 +9,8 @@ from cja_audit_log_monitor.config import CJASettings
 from cja_audit_log_monitor.models import AuditLogEntry, AuditLogResponse
 from cja_audit_log_monitor.tui.state import AppState
 
+from .fakeapi import FakeApi, start
+
 _ENV_NAMES = (
     "ORG_ID CLIENT_ID SECRET SCOPES API_BASE_URL IMS_BASE_URL MONITOR_INTERVAL "
     "DEFAULT_PAGE_SIZE DEFAULT_DAYS OUTPUT_FORMAT CJA_CONFIG_PATH"
@@ -157,3 +159,14 @@ def los_angeles_tz(monkeypatch):
     yield
     monkeypatch.undo()
     time.tzset()
+
+
+@pytest.fixture
+def fake_api():
+    """A local fake of IMS and the audit log API, for tests that run a real process."""
+    api = start(FakeApi())
+    yield api
+    api.block.clear()
+    assert api.server is not None
+    api.server.shutdown()
+    api.server.server_close()
