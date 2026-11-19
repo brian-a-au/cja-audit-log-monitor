@@ -1187,7 +1187,8 @@ def config(ctx: click.Context) -> None:
     console.print("[bold]Current Configuration[/bold]\n")
     effective_config_path = config_path or get_config_path()
     missing = "" if effective_config_path.exists() else " (not found)"
-    console.print(f"Config file: {literal(str(effective_config_path))}{missing}")
+    # soft_wrap: a long path stays one line, so "(not found)" is never split.
+    console.print(f"Config file: {literal(str(effective_config_path))}{missing}", soft_wrap=True)
     console.print(f"API base URL: {literal(str(settings.api_base_url))}")
     console.print(f"IMS base URL: {literal(str(settings.ims_base_url))}")
     console.print(f"Log browser page size (TUI): {settings.default_page_size}")
