@@ -781,7 +781,7 @@ def monitor(
             err_console.print(f"[dim]Alert detection enabled with {rule_count} rules[/dim]")
 
         with NotificationManager(settings.notifications) as nm:
-            if nm.is_configured():
+            if nm.is_configured() and settings.notifications.notify_on_alerts:
                 channel_summary = []
                 if settings.notifications.slack_webhook_url:
                     channel_summary.append("Slack")
@@ -1228,7 +1228,6 @@ def tail(
             )
 
             err_console.print(f"[green]Tailing audit logs{filter_str}[/green]")
-            err_console.print(f"[dim]Polling every {interval}s, Ctrl+C to stop[/dim]\n")
 
             with client:
                 monitor_instance.start()

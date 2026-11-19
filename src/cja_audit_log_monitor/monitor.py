@@ -137,6 +137,8 @@ class AuditLogMonitor:
         self._entry_filter = entry_filter
         self._last_poll_time: datetime | None = None
         self._seen = RecentIds(SEEN_IDS_MAX)
+        # When the first poll was tried; events after it are never treated as baseline.
+        self._first_attempt: datetime | None = None
         # Events the last poll skipped at the page limit (None: an unknown number).
         self._skipped: int | None = 0
         # Why the last poll failed, or None when it worked.
@@ -167,6 +169,8 @@ class AuditLogMonitor:
         logged and give no entries.
         """
         now = datetime.now(UTC)
+        if self._last_poll_time is None and self._first_attempt is None:
+            self._first_attempt = now
         query = build_poll_query(self._last_poll_time, now, POLL_PAGE_SIZE)
         self._skipped = 0
 
@@ -275,7 +279,7 @@ class AuditLogMonitor:
 
     def _display_entry(self, entry: AuditLogEntry) -> None:
         """Display a new audit log entry."""
-        timestamp = entry.timestamp.strftime("%H:%M:%S") if entry.timestamp else "-"
+        timestamp = entry.timestamp.strftime("%H:%M:%S UTC") if entry.timestamp else "-"
         action_color = get_action_color(entry.action or "")
 
         text = Text()
@@ -318,6 +322,14 @@ class AuditLogMonitor:
         entries = self._get_new_entries()
         if self._skipped != 0:
             self._print_warning(skipped_message(self._skipped))
+        if is_baseline and self._first_attempt is not None:
+            # Polls before this one failed: events after the first attempt are new, not
+            # baseline, so they still raise alerts.
+            first = self._first_attempt
+            late = [e for e in entries if e.timestamp is not None and e.timestamp > first]
+            entries = [e for e in entries if e not in late]
+            for entry in late:
+                self._handle_entry(entry)
         if is_baseline:
             if entries:
                 self.console.print(f"[dim]Found {len(entries)} recent entries[/dim]")
@@ -327,7 +339,7 @@ class AuditLogMonitor:
         else:
             for entry in entries:
                 self._handle_entry(entry)
-        clock = datetime.now().strftime("%H:%M:%S")
+        clock = datetime.now(UTC).strftime("%H:%M:%S UTC")
         if self._poll_error is not None:
             status.update(
                 f"Last poll {clock} failed: {escape(self._poll_error)}. "
@@ -371,10 +383,10 @@ class AuditLogMonitor:
                 "Waiting for first poll..."
             ) as status, self._logs_around_status():
                 self._status = status
-                self._run_poll(status)
-
+                # The duration counts from before the first poll, which can be slow.
                 start_time = time.monotonic()
                 last_check = start_time
+                self._run_poll(status)
 
                 while self._running:
                     current_time = time.monotonic()

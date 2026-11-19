@@ -2910,3 +2910,34 @@ def test_init_message_does_not_ask_for_scopes(tmp_path) -> None:
     assert result.exit_code == 0
     assert "SCOPES" not in result.stdout
     assert ".env.example" not in result.stdout
+
+
+def test_tail_prints_the_polling_line_once(runner: CliRunner) -> None:
+    with (
+        patch("cja_audit_log_monitor.cli.get_client") as gc,
+        patch("cja_audit_log_monitor.cli.AuditLogMonitor.start", lambda self, *a, **k: None),
+    ):
+        client = MagicMock()
+        gc.return_value = (client, MagicMock(alert_rules=[]))
+        result = runner.invoke(main, ["cli", "tail", "--no-alerts"])
+    assert result.output.lower().count("polling every") <= 1
+    assert "Polling every" not in result.stderr
+
+
+def test_monitor_hides_channel_summary_when_alert_delivery_is_off(runner: CliRunner) -> None:
+    from cja_audit_log_monitor.config import CJASettings
+    from cja_audit_log_monitor.models import NotificationConfig
+
+    settings = CJASettings(
+        _env_file=None,
+        notifications=NotificationConfig(
+            slack_webhook_url="https://hooks.slack.com/x", notify_on_alerts=False
+        ),
+    )
+    with (
+        patch("cja_audit_log_monitor.cli.get_client", return_value=(MagicMock(), settings)),
+        patch("cja_audit_log_monitor.cli.AuditLogMonitor.start", lambda self, *a, **k: None),
+        patch("cja_audit_log_monitor.cli.AuditLogMonitor.successful_polls", 1, create=True),
+    ):
+        result = runner.invoke(main, ["cli", "monitor"])
+    assert "Notification channels" not in result.output

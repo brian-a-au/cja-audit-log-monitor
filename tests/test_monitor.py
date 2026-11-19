@@ -1076,3 +1076,55 @@ class TestLogLinesAndStatus:
             engine.check_entry(_entry("x", action="DELETE"))
         records = [r for r in caplog.records if "Alert triggered" in r.getMessage()]
         assert [r.levelno for r in records] == [logging.INFO]
+
+
+class TestMonitorDetails:
+    """Clock labels, duration, a failed first poll (G42)."""
+
+    def test_clock_label_names_utc(self, mock_client: MagicMock) -> None:
+        mock_client.get_logs.return_value = AuditLogResponse(content=[], last=True)
+        console = MagicMock()
+        monitor = AuditLogMonitor(mock_client, console=console, interval=5)
+        status = MagicMock()
+        monitor._run_poll(status)
+        assert "UTC" in status.update.call_args.args[0]
+        monitor._display_entry(_entry("a"))
+        assert "UTC" in str(console.print.call_args)
+
+    def test_duration_counts_the_first_poll(self, mock_client: MagicMock) -> None:
+        clock = {"t": 0.0}
+
+        def slow_poll(query):
+            clock["t"] += 6  # each poll takes 6 seconds
+            return AuditLogResponse(content=[], last=True)
+
+        def sleep(seconds):
+            clock["t"] += seconds
+
+        mock_client.get_logs.side_effect = slow_poll
+        monitor = AuditLogMonitor(mock_client, console=MagicMock(), interval=5)
+        with (
+            patch("cja_audit_log_monitor.monitor.time.monotonic", lambda: clock["t"]),
+            patch("cja_audit_log_monitor.monitor.time.sleep", sleep),
+        ):
+            monitor.start(duration=10)
+        assert clock["t"] <= 13  # the 10 seconds include the first poll
+
+    def test_first_poll_fails_later_entries_still_alert(self, mock_client: MagicMock) -> None:
+        later = AuditLogEntry(
+            id="late", action="DELETE", timestamp=datetime.now(UTC) + timedelta(seconds=30)
+        )
+        mock_client.get_logs.side_effect = [
+            APIError("down", status_code=503),
+            AuditLogResponse(content=[later], last=True),
+        ]
+        engine = MagicMock()
+        engine.check_entry.return_value = []
+        monitor = AuditLogMonitor(
+            mock_client, console=MagicMock(), interval=5, alert_engine=engine
+        )
+        monitor._run_poll(MagicMock())
+        with patch("cja_audit_log_monitor.monitor.datetime") as fake_dt:
+            fake_dt.now.return_value = datetime.now(UTC) + timedelta(minutes=1)
+            monitor._run_poll(MagicMock())
+        engine.check_entry.assert_called_once_with(later)
