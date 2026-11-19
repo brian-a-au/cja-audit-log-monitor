@@ -54,10 +54,18 @@ def is_final_page(page: int, response: AuditLogResponse) -> bool:
 class APIError(Exception):
     """Raised when API request fails."""
 
-    def __init__(self, message: str, status_code: int | None = None, response: Any = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        status_code: int | None = None,
+        response: Any = None,
+        network: bool = False,
+    ) -> None:
         super().__init__(message)
         self.status_code = status_code
         self.response = response
+        # True when the API host could not be reached at all (DNS, refused, timed out).
+        self.network = network
 
 
 class ClientClosedError(APIError):
@@ -269,7 +277,10 @@ class AuditLogsClient:
                     time.sleep(_retry_delay(None, attempt))  # Exponential backoff
                     attempt += 1
                     continue
-                raise APIError(f"Request failed: {e}") from e
+                host = self.client.base_url.host or self.settings.api_base_url
+                raise APIError(
+                    f"could not reach {host} ({type(e).__name__})", network=True
+                ) from e
 
         raise APIError("Max retries exceeded")
 

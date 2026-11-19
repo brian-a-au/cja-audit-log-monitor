@@ -3561,3 +3561,25 @@ def test_cli_config_shows_the_org_id_in_full(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("ORG_ID", "ABCDEF0123456789@AdobeOrg")
     result = CliRunner().invoke(main, ["-c", str(tmp_path / "x.yaml"), "cli", "config"])
     assert "ABCDEF0123456789@AdobeOrg" in result.stdout
+
+
+@pytest.mark.parametrize("command", ["monitor", "tail"])
+def test_interval_has_the_config_upper_limit(runner, command) -> None:
+    """G56: the CLI --interval takes at most 86,400 seconds, like monitor_interval."""
+    result = runner.invoke(main, ["cli", command, "-i", "86401"])
+    assert result.exit_code == 2
+
+
+def test_api_network_failure_is_a_network_error(runner) -> None:
+    """G57: an API call that cannot reach the host reads like the login step does."""
+    from cja_audit_log_monitor.client import APIError
+
+    client = MagicMock()
+    client.__enter__ = MagicMock(return_value=client)
+    client.__exit__ = MagicMock(return_value=False)
+    client.get_all_logs.side_effect = APIError(
+        "could not reach cja.adobe.io (ConnectError)", network=True
+    )
+    with patch("cja_audit_log_monitor.cli.get_client", return_value=(client, _settings())):
+        result = runner.invoke(main, ["cli", "list"])
+    assert result.stderr.startswith("Network error: could not reach cja.adobe.io")

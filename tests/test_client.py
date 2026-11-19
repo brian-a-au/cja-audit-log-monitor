@@ -751,3 +751,15 @@ def test_page_size_is_bounded(size) -> None:
 
     with pytest.raises(ValidationError):
         AuditLogQuery(page_size=size)
+
+
+def test_network_failure_names_the_host(client, httpx_mock, monkeypatch) -> None:
+    monkeypatch.setattr("cja_audit_log_monitor.client.time.sleep", lambda s: None)
+    httpx_mock.add_exception(
+        httpx.ConnectError("dns"), url="https://cja.adobe.io/auditlogs/api/v1/auditlogs",
+        is_reusable=True,
+    )
+    with client, pytest.raises(APIError) as info:
+        client.get_logs()
+    assert str(info.value) == "could not reach cja.adobe.io (ConnectError)"
+    assert info.value.network is True

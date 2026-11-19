@@ -28,6 +28,7 @@ from .auth import AuthenticationError, TokenManager
 from .client import MAX_PAGE_SIZE, APIError, AuditLogsClient, RateLimitError
 from .config import (
     MAX_DAYS,
+    MAX_MONITOR_INTERVAL,
     CJASettings,
     ConfigError,
     create_default_config,
@@ -57,7 +58,7 @@ POSITIVE_INT = click.IntRange(min=1)
 # A day count, up to about ten years, so a typo cannot overflow a date.
 DAYS = click.IntRange(min=1, max=MAX_DAYS)
 LOOKBACK_HOURS = click.IntRange(min=1, max=MAX_DAYS * 24)
-INTERVAL_SECONDS = click.IntRange(min=5)
+INTERVAL_SECONDS = click.IntRange(min=5, max=MAX_MONITOR_INTERVAL)
 
 
 def days_option(what: str) -> Callable[[Callable[P, R]], Callable[P, R]]:
@@ -138,7 +139,7 @@ def handle_cli_errors(func: Callable[P, R]) -> Callable[P, R]:
             label = "Network error" if e.network else "Authentication error"
             error = e
         except APIError as e:
-            label = "API error"
+            label = "Network error" if e.network else "API error"
             error = e
             if e.status_code == 403:
                 error = APIError(
