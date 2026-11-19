@@ -282,7 +282,7 @@ class WebhookConfig(BaseModel):
     enabled: bool = True
     method: str = "POST"
     headers: dict[str, str] | None = Field(default=None, repr=False)
-    timeout: int = 30
+    timeout: int = Field(30, gt=0, le=300)  # seconds
     include_entry_details: bool = True
 
 

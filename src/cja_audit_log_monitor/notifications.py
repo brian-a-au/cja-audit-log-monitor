@@ -2,6 +2,7 @@
 
 import hashlib
 import logging
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
@@ -13,9 +14,22 @@ from .utils import get_user_identifier, redact_url
 logger = logging.getLogger(__name__)
 
 
+# Slack's limits: a header holds 150 characters and a section 3,000.
+SLACK_HEADER_MAX = 150
+SLACK_SECTION_MAX = 3000
+
+
 def slack_escape(text: str) -> str:
-    """Escape ``&``, ``<`` and ``>`` so Slack shows text as is, with no mentions or links."""
+    """Escape ``&``, ``<`` and ``>`` so Slack shows text as is, with no mentions or links.
+
+    Line breaks become spaces, so a name cannot start a line that looks like a field.
+    """
+    text = text.replace("\r\n", " ").replace("\n", " ").replace("\r", " ")
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _cut(text: str, limit: int) -> str:
+    return text if len(text) <= limit else text[: limit - 1] + "\u2026"
 
 
 class NotificationError(Exception):
@@ -177,14 +191,14 @@ class NotificationManager:
                 "type": "header",
                 "text": {
                     "type": "plain_text",
-                    "text": f"CJA Audit Alert: {rule_name}",
+                    "text": _cut(f"CJA Audit Alert: {rule_name}", SLACK_HEADER_MAX),
                 },
             },
             {
                 "type": "section",
                 "text": {
                     "type": "mrkdwn",
-                    "text": slack_escape(message),
+                    "text": _cut(slack_escape(message), SLACK_SECTION_MAX),
                 },
             },
         ]
@@ -349,21 +363,37 @@ class NotificationManager:
 
         # Send to webhooks
         for webhook in self.config.webhooks:
-            payload = self._build_alert_payload(
-                rule_name,
-                message,
-                entry,
-                include_details=webhook.include_entry_details,
-            )
-            if self.send_webhook(webhook, payload):
+            def send(webhook: WebhookConfig = webhook) -> bool:
+                payload = self._build_alert_payload(
+                    rule_name,
+                    message,
+                    entry,
+                    include_details=webhook.include_entry_details,
+                )
+                return self.send_webhook(webhook, payload)
+
+            if self._guarded(self._webhook_key(webhook), webhook.url, send):
                 sent += 1
 
         # Send to Slack
-        if self.config.slack_webhook_url:
-            if self.send_slack(rule_name, message, entry):
-                sent += 1
+        url = self.config.slack_webhook_url
+        if url and self._guarded("slack", url, lambda: self.send_slack(rule_name, message, entry)):
+            sent += 1
 
         return sent
+
+    def _guarded(self, key: str, url: str, send: Callable[[], bool]) -> bool:
+        """Run one channel's send; an unexpected error fails that channel only.
+
+        Only the error type is logged: its message could hold the URL.
+        """
+        try:
+            return send()
+        except Exception as e:
+            label = f"{key.replace(':', ' ')} ({redact_url(url)})"
+            logger.error("Notification to %s failed: %s", label, type(e).__name__)
+            self._mark_failure(key, label)
+            return False
 
     def channels(self) -> list[str]:
         """Keys of the active channels: ``webhook:<n>`` (n counts from 1) and ``slack``."""
@@ -398,11 +428,15 @@ class NotificationManager:
             key = f"webhook:{index}"
             if channels is not None and key not in channels:
                 continue
-            if self.send_webhook(webhook, payload):
+            if self._guarded(key, webhook.url, lambda w=webhook: self.send_webhook(w, payload)):
                 accepted.add(key)
 
-        if self.config.slack_webhook_url and (channels is None or "slack" in channels):
-            if self._post_slack(self._build_slack_anomaly_payload(anomaly)):
+        url = self.config.slack_webhook_url
+        if url and (channels is None or "slack" in channels):
+            def send_slack() -> bool:
+                return self._post_slack(self._build_slack_anomaly_payload(anomaly))
+
+            if self._guarded("slack", url, send_slack):
                 accepted.add("slack")
 
         return accepted

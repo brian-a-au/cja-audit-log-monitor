@@ -643,3 +643,56 @@ class TestFailureWarnings:
         assert warning.startswith("Notification delivery failed (slack (")
         assert "shows again if the channel fails after it works again" in warning
         assert "suppressed for this session" not in warning
+
+
+class TestSlackLimitsAndChannelFailures:
+    """Slack text stays in its block, and one bad channel never skips the others (G43)."""
+
+    URL = "https://hooks.slack.com/services/T/B/x"
+
+    def test_newline_in_a_name_becomes_a_space(self, httpx_mock):
+        manager = NotificationManager(NotificationConfig(slack_webhook_url=self.URL))
+        entry = AuditLogEntry(
+            id="1", action="DELETE", component_name="x\n*User:* admin@example.com",
+            timestamp=datetime.now(UTC),
+        )
+        httpx_mock.add_response(url=self.URL, status_code=200)
+        manager.send_slack("r", "m", entry)
+        fields = json.loads(httpx_mock.get_requests()[0].content)["blocks"][2]["text"]["text"]
+        lines = fields.splitlines()
+        assert [line for line in lines if line.startswith("*User:*")] == ["*User:* unknown"]
+
+    def test_slack_limits(self, httpx_mock):
+        manager = NotificationManager(NotificationConfig(slack_webhook_url=self.URL))
+        httpx_mock.add_response(url=self.URL, status_code=200)
+        manager.send_slack("r" * 300, "m" * 5000)
+        blocks = json.loads(httpx_mock.get_requests()[0].content)["blocks"]
+        assert len(blocks[0]["text"]["text"]) <= 150
+        assert len(blocks[1]["text"]["text"]) <= 3000
+
+    @pytest.mark.parametrize("timeout", [0, -1, 301])
+    def test_webhook_timeout_is_bounded(self, timeout):
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            WebhookConfig(url="https://example.com/h", timeout=timeout)
+
+    def test_a_channel_that_raises_does_not_skip_the_others(self, httpx_mock):
+        hook = WebhookConfig(url="https://example.com/hook")
+        manager = NotificationManager(
+            NotificationConfig(slack_webhook_url=self.URL, webhooks=[hook])
+        )
+        httpx_mock.add_response(url=self.URL, status_code=200)
+        with patch.object(manager, "send_webhook", side_effect=UnicodeEncodeError(
+            "utf-8", "\ud83d", 0, 1, "surrogates not allowed"
+        )):
+            sent = manager.notify_alert("r", "m")
+        assert sent == 1  # Slack still got it
+        (warning,) = manager.pop_failures()
+        assert "webhook 1" in warning
+
+
+def test_redact_url_keeps_ipv6_brackets():
+    from cja_audit_log_monitor.utils import redact_url
+
+    assert redact_url("http://[::1]:8080/x?token=s") == "http://[::1]:8080/…"
