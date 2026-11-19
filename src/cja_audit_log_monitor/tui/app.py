@@ -94,6 +94,10 @@ class HelpScreen(ModalScreen):
 class CJAAuditApp(App):
     """Main TUI application for CJA Audit Log Monitor."""
 
+    # The colours are fixed, so Textual's palette (themes, screenshots) would give mixed
+    # results; it also used to leave the export dialog stuck.
+    ENABLE_COMMAND_PALETTE = False
+
     TITLE = "CJA Audit Log Monitor"
     CSS_PATH = "styles.tcss"
     # Width classes on the screen (-narrow / -normal / -wide) drive layout in styles.tcss.

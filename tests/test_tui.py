@@ -4138,15 +4138,6 @@ class TestNarrowLayout:
     def _label(app, nav_id: str) -> str:
         return str(app.screen_stack[0].query_one(f"#{nav_id}").render()).strip()
 
-    async def test_command_palette_opens_with_ctrl_p(self, mock_app_state):
-        from textual.command import CommandPalette
-
-        app = _make_app(mock_app_state)
-        async with app.run_test(size=(80, 24)) as pilot:
-            await pilot.pause()
-            await pilot.press("ctrl+p")
-            assert await _wait_for(lambda: isinstance(app.screen, CommandPalette), pilot)
-
     async def test_narrow_nav_label_is_key_only(self, mock_app_state):
         app = _make_app(mock_app_state)
         async with app.run_test(size=(80, 24)) as pilot:
@@ -4727,3 +4718,77 @@ async def test_hung_refreshes_use_one_thread_and_other_views_still_load(mock_app
     finally:
         release.set()
         await asyncio.sleep(0)
+
+
+class TestExportDialogReports:
+    """The export dialog always reports its result (G25, G40, G44)."""
+
+    async def _open(self, app, pilot):
+        await pilot.pause()
+        await pilot.press("e")
+        await pilot.pause()
+        return app.screen
+
+    async def test_ctrl_p_does_not_open_the_command_palette(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            await pilot.press("ctrl+p")
+            await pilot.pause()
+            assert type(app.screen).__name__ != "CommandPalette"
+
+    async def test_escape_during_write_still_reports_the_file(
+        self, mock_app_state, sample_audit_entries, tmp_path, monkeypatch
+    ):
+        import threading
+
+        from cja_audit_log_monitor.tui.modals import export_dialog
+
+        started, release = threading.Event(), threading.Event()
+        real_export = export_dialog.export_entries
+
+        def slow_export(*args, **kwargs):
+            started.set()
+            release.wait(10)
+            return real_export(*args, **kwargs)
+
+        monkeypatch.setattr(export_dialog, "export_entries", slow_export)
+        mock_app_state.page_loaded = True
+        mock_app_state.entries = sample_audit_entries
+        target = tmp_path / "out.json"
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(120, 40), notifications=True) as pilot:
+            dialog = await self._open(app, pilot)
+            dialog.query_one("#output-path").value = str(target)
+            await pilot.pause()
+            await pilot.click("#export-button")
+            assert await _wait_for(started.is_set, pilot)
+            await pilot.press("escape")
+            await pilot.pause()
+            release.set()
+            assert await _wait_for(
+                lambda: any("exported" in n.message for n in app._notifications), pilot
+            )
+        assert target.exists()
+
+    async def test_limit_reached_only_when_the_limit_cut_the_result(
+        self, mock_app_state, sample_audit_entry, tmp_path
+    ):
+        many = [sample_audit_entry.model_copy(update={"id": f"m{i}"}) for i in range(5)]
+        mock_app_state.page_loaded = True
+        mock_app_state.entries = many[:1]
+        mock_app_state.total_entries = 6
+        mock_app_state.client.get_logs_sample.return_value = (many, 6)
+        target = tmp_path / "all.json"
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(120, 40), notifications=True) as pilot:
+            dialog = await self._open(app, pilot)
+            dialog.query_one("#scope-all").value = True
+            dialog.query_one("#output-path").value = str(target)
+            await pilot.pause()
+            await pilot.click("#export-button")
+            assert await _wait_for(
+                lambda: any("exported" in n.message for n in app._notifications), pilot
+            )
+            message = next(n.message for n in app._notifications if "exported" in n.message)
+            assert "limit reached" not in message
