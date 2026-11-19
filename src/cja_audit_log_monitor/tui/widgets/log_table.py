@@ -22,33 +22,27 @@ class LogTable(DataTable):
     """
 
     COLUMN_WIDTHS = {"timestamp": 19, "user": 28, "action": 13, "component": 18}
-    DETAIL_WIDTHS = {"description": 35, "ip": 15}
     # Narrowest each column may get before it is shrunk or hidden. ``name`` is hidden first,
     # then ``component`` (the type); the other columns always stay.
     MIN_WIDTHS = {"timestamp": 19, "user": 16, "action": 13, "component": 12, "name": 12}
     HIDE_ORDER = ("name", "component")
-    # Columns whose text is cut to the column width, so the cut ends with an ellipsis.
+    # The narrowest the name column gets once every other column has its minimum.
     NAME_FLOOR = 6
 
-    def __init__(self, show_details: bool = False, **kwargs) -> None:
+    def __init__(self, **kwargs) -> None:
         """Initialize LogTable.
 
         Args:
-            show_details: Whether to show additional columns.
             **kwargs: Additional arguments for DataTable.
         """
         super().__init__(**kwargs)
-        self._show_details = show_details
         self._entries: dict[RowKey, AuditLogEntry] = {}
         self._shown: list[str] = []  # keys of the columns currently in the table
         self.cursor_type = "row"
         self.zebra_stripes = False  # quieter rows; severity does the work
 
     def _all_columns(self) -> list[str]:
-        keys = [*self.COLUMN_WIDTHS, "name"]
-        if self._show_details:
-            keys.extend(self.DETAIL_WIDTHS)
-        return keys
+        return [*self.COLUMN_WIDTHS, "name"]
 
     def _add_columns(self, widths: dict[str, int]) -> None:
         labels = {"timestamp": f"time ({local_tz_name()})"}
@@ -59,8 +53,6 @@ class LogTable(DataTable):
     def on_mount(self) -> None:
         """Set up table columns on mount."""
         widths = {**self.COLUMN_WIDTHS, "name": self.MIN_WIDTHS["name"]}
-        if self._show_details:
-            widths.update(self.DETAIL_WIDTHS)
         self._add_columns(widths)
         self._fit_columns()
 
@@ -71,7 +63,7 @@ class LogTable(DataTable):
     def _visible_columns(self, available: int) -> list[str]:
         """Column keys that fit in ``available`` cells at their minimum widths."""
         keys = self._all_columns()
-        minimum = {**self.COLUMN_WIDTHS, **self.DETAIL_WIDTHS, **self.MIN_WIDTHS}
+        minimum = {**self.COLUMN_WIDTHS, **self.MIN_WIDTHS}
 
         def needed() -> int:
             return sum(minimum[k] + 2 * self.cell_padding for k in keys)
@@ -94,7 +86,7 @@ class LogTable(DataTable):
         if available <= 0:
             return
         keys = self._visible_columns(available)
-        widths = {k: {**self.COLUMN_WIDTHS, **self.DETAIL_WIDTHS}.get(k, 0) for k in keys}
+        widths = {k: self.COLUMN_WIDTHS.get(k, 0) for k in keys}
         padding = 2 * self.cell_padding * len(keys)
         free = available - padding - sum(widths.values())
         # Shrink user, then component, until ``name`` has its minimum (or nothing is left over).
@@ -170,8 +162,6 @@ class LogTable(DataTable):
                 ),
                 no_wrap=True,
             ),
-            "description": Text((entry.description or "-")[:35], no_wrap=True),
-            "ip": Text(entry.ip_address or "-", no_wrap=True),
         }
         return [cells[key] for key in (self._shown or self._all_columns())]
 

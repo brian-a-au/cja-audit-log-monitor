@@ -92,16 +92,13 @@ class AppState:
         # Days the statistics view looks back; starts at the configured default_days.
         self.stats_days: int = 7
 
-        # Connection state
-        self.is_connected: bool = False
-        self.connection_error: str | None = None
+        # Config state
         self.config_error: str | None = None
         self.config_error_summary: str | None = None
         # Set by close(): no client is built after that.
         self._closed = False
         # Names of rules turned off this session; kept across a settings reload.
         self._disabled_rules: set[str] = set()
-        self.last_refresh: datetime | None = None
 
     @property
     def settings(self) -> CJASettings:
@@ -208,8 +205,6 @@ class AppState:
         self._settings = new_settings
         self.config_error = None
         self.config_error_summary = None
-        self.is_connected = False
-        self.connection_error = None
         self._alert_engine = None
         if self._notification_manager:
             self._notification_manager.close()
@@ -237,13 +232,8 @@ class AppState:
             Dictionary with connection status and details.
         """
         try:
-            result = self.client.verify_connection()
-            self.is_connected = result.get("connected", False)
-            self.connection_error = result.get("error")
-            return result
+            return self.client.verify_connection()
         except Exception as e:
-            self.is_connected = False
-            self.connection_error = str(e)
             return {
                 "connected": False,
                 "authenticated": False,

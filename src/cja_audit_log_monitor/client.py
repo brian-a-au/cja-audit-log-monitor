@@ -86,6 +86,10 @@ class RateLimitError(APIError):
         )
 
 
+# How many times one request is tried (rate limits, 5xx and network errors).
+REQUEST_ATTEMPTS = 3
+
+
 class AuditLogsClient:
     """Client for querying CJA audit logs API."""
 
@@ -153,8 +157,6 @@ class AuditLogsClient:
         method: str,
         path: str,
         params: dict[str, Any] | None = None,
-        json: dict[str, Any] | None = None,
-        retry_count: int = 3,
     ) -> dict[str, Any]:
         """Make authenticated request with retry logic."""
         with self._client_lock:
@@ -162,7 +164,7 @@ class AuditLogsClient:
                 raise ClientClosedError()
             self._in_flight += 1
         try:
-            return self._request_with_retries(method, path, params, json, retry_count)
+            return self._request_with_retries(method, path, params, REQUEST_ATTEMPTS)
         finally:
             self._request_done()
 
@@ -171,7 +173,6 @@ class AuditLogsClient:
         method: str,
         path: str,
         params: dict[str, Any] | None,
-        json: dict[str, Any] | None,
         retry_count: int,
     ) -> dict[str, Any]:
         """The body of ``_request``."""
@@ -188,7 +189,6 @@ class AuditLogsClient:
                     url=path,
                     headers=headers,
                     params=params,
-                    json=json,
                 )
 
                 if response.status_code == 429:

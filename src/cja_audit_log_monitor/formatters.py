@@ -6,7 +6,6 @@ from datetime import datetime
 from typing import Any
 
 from rich.cells import cell_len, set_cell_size
-from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
@@ -157,14 +156,12 @@ def format_timestamp(dt: datetime | None, local: bool = False) -> str:
 
 def format_logs_table(
     entries: list[AuditLogEntry],
-    console: Console | None = None,
     show_details: bool = False,
 ) -> Table:
     """Format audit log entries as a Rich table.
 
     Args:
         entries: List of audit log entries.
-        console: Optional console for rendering.
         show_details: Whether to show additional columns.
 
     Returns:

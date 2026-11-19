@@ -112,7 +112,7 @@ class MonitorScreen(ContentView):
             controls,
             status,
             Static("LIVE LOG STREAM", classes="section-label"),
-            LogTable(id="monitor-log", show_details=False),
+            LogTable(id="monitor-log"),
             Static("ALERTS", classes="section-label"),
             AlertSummary(id="alert-summary"),
             id="monitor-container",
