@@ -116,8 +116,10 @@ class AuditLogsClient:
     ) -> dict[str, Any]:
         """Make authenticated request with retry logic."""
         headers = self.token_manager.get_auth_headers()
-
-        for attempt in range(retry_count):
+        # A token refresh after a 401 happens once and does not use up a retry attempt.
+        refreshed = False
+        attempt = 0
+        while attempt < retry_count:
             try:
                 response = self.client.request(
                     method=method,
@@ -137,6 +139,7 @@ class AuditLogsClient:
                             retry_count,
                         )
                         time.sleep(retry_after)
+                        attempt += 1
                         continue
                     raise RateLimitError(retry_after=retry_after)
 
@@ -150,11 +153,13 @@ class AuditLogsClient:
                         retry_count,
                     )
                     time.sleep(delay)
+                    attempt += 1
                     continue
 
                 if response.status_code == 401:
-                    # Token might be expired, invalidate and retry
-                    if attempt < retry_count - 1:
+                    # Token might be expired: refresh it once and send again
+                    if not refreshed:
+                        refreshed = True
                         logger.debug("Got 401, refreshing token")
                         self.token_manager.invalidate_token()
                         headers = self.token_manager.get_auth_headers()
@@ -193,6 +198,7 @@ class AuditLogsClient:
                         e,
                     )
                     time.sleep(_retry_delay(None, attempt))  # Exponential backoff
+                    attempt += 1
                     continue
                 raise APIError(f"Request failed: {e}") from e
 

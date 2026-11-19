@@ -14,9 +14,15 @@ logger = logging.getLogger(__name__)
 
 
 class AuthenticationError(Exception):
-    """Raised when authentication fails."""
+    """Raised when authentication fails.
 
-    pass
+    ``transient`` is True when trying again later may work: a network error, or IMS
+    answering 429 or 5xx. Bad or missing credentials are not transient.
+    """
+
+    def __init__(self, message: str, transient: bool = False) -> None:
+        super().__init__(message)
+        self.transient = transient
 
 
 class TokenManager:
@@ -91,9 +97,10 @@ class TokenManager:
                     raise AuthenticationError("IMS response had no access_token") from None
         except httpx.HTTPStatusError as e:
             error_detail = self._parse_oauth_error(e)
-            raise AuthenticationError(error_detail) from e
+            status = e.response.status_code
+            raise AuthenticationError(error_detail, transient=status == 429 or status >= 500) from e
         except httpx.RequestError as e:
-            raise AuthenticationError(f"OAuth request failed: {e}") from e
+            raise AuthenticationError(f"OAuth request failed: {e}", transient=True) from e
 
     def _parse_oauth_error(self, e: httpx.HTTPStatusError) -> str:
         """Parse OAuth error response and return helpful message."""

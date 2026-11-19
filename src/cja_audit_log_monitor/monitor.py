@@ -148,8 +148,13 @@ class AuditLogMonitor:
                     "Monitor poll reached %d pages; backlog may be larger than one cycle",
                     _MAX_POLL_PAGES,
                 )
-        except AuthenticationError:
-            raise
+        except AuthenticationError as e:
+            if not e.transient:
+                raise
+            # IMS or the network failed for a moment: try again next poll, like an API 503.
+            logger.error("Error fetching audit logs: %s", e)
+            self._poll_error = str(e)
+            return []
         except APIError as e:
             if e.status_code in FATAL_STATUS:
                 raise

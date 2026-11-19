@@ -764,3 +764,25 @@ class TestPollGuards:
         with patch("cja_audit_log_monitor.monitor.time.sleep", sleep):
             monitor.start()
         assert len(sleeps) == 1
+
+
+class TestTransientTokenFailure:
+    """One failed token refresh does not end a monitor (G2)."""
+
+    def test_monitor_survives_transient_token_failure(self, mock_client: MagicMock) -> None:
+        mock_client.get_logs.side_effect = [
+            AuditLogResponse(content=[], last=True),
+            AuthenticationError("OAuth authentication failed: 503", transient=True),
+            AuditLogResponse(content=[], last=True),
+        ]
+        monitor = AuditLogMonitor(mock_client, console=MagicMock(), interval=5)
+        status = MagicMock()
+        for _ in range(3):
+            monitor._run_poll(status)
+        assert monitor.successful_polls == 2
+
+    def test_monitor_stops_on_bad_credentials(self, mock_client: MagicMock) -> None:
+        mock_client.get_logs.side_effect = AuthenticationError("invalid_client")
+        monitor = AuditLogMonitor(mock_client, console=MagicMock(), interval=5)
+        with pytest.raises(AuthenticationError):
+            monitor._run_poll(MagicMock())

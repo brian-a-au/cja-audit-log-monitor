@@ -1367,6 +1367,35 @@ class TestAnomaliesCommand:
         assert "Notification delivery failed (slack)" in result.stderr
         assert "Notification delivery failed (slack)" not in result.stdout
 
+    @patch("cja_audit_log_monitor.cli.NotificationManager")
+    @patch("cja_audit_log_monitor.cli._run_anomalies_cycle")
+    @patch("cja_audit_log_monitor.cli.get_client")
+    def test_watch_survives_transient_token_failure(
+        self,
+        mock_get_client: MagicMock,
+        mock_cycle: MagicMock,
+        mock_nm_cls: MagicMock,
+        runner: CliRunner,
+    ) -> None:
+        from cja_audit_log_monitor.auth import AuthenticationError
+
+        client = MagicMock()
+        client.__enter__ = MagicMock(return_value=client)
+        client.__exit__ = MagicMock(return_value=False)
+        mock_get_client.return_value = (client, _settings())
+        nm_instance = MagicMock()
+        nm_instance.__enter__ = MagicMock(return_value=nm_instance)
+        nm_instance.__exit__ = MagicMock(return_value=False)
+        nm_instance.is_configured = MagicMock(return_value=False)
+        mock_nm_cls.return_value = nm_instance
+        mock_cycle.side_effect = [AuthenticationError("IMS 503", transient=True), None]
+
+        with patch("cja_audit_log_monitor.cli.time.sleep", side_effect=[None, KeyboardInterrupt]):
+            result = runner.invoke(main, ["cli", "anomalies", "--watch", "--interval", "5"])
+
+        assert result.exit_code == 0
+        assert mock_cycle.call_count == 2
+
     @pytest.mark.parametrize("status_code", [None, 408, 425, 429, 500, 502, 503, 504])
     @patch("cja_audit_log_monitor.cli.NotificationManager")
     @patch("cja_audit_log_monitor.cli._run_anomalies_cycle")
