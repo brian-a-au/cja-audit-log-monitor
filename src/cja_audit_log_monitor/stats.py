@@ -21,6 +21,7 @@ def calculate_stats(entries: list[AuditLogEntry], top_n: int = 10) -> dict:
         return {
             "total_entries": 0,
             "top_users": [],
+            "user_count": 0,
             "action_counts": {},
             "component_counts": {},
             "date_range": None,

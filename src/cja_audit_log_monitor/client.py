@@ -71,8 +71,11 @@ class RateLimitError(APIError):
     """Raised when rate limited by API."""
 
     def __init__(self, retry_after: float | None = None) -> None:
-        super().__init__("Rate limited by API", status_code=429)
         self.retry_after = 30 if retry_after is None else retry_after
+        super().__init__(
+            f"Rate limited by API; the server asked to wait {self.retry_after:g} seconds",
+            status_code=429,
+        )
 
 
 class AuditLogsClient:
@@ -215,7 +218,11 @@ class AuditLogsClient:
                         self.token_manager.invalidate_token()
                         headers = self.token_manager.get_auth_headers()
                         continue
-                    raise APIError("Authentication failed", status_code=401)
+                    raise APIError(
+                        "Authentication failed (401). Check that ORG_ID, CLIENT_ID and "
+                        "SECRET are current in the Developer Console.",
+                        status_code=401,
+                    )
 
                 response.raise_for_status()
                 try:

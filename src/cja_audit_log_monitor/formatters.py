@@ -222,45 +222,36 @@ def format_logs_table(
 
 
 def format_single_entry(entry: AuditLogEntry) -> Panel:
-    """Format a single audit log entry as a detailed panel."""
+    """Format a single audit log entry as a detailed panel; a missing field shows as ``-``."""
     action_color = get_action_color(entry.action or "")
-
     icon = get_action_icon(entry.action or "")
+
+    def line(label: str, value: object) -> None:
+        content.append(f"{label}: ", style="bold")
+        content.append(f"{'-' if value in (None, '') else value}\n")
+
     content = Text()
     content.append("Action: ", style="bold")
-    content.append(f"{icon} {entry.action}\n", style=action_color)
-
-    content.append("Timestamp: ", style="bold")
-    content.append(f"{format_timestamp(entry.timestamp)} UTC\n")
-
-    content.append("User: ", style="bold")
-    content.append(f"{get_user_identifier(entry, default='-')}\n")
-
-    content.append("Component Type: ", style="bold")
-    content.append(f"{entry.component_type or '-'}\n")
-
-    content.append("Component: ", style="bold")
-    content.append(f"{entry.component_name or entry.component_id or '-'}\n")
-
-    if entry.description:
-        content.append("Description: ", style="bold")
-        content.append(f"{entry.description}\n")
-
-    if entry.ip_address:
-        content.append("IP Address: ", style="bold")
-        content.append(f"{entry.ip_address}\n")
-
-    if entry.org_id:
-        content.append("Org ID: ", style="bold")
-        content.append(f"{entry.org_id}\n")
+    content.append(f"{icon} {entry.action or '-'}\n", style=action_color)
+    line("Timestamp", f"{format_timestamp(entry.timestamp)} UTC" if entry.timestamp else None)
+    line("ID", entry.id)
+    line("User", get_user_identifier(entry, default="-"))
+    line("User ID", entry.user_id)
+    line("User name", entry.user_name)
+    line("Component Type", entry.component_type)
+    line("Component", entry.component_name)
+    line("Component ID", entry.component_id)
+    line("Description", entry.description)
+    line("IP Address", entry.ip_address)
+    line("Org ID", entry.org_id)
 
     if entry.changes:
         content.append("Changes:\n", style="bold")
         content.append(json.dumps(entry.changes, indent=2, default=str) + "\n")
 
     title = Text()
-    title.append(f"{entry.action}", style=action_color)
-    title.append(f" - {entry.component_type}")
+    title.append(f"{entry.action or '-'}", style=action_color)
+    title.append(f" - {entry.component_type or '-'}")
     return Panel(
         content,
         title=title,

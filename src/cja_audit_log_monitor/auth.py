@@ -4,6 +4,7 @@ import logging
 import re
 import threading
 from datetime import UTC, datetime, timedelta
+from urllib.parse import urlparse
 
 import httpx
 
@@ -20,9 +21,11 @@ class AuthenticationError(Exception):
     answering 429 or 5xx. Bad or missing credentials are not transient.
     """
 
-    def __init__(self, message: str, transient: bool = False) -> None:
+    def __init__(self, message: str, transient: bool = False, network: bool = False) -> None:
         super().__init__(message)
         self.transient = transient
+        # True when IMS could not be reached at all (DNS, refused, timed out).
+        self.network = network
 
 
 class TokenManager:
@@ -105,7 +108,10 @@ class TokenManager:
             status = e.response.status_code
             raise AuthenticationError(error_detail, transient=status == 429 or status >= 500) from e
         except httpx.RequestError as e:
-            raise AuthenticationError(f"OAuth request failed: {e}", transient=True) from e
+            host = urlparse(token_url).hostname or token_url
+            raise AuthenticationError(
+                f"could not reach {host} ({type(e).__name__})", transient=True, network=True
+            ) from e
 
     def _parse_oauth_error(self, e: httpx.HTTPStatusError) -> str:
         """Parse OAuth error response and return helpful message."""
