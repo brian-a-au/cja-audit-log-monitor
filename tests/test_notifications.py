@@ -12,6 +12,18 @@ from cja_audit_log_monitor.models import AuditLogEntry, NotificationConfig, Webh
 from cja_audit_log_monitor.notifications import NotificationManager, slack_escape
 
 
+@pytest.fixture(autouse=True)
+def _fresh_url_redactor():
+    """Each test starts with no remembered webhook URLs, so no test depends on test order."""
+    from cja_audit_log_monitor.notifications import _url_redactor
+
+    saved = set(_url_redactor._secret_urls)
+    _url_redactor._secret_urls.clear()
+    yield
+    _url_redactor._secret_urls.clear()
+    _url_redactor._secret_urls.update(saved)
+
+
 @pytest.fixture
 def sample_entry() -> AuditLogEntry:
     """Create a sample audit log entry."""
@@ -465,6 +477,20 @@ class TestSlackEscaping:
     def test_slack_escape(self):
         assert slack_escape("a & <b>") == "a &amp; &lt;b&gt;"
 
+    def test_slack_payload_escapes_the_component_name(self, httpx_mock):
+        url = "https://hooks.slack.com/x"
+        manager = NotificationManager(NotificationConfig(slack_webhook_url=url))
+        entry = AuditLogEntry(
+            id="1", action="DELETE", component_name="<!channel> <https://evil|x>",
+            timestamp=datetime.now(UTC),
+        )
+        httpx_mock.add_response(url=url, status_code=200)
+
+        manager.send_slack("rule", "msg", entry)
+        body = httpx_mock.get_requests()[0].content.decode()
+        assert "<!channel>" not in body
+        assert "&lt;!channel&gt;" in body
+
     def test_user_name_escaped_in_slack_payload(self, httpx_mock):
         url = "https://hooks.slack.com/x"
         manager = NotificationManager(NotificationConfig(slack_webhook_url=url))
@@ -566,3 +592,21 @@ class TestLogFilterAndBadUrls:
             assert manager.send_slack("r", "m") is False
         assert "SECRET" not in caplog.text
         assert "SECRET" not in (manager.pop_first_failure() or "")
+
+
+class TestDeliveryDetails:
+    """Webhook headers and closing the client (G50)."""
+
+    def test_webhook_sends_its_headers(self, httpx_mock):
+        webhook = WebhookConfig(url="https://example.com/hook", headers={"Authorization": "x"})
+        manager = NotificationManager(NotificationConfig(webhooks=[webhook]))
+        httpx_mock.add_response(url="https://example.com/hook", status_code=200)
+        assert manager.send_webhook(webhook, {"a": 1}) is True
+        assert httpx_mock.get_requests()[0].headers["Authorization"] == "x"
+
+    def test_close_closes_the_http_client(self):
+        manager = NotificationManager(NotificationConfig())
+        http = manager.client
+        manager.close()
+        assert http.is_closed
+        assert manager._client is None

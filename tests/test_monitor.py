@@ -1,14 +1,25 @@
 """Tests for monitoring module."""
 
+import io
 from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
+from rich.console import Console
 
 from cja_audit_log_monitor.auth import AuthenticationError
 from cja_audit_log_monitor.client import APIError
 from cja_audit_log_monitor.models import AuditLogEntry, AuditLogResponse
 from cja_audit_log_monitor.monitor import POLL_OVERLAP, AuditLogMonitor, build_poll_query
+
+
+@pytest.fixture(autouse=True)
+def _quiet_consoles(monkeypatch):
+    """Monitors built without a console print into a buffer, not the test output."""
+    monkeypatch.setattr(
+        "cja_audit_log_monitor.monitor.Console",
+        lambda *args, **kwargs: Console(*args, file=io.StringIO(), **kwargs),
+    )
 
 
 @pytest.fixture
@@ -21,7 +32,7 @@ def mock_client() -> MagicMock:
 @pytest.fixture
 def monitor(mock_client: MagicMock) -> AuditLogMonitor:
     """Create a monitor instance with mock client."""
-    return AuditLogMonitor(mock_client, interval=1)
+    return AuditLogMonitor(mock_client, console=Console(file=io.StringIO()), interval=1)
 
 
 class TestAuditLogMonitor:
@@ -708,3 +719,48 @@ class TestPollOrdering:
         from rich.panel import Panel
 
         assert sum(isinstance(p, Panel) for p in panels) == 1
+
+
+class TestPollGuards:
+    """Guards for the poll window, the baseline and stopping (G38)."""
+
+    def test_failed_poll_keeps_the_poll_window(self, mock_client: MagicMock) -> None:
+        last_good = datetime.now(UTC) - timedelta(minutes=3)
+        mock_client.get_logs.side_effect = [
+            APIError("down", status_code=503),
+            AuditLogResponse(content=[], last=True),
+        ]
+        monitor = AuditLogMonitor(mock_client, console=MagicMock(), interval=5)
+        monitor._last_poll_time = last_good
+        monitor._get_new_entries()
+        monitor._get_new_entries()
+        query = mock_client.get_logs.call_args_list[1].args[0]
+        assert query.start_date == last_good - POLL_OVERLAP
+
+    def test_baseline_poll_raises_no_alert(self, mock_client: MagicMock) -> None:
+        mock_client.get_logs.return_value = AuditLogResponse(
+            content=[_entry(f"d{i}", -i, action="DELETE") for i in range(10)], last=True
+        )
+        engine = MagicMock()
+        monitor = AuditLogMonitor(
+            mock_client, console=MagicMock(), interval=5, alert_engine=engine
+        )
+        monitor._run_poll(MagicMock())
+        engine.check_entry.assert_not_called()
+
+    def test_sigint_stops_the_loop(self, mock_client: MagicMock) -> None:
+        import signal
+
+        mock_client.get_logs.return_value = AuditLogResponse(content=[], last=True)
+        monitor = AuditLogMonitor(mock_client, console=MagicMock(), interval=5)
+        sleeps: list[float] = []
+
+        def sleep(seconds: float) -> None:
+            sleeps.append(seconds)
+            if len(sleeps) > 5:
+                raise AssertionError("the loop kept running after SIGINT")
+            monitor._signal_handler(signal.SIGINT, None)
+
+        with patch("cja_audit_log_monitor.monitor.time.sleep", sleep):
+            monitor.start()
+        assert len(sleeps) == 1

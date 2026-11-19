@@ -3,7 +3,7 @@
 import io
 import os
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from textual.color import Color
@@ -44,8 +44,14 @@ def _noop(*args, **kwargs):
 
 
 @pytest.fixture(autouse=True)
-def _patch_screen_workers():
-    """Patch screen on_content_mounted workers for all TUI tests."""
+def _patch_screen_workers(request):
+    """Patch screen on_content_mounted workers for all TUI tests.
+
+    A test marked ``real_mount`` keeps the real hooks, so views load as in the real app.
+    """
+    if request.node.get_closest_marker("real_mount"):
+        yield
+        return
     patchers = [patch(p, _noop) for p in _SCREEN_WORKER_PATCHES]
     for p in patchers:
         p.start()
@@ -1098,48 +1104,37 @@ class TestMonitorScreen:
             assert monitor_screen._state.monitor.is_running is False
 
     async def test_poll_once_skips_when_stopped(self, mock_app_state):
+        import threading
+
         app = _make_app(mock_app_state)
         async with app.run_test() as pilot:
             await pilot.press("m")
             await pilot.pause()
             monitor_screen = app._screens["monitor"]
             monitor_screen._state.monitor.is_running = False
-            monitor_screen._poll_for_new_entries = AsyncMock()
+            polls: list[object] = []
+            monitor_screen._guarded_poll = polls.append
 
-            await monitor_screen._poll_once()
+            await monitor_screen._poll_once(threading.Event())
 
-            monitor_screen._poll_for_new_entries.assert_not_awaited()
+            assert polls == []
 
-    def test_monitor_surfaces_pop_first_failure_warning(self):
-        """When pop_first_failure returns a string, _show_warning is dispatched."""
-        from cja_audit_log_monitor.tui.screens.monitor import MonitorScreen
-
-        expected_warning = (
-            "Notification delivery failed (slack);"
-            " subsequent failures suppressed for this session — check logs."
-        )
-
-        state = MagicMock()
-        state.notification_manager.pop_first_failure.return_value = expected_warning
-
-        screen = MonitorScreen(state=state)
-        mock_app = MagicMock()
-
-        with patch.object(
-            MonitorScreen, "app", new_callable=lambda: property(lambda self: mock_app)
-        ):
-            # Directly exercise the warning-surface idiom as it appears in production code.
-            warning = screen._state.notification_manager.pop_first_failure()
-            if warning:
-                screen.app.call_from_thread(screen._show_warning, warning)
-
-            mock_app.call_from_thread.assert_called_once_with(
-                screen._show_warning, expected_warning
+    async def test_monitor_shows_a_delivery_failure_warning(self, mock_app_state, monkeypatch):
+        """A queued delivery failure is drained after a poll and shown as a toast."""
+        expected = "Notification delivery failed (slack, hooks.slack.com/...)"
+        nm = MagicMock()
+        nm.pop_first_failure.side_effect = [None, expected, None, None]
+        nm.is_configured.return_value = False
+        mock_app_state._notification_manager = nm
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40), notifications=True) as pilot:
+            screen = await _start_monitor_without_loop(app, pilot, monkeypatch)
+            await _drive_poll(screen, pilot)  # baseline
+            await _drive_poll(screen, pilot)
+            assert await _wait_for(
+                lambda: any(expected in n.message for n in app._notifications), pilot
             )
-
-        # Confirm the warning string contains the expected channel name
-        call_args = mock_app.call_from_thread.call_args
-        assert "slack" in call_args.args[1].lower()
+            screen._stop_monitoring()
 
     def test_monitor_show_alert_uses_rule_name(self):
         """_show_alert renders 'rule_name: message' (not the literal 'Alert triggered')."""
@@ -1245,6 +1240,25 @@ def _status_indicator(screen) -> str:
 
 class TestMonitorStream:
     """The live stream stays bounded and ordered, and its status tells the truth."""
+
+    async def test_tui_failed_poll_keeps_the_poll_window(self, mock_app_state, monkeypatch):
+        from cja_audit_log_monitor.monitor import POLL_OVERLAP
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            screen = await _start_monitor_without_loop(app, pilot, monkeypatch)
+            await _drive_poll(screen, pilot)  # baseline
+            last_good = screen._last_poll_time
+            assert last_good is not None
+            mock_app_state.client.get_logs.side_effect = [
+                RuntimeError("network down"),
+                mock_app_state.client.get_logs.return_value,
+            ]
+            await _drive_poll(screen, pilot)
+            await _drive_poll(screen, pilot)
+            query = mock_app_state.client.get_logs.call_args.args[0]
+            assert query.start_date == last_good - POLL_OVERLAP
+            screen._stop_monitoring()
 
     async def test_monitor_query_has_end_date(self, mock_app_state, monkeypatch):
         app = _make_app(mock_app_state)
@@ -4147,3 +4161,63 @@ class TestWideDashboardFill:
             users = [str(table.get_row_at(i)[1]) for i in range(table.row_count)]
             assert all(u.endswith("…") for u in users), users
             assert all(cell_len(u) <= table.columns["user"].width for u in users), users
+
+
+# ---------------------------------------------------------------------------
+# Guards that see what a user sees: real toasts and the first load (G38)
+# ---------------------------------------------------------------------------
+
+
+async def test_monitor_toasts_show_markup_literally(mock_app_state):
+    """Toasts are rendered (notifications=True), so markup in data would raise here."""
+    from cja_audit_log_monitor.tui.screens.monitor import MonitorScreen
+
+    app = _make_app(mock_app_state)
+    async with app.run_test(size=(100, 30), notifications=True) as pilot:
+        await pilot.press("m")
+        await pilot.pause()
+        screen = app._screens["monitor"]
+        assert isinstance(screen, MonitorScreen)
+        screen._show_alert("[/rule]", "[bold]msg[/")
+        screen._show_error("[bold red]boom[/] [/oops]")
+        screen._show_warning("[/warn]")
+        await pilot.pause()
+        assert await _wait_for(lambda: len(app.screen.query("Toast")) == 3, pilot)
+        await pilot.pause()
+        assert app.is_running
+        assert any("[/rule]" in n.message for n in app._notifications)
+
+
+@pytest.mark.real_mount
+@pytest.mark.parametrize(
+    ("key", "loaded"),
+    [
+        ("s", lambda state: state.client.get_logs_sample.called),
+        ("c", lambda state: state.client.verify_connection.called),
+    ],
+)
+async def test_views_load_data_when_first_shown(mock_app_state, key, loaded):
+    """With the real on_content_mounted, showing a view the first time starts its load."""
+    app = _make_app(mock_app_state)
+    async with app.run_test(size=(100, 30)) as pilot:
+        await app.workers.wait_for_complete()
+        mock_app_state.client.get_logs_sample.reset_mock()
+        mock_app_state.client.verify_connection.reset_mock()
+        await pilot.press(key)
+        assert await _wait_for(lambda: loaded(mock_app_state), pilot)
+        await app.workers.wait_for_complete()
+
+
+@pytest.mark.real_mount
+async def test_app_loads_dashboard_on_start(mock_app_state):
+    """Starting the app shows dashboard data without any key press."""
+    from cja_audit_log_monitor.tui.screens.dashboard import DashboardScreen
+
+    app = _make_app(mock_app_state)
+    async with app.run_test(size=(100, 30)) as pilot:
+        assert await _wait_for(lambda: mock_app_state.client.get_logs_sample.called, pilot)
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        view = app._screens["dashboard"]
+        assert isinstance(view, DashboardScreen)
+        assert await _wait_for(lambda: "user" in _plain(view.query_one("#top-users")), pilot)

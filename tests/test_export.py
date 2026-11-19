@@ -2,6 +2,7 @@
 
 import csv
 import json
+import os
 import sys
 from datetime import UTC, datetime
 from io import StringIO
@@ -453,6 +454,9 @@ class TestAtomicWrite:
         assert target.read_text() == "old"
         assert self._only(target) == ["out.txt"]
 
+    @pytest.mark.skipif(
+        hasattr(os, "geteuid") and os.geteuid() == 0, reason="root can write anywhere"
+    )
     def test_unwritable_folder_error_names_the_target(self, tmp_path: Path) -> None:
         from cja_audit_log_monitor.export import atomic_write
 
