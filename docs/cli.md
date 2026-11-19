@@ -330,7 +330,7 @@ Works like `monitor`, but shows only the entries that match the filters. The fil
 | Flag | Default | Meaning |
 |---|---|---|
 | `-i`, `--interval` | 5 | Seconds between polls. The minimum is 5. |
-| `-u`, `--user` | all | A user id or an email address. |
+| `-u`, `--user` | all | A user id, email address or display name. Case does not matter, the same as for a rule's `users:` list. |
 | `--component-id` | all | One component id. |
 | `-a`, `--action` | all | An action type. You can repeat it. |
 | `--alerts` / `--no-alerts` | `--alerts` | Check each new event against the alert rules. |
@@ -348,13 +348,17 @@ cja-audit-log-monitor cli anomalies --watch --interval 600 --lookback 48
 | Flag | Default | Meaning |
 |---|---|---|
 | `--watch` | off | Keep scanning. Without it, the command scans once and exits. |
-| `--interval` | 300 | Seconds between scans with `--watch`. The minimum is 5. |
+| `--interval` | 300 | Seconds between scans with `--watch`, 5 to 86,400. |
 | `--lookback` | 24 | Hours of history to read in each scan. |
 | `-F`, `--output-format` | `table` | `table` or `json`. See [JSON output](#json-output) for `--watch`. |
 
 When a scan finds nothing, the command prints "No anomalies found in the last N hours."
 
+With `--watch`, a failed scan is tried again at the next interval, the same as in `monitor`. A 400, 401, 403 or 404 response, or a login error caused by bad or missing credentials, stops the command with exit code 1, because trying again cannot fix it.
+
 The command always prints what it finds. It sends anomalies to Slack or webhooks only when the config file has a `notifications:` block and `notify_on_anomalies: true`. The default for `notify_on_anomalies` is `false`. See [Anomaly delivery](alert-rules.md#anomaly-delivery) for how repeats are skipped and how failures are reported.
+
+In every JSON output, a user count is an object with the keys `user` and `count`, e.g. `{"user": "someone@example.com", "count": 12}`. Hours of the day are the strings `"00"` to `"23"`.
 
 ## Export commands
 
@@ -381,6 +385,7 @@ How the file is written:
 - The tool checks the output path before it calls the API. It refuses a file that already exists unless you pass `--force`. It also refuses a folder that does not exist or that you cannot write to, a folder given as the file name, a path that ends with `/`, and a file name longer than 255 bytes. Each of these prints one line and exits 1.
 - If a file appears at the path during the export, the tool stops with an error that names the file and `--force`.
 - When no entries match, the tool still writes the file. A JSON file has no entries, and a CSV or TSV file has only the header row. So a scheduled export never leaves an older file in place.
+- The file appears only when the export is complete. If the export stops early, e.g. by Ctrl+C, SIGTERM or SIGHUP, no file and no hidden temp file is left behind.
 - The tool writes to a temporary file in the same folder and then moves it into place. If the export fails partway, no partial file is left, and an existing file stays as it was.
 - A new file can be read only by you (mode 0600). It is written as UTF-8. JSON keeps text that is not ASCII as it is, and it ends with a newline.
 - If the target is a symbolic link, the tool replaces the link with the file. It does not write to the file the link points to.

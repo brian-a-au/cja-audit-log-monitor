@@ -8,7 +8,7 @@ The statistics view shows charts and a user ranking for the number of days you c
 
 - **The window control**, which is a `days` box and an `update` button. The box starts at `default_days` from the config file, which is 7 unless you change it. The control stays on screen even when the window has no activity, so you can make the window longer.
 - **Stat cards** with the total number of entries in the window, the number of active users, and the dates of the window. When the window has more than 5,000 entries, a note says that the charts use the newest 5,000.
-- **An action chart** and an **hourly activity chart**, side by side. Hours and days are in your local time zone. The busiest hour is highlighted.
+- **An action chart** and an **hourly activity chart**, side by side. On a screen 160 columns wide or more, the hourly chart grows to use the free height. Hours and days are in your local time zone. The busiest hour is highlighted.
 - **A daily activity chart** with one bar for each of the last 14 days in the window, and a **user ranking** of the top 10 users by action count.
 - **A loading message** in each chart while the data loads.
 

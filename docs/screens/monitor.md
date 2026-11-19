@@ -7,7 +7,7 @@ The monitor asks the audit API for new events at a set interval. It adds each ne
 ## What you see
 
 - **The controls**, which are the `▶ start` and `■ stop` buttons and an `interval` box in seconds. The interval box is turned off while the monitor runs.
-- **The status row**, which shows `running`, `stopped` or `error`. After a failed poll, it shows the error text and says that the monitor retries each interval. Its color and its left border change with the state. It also shows the time of the last check, the number of new events and the number of alerts. It updates after every poll.
+- **The status row**, which shows `running`, `stopped` or `error`. After a failed poll, it shows the error text and says that the monitor retries each interval. A 400, 401, 403 or 404 response, or bad or missing credentials, stops the monitor instead, as in the CLI, because trying again cannot fix it. A toast gives the reason. Its color and its left border change with the state. It also shows the time of the last check, the number of new events and the number of alerts. It updates after every poll.
 - **The live log stream**, a table with the same colored action column as the log browser.
   - The newest event is at the bottom.
   - When the cursor is on the last row, the view follows new rows as they arrive. When you move the cursor up, the view stays where you put it.
