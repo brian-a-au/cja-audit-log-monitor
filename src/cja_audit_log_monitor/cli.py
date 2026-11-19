@@ -616,7 +616,7 @@ def component(
     "-F",
     type=click.Choice(["json", "csv", "tsv"], case_sensitive=False),
     default="json",
-    help="Export format",
+    help="Export format (default: from the file suffix .json, .csv or .tsv, else json)",
 )
 @click.option(
     "--output",
@@ -666,6 +666,10 @@ def export(
     config_path = ctx.obj.get("config_path")
     output = check_output_path(output, force)
     to_stdout = str(output) == "-"
+    if ctx.get_parameter_source("format") is click.core.ParameterSource.DEFAULT:
+        suffix = Path(str(output)).suffix.lower().lstrip(".")
+        if suffix in {"json", "csv", "tsv"}:
+            format = suffix
     destination: Any = sys.stdout if to_stdout else output
 
     start, end = parse_date_range(start_date, end_date)
@@ -706,9 +710,14 @@ def export(
             source = list(up_to_limit(iter(client.get_all_logs(query, max_entries=limit))))
         # An empty result still writes an empty document, so a scheduled export never
         # leaves yesterday's file in place.
-        count = export_entries(
-            source, destination, output_format=format, pretty=pretty, overwrite=force
-        )
+        try:
+            count = export_entries(
+                source, destination, output_format=format, pretty=pretty, overwrite=force
+            )
+        except FileExistsError:
+            raise FileExistsError(
+                f"{output} appeared during the export; use --force to overwrite"
+            ) from None
 
     target = "stdout" if to_stdout else escape(str(output))
     if count == 0:

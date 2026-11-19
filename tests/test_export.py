@@ -604,3 +604,35 @@ class TestChangesInExports:
         export_entries([self.ENTRY.model_copy(update={"changes": None})], out, output_format="csv")
         rows = list(csv.reader(StringIO(out.getvalue())))
         assert rows[1][-1] == ""
+
+
+class TestExportDetails:
+    """Plain TSV, UTF-8 JSON, long names (G44)."""
+
+    ENTRY = AuditLogEntry(
+        id="d1", action="EDIT", timestamp=datetime(2026, 1, 1, tzinfo=UTC),
+        component_name='日本 "quoted"\tname\nline two', user_email="u@example.com",
+    )
+
+    def test_tsv_is_plain(self) -> None:
+        out = StringIO()
+        export_entries([self.ENTRY], out, output_format="tsv")
+        lines = out.getvalue().splitlines()
+        assert len(lines) == 2  # no line break inside a cell
+        cells = lines[1].split("\t")
+        assert len(cells) == len(lines[0].split("\t"))
+        assert '日本 "quoted" name line two' in cells
+
+    def test_json_file_keeps_utf8_and_ends_with_a_newline(self, tmp_path: Path) -> None:
+        target = tmp_path / "out.json"
+        export_entries([self.ENTRY], target, output_format="json")
+        text = target.read_text(encoding="utf-8")
+        assert "日本" in text
+        assert text.endswith("\n")
+
+    @pytest.mark.parametrize("length", [242, 255])
+    def test_long_file_name(self, tmp_path: Path, length: int) -> None:
+        target = tmp_path / ("x" * (length - 5) + ".json")
+        export_entries([self.ENTRY], target, output_format="json")
+        assert target.exists()
+        assert [p.name for p in tmp_path.iterdir()] == [target.name]

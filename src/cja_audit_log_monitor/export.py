@@ -4,6 +4,7 @@ import csv
 import errno
 import json
 import os
+import re
 import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager, suppress
@@ -29,7 +30,8 @@ def atomic_write(
     that appears while the block runs: ``FileExistsError`` is raised instead.
     """
     try:
-        fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+        # A short temp name, so a file name near the 255 byte limit still works.
+        fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=".cja-", suffix=".tmp")
     except OSError as e:
         raise type(e)(e.errno, e.strerror, str(path)) from e
     try:
@@ -152,11 +154,13 @@ def export_to_json(
         "entries": [entry_to_dict(e) for e in entries],
     }
 
+    indent = 2 if pretty else None
     if isinstance(output, Path):
         with atomic_write(output, overwrite=overwrite) as f:
-            json.dump(data, f, indent=2 if pretty else None, default=str)
+            json.dump(data, f, indent=indent, default=str, ensure_ascii=False)
+            f.write("\n")
     else:
-        json.dump(data, output, indent=2 if pretty else None, default=str)
+        json.dump(data, output, indent=indent, default=str, ensure_ascii=False)
         output.write("\n")
 
     return len(entries)
@@ -199,17 +203,30 @@ def _cell(value: object) -> str:
 def _write_delimited(
     entries: list[AuditLogEntry] | Iterator[AuditLogEntry], f: TextIO, delimiter: str
 ) -> int:
-    """Write entries as delimited text with a header row; return the entry count."""
-    writer = csv.writer(f, delimiter=delimiter)
-    writer.writerow(_EXPORT_FIELDS)
+    """Write entries as delimited text with a header row; return the entry count.
+
+    CSV uses standard quoting. TSV is plain, with no quoting, so ``cut`` and ``awk`` can
+    read it: tabs and line breaks inside a cell become spaces.
+    """
+    if delimiter == "\t":
+        def write_row(cells: list[str]) -> None:
+            f.write("\t".join(_TSV_UNSAFE.sub(" ", cell) for cell in cells) + "\n")
+    else:
+        write_row = csv.writer(f, delimiter=delimiter).writerow
+    write_row(_EXPORT_FIELDS)
     count = 0
     for entry in entries:
         row = entry_to_dict(entry)
         if row["changes"] is not None:  # one cell: compact JSON
-            row["changes"] = json.dumps(row["changes"], separators=(",", ":"), default=str)
-        writer.writerow([_cell(row[name]) for name in _EXPORT_FIELDS])
+            row["changes"] = json.dumps(
+                row["changes"], separators=(",", ":"), default=str, ensure_ascii=False
+            )
+        write_row([_cell(row[name]) for name in _EXPORT_FIELDS])
         count += 1
     return count
+
+
+_TSV_UNSAFE = re.compile(r"[\t\r\n]")
 
 
 def _export_delimited(

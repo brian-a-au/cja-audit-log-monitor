@@ -3197,3 +3197,46 @@ def test_show_prints_changes(runner: CliRunner) -> None:
     assert result.exit_code == 0, result.output
     assert "Changes" in result.stdout
     assert '"old": "a"' in result.stdout
+
+
+class TestExportFormatAndMessages:
+    @staticmethod
+    def _run(args, entries, during=None):
+        client = MagicMock()
+        client.__enter__ = MagicMock(return_value=client)
+        client.__exit__ = MagicMock(return_value=False)
+
+        def fetch(*a, **k):
+            if during:
+                during()
+            return entries
+
+        client.get_all_logs.side_effect = fetch
+        client.get_logs_paginated.side_effect = lambda q: iter(fetch())
+        with patch("cja_audit_log_monitor.cli.get_client", return_value=(client, _settings())):
+            return CliRunner().invoke(main, ["cli", "export", *args])
+
+    @pytest.mark.parametrize(("suffix", "first"), [("csv", "id,"), ("tsv", "id\t")])
+    def test_format_from_suffix(self, tmp_path, sample_audit_entries, suffix, first) -> None:
+        target = tmp_path / f"audit.{suffix}"
+        result = self._run(["-o", str(target)], sample_audit_entries)
+        assert result.exit_code == 0, result.output
+        assert target.read_text().startswith(first)
+
+    def test_explicit_format_wins_over_suffix(self, tmp_path, sample_audit_entries) -> None:
+        target = tmp_path / "audit.csv"
+        result = self._run(["-F", "json", "-o", str(target)], sample_audit_entries)
+        assert result.exit_code == 0
+        assert json.loads(target.read_text())["count"] == len(sample_audit_entries)
+
+    def test_late_file_message_names_the_target_and_force(
+        self, tmp_path, sample_audit_entries
+    ) -> None:
+        target = tmp_path / "out.json"
+        result = self._run(
+            ["-o", str(target)], sample_audit_entries, during=lambda: target.write_text("x")
+        )
+        assert result.exit_code == 1
+        assert str(target) in result.stderr.replace("\n", "")
+        assert "--force" in result.stderr
+        assert ".tmp" not in result.stderr
