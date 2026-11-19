@@ -3409,7 +3409,7 @@ def test_state_survives_bad_config_file_and_bad_env(tmp_path, monkeypatch) -> No
     assert str(path) in (state.config_error or "")
     summary = state.config_error_summary or ""
     assert summary.startswith("config.yaml: ")
-    assert "environment: monitor_interval" in summary
+    assert "environment or .env: monitor_interval" in summary
 
 
 async def test_header_keeps_connection_status_with_bad_config(mock_app_state, tmp_path) -> None:

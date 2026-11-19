@@ -187,9 +187,12 @@ def load_config(config_path: Path | None = None, *, use_file: bool = True) -> CJ
     try:
         return CJASettings()
     except ValidationError as e:
-        source = str(config_path) if use_file else "environment"
-        short = config_path.name if use_file else "environment"
-        raise ConfigError(f"{source}: {e}", _validation_summary(short, e)) from e
+        field = str(e.errors()[0]["loc"][0]) if e.errors()[0]["loc"] else ""
+        if use_file and field in config_data and not _set_outside_file(field):
+            source, short = str(config_path), config_path.name
+        else:
+            source = short = "environment or .env"
+        raise ConfigError(_validation_summary(source, e), _validation_summary(short, e)) from None
     except SettingsError as e:
         # A JSON-valued env var or .env line (e.g. NOTIFICATIONS) that does not parse.
         # The message never holds the value; keep only the field name.
@@ -198,6 +201,21 @@ def load_config(config_path: Path | None = None, *, use_file: bool = True) -> CJ
         raise ConfigError(text, text) from None
     finally:
         _config_file_data.reset(token)
+
+
+def _set_outside_file(field: str) -> bool:
+    """Whether an env var or the .env file sets ``field`` (they win over the config file)."""
+    if any(name.lower() == field for name in os.environ):
+        return True
+    env_file = Path(".env")
+    if not env_file.is_file():
+        return False
+    try:
+        from dotenv import dotenv_values
+
+        return any(str(name).lower() == field for name in dotenv_values(env_file))
+    except Exception:  # an unreadable .env fails later with its own error
+        return False
 
 
 def _settings_error_field(error: Exception) -> str:

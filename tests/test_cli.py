@@ -2833,3 +2833,37 @@ def test_cli_bad_config_is_one_line(bad_config) -> None:
     assert len(lines) == 1, result.stderr
     assert lines[0].startswith("Configuration error:")
     assert SECRET_MARK not in result.output
+
+
+def test_config_error_is_one_line(tmp_path) -> None:
+    path = tmp_path / "config.yaml"
+    path.write_text("monitor_interval: 4\n")
+    path.chmod(0o600)
+    result = CliRunner().invoke(main, ["-c", str(path), "cli", "list"])
+    assert result.exit_code == 1
+    lines = [line for line in result.stderr.splitlines() if line.strip()]
+    assert len(lines) == 1, result.stderr
+    assert str(path) in lines[0]
+    assert "monitor_interval" in lines[0]
+    assert "pydantic.dev" not in result.stderr
+
+
+def test_env_error_names_the_environment(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("API_BASE_URL", "http://example.com")
+    result = CliRunner().invoke(main, ["-c", str(tmp_path / "missing.yaml"), "cli", "list"])
+    assert result.exit_code == 1
+    line = result.stderr.strip()
+    assert line.startswith("Configuration error: environment or .env: api_base_url")
+    assert "missing.yaml" not in line
+
+
+def test_env_value_overriding_a_file_value_is_blamed_on_the_environment(tmp_path, monkeypatch):
+    path = tmp_path / "config.yaml"
+    path.write_text("monitor_interval: 30\n")
+    path.chmod(0o600)
+    monkeypatch.setenv("monitor_interval", "4")
+    with pytest.raises(Exception) as info:
+        from cja_audit_log_monitor.config import load_config
+
+        load_config(path)
+    assert str(info.value).startswith("environment or .env: monitor_interval")
