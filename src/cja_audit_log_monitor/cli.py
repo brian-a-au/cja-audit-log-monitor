@@ -710,7 +710,11 @@ def stats(ctx: click.Context, days: int | None, top: int, output_format: str) ->
         emit_json(data)
     else:
         # Show summary panel
-        panel = format_stats_panel(stats_data, title=f"Audit Log Statistics (Last {days} Days)")
+        panel = format_stats_panel(
+            stats_data,
+            title=f"Audit Log Statistics (Last {days} Days)",
+            include_top_users=False,  # the Most Active Users table below has them
+        )
         console.print(panel)
         console.print()
 
@@ -926,6 +930,10 @@ def _run_anomalies_cycle(
     as_json = output_format == "json"
     if as_json:
         emit_json({"anomalies": new_anomalies, "count": len(new_anomalies)})
+
+    if not raw_anomalies and not as_json:
+        unit = "hour" if lookback == 1 else "hours"
+        console.print(f"[dim]No anomalies found in the last {lookback} {unit}.[/dim]")
 
     for anomaly in new_anomalies:
         # Escape the description: it's user-derived (component names, user
@@ -1246,14 +1254,17 @@ def alerts_list(ctx: click.Context, output_format: str) -> None:
     else:
         from rich.table import Table
 
-        table = Table(title="Alert Rules")
-        table.add_column("Name", style="cyan")
-        table.add_column("Description")
-        table.add_column("Enabled", justify="center")
-        table.add_column("Threshold", justify="right")
-        table.add_column("Window", justify="right")
-        table.add_column("Actions")
-        table.add_column("Components")
+        # Narrow headers and tight padding keep the table inside 80 columns; the key
+        # columns never wrap, and only the free-text columns give way.
+        name_width = max((len(str(rule["name"])) for rule in rules_status), default=4)
+        table = Table(title="Alert Rules", padding=(0, 1, 0, 0), pad_edge=False)
+        table.add_column("Name", style="cyan", no_wrap=True, min_width=name_width)
+        table.add_column("Description", min_width=11, overflow="fold")
+        table.add_column("On", justify="center", no_wrap=True)
+        table.add_column("Count", justify="right", no_wrap=True)
+        table.add_column("Win", justify="right", no_wrap=True)
+        table.add_column("Actions", no_wrap=True)
+        table.add_column("Components", min_width=10, overflow="fold")
 
         for rule in rules_status:
             enabled = "[green]✓[/green]" if rule["enabled"] else "[red]✗[/red]"
@@ -1598,28 +1609,37 @@ def top_users(ctx: click.Context, days: int | None, top: int, output_format: str
 
 @cli.command()
 @click.argument("entry_id")
+@click.option(
+    "--max-entries",
+    type=POSITIVE_INT,
+    default=10_000,
+    show_default=True,
+    help="Newest entries to search before giving up",
+)
 @click.pass_context
 @handle_cli_errors
-def show(ctx: click.Context, entry_id: str) -> None:
+def show(ctx: click.Context, entry_id: str, max_entries: int) -> None:
     """Show detailed information for a specific audit log entry."""
     config_path = ctx.obj.get("config_path")
 
     client, settings = get_client(config_path)
 
-    # Search for the entry by ID
-    query = AuditLogQuery(page_size=100)
+    # The API has no lookup by id, so page through the newest entries until it turns up.
+    query = AuditLogQuery(page_size=MAX_PAGE_SIZE)
 
     with client:
-        # We need to search through logs to find the entry
         found_entry = None
-        for entry in client.get_logs_paginated(query, max_pages=10):
+        for entry in islice(client.get_logs_paginated(query), max_entries):
             if entry.id == entry_id:
                 found_entry = entry
                 break
 
     if not found_entry:
         err_console.print(f"[yellow]Entry not found: {escape(entry_id)}[/yellow]")
-        err_console.print("[dim]Note: Only recent entries can be found this way.[/dim]")
+        err_console.print(
+            f"[dim]Searched the newest {max_entries:,} entries; "
+            "raise --max-entries to look further back.[/dim]"
+        )
         sys.exit(1)
 
     panel = format_single_entry(found_entry)

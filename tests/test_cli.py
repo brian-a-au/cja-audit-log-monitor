@@ -2439,3 +2439,122 @@ class TestJsonFormatEverywhere:
         assert keys <= set(data)
         if "count" in data and "entries" in data:
             assert data["count"] == len(entries)
+
+
+class TestSmallCliBehaviours:
+    """Empty results say so, `show` searches deeply, tables fit 80 columns."""
+
+    @patch("cja_audit_log_monitor.cli.NotificationManager")
+    @patch("cja_audit_log_monitor.cli.get_client")
+    def test_anomalies_none_found_says_so_on_stdout(
+        self, mock_get_client: MagicMock, mock_nm: MagicMock, runner: CliRunner
+    ) -> None:
+        mock_get_client.return_value = (_fake_client([]), _settings())
+        nm = mock_nm.return_value.__enter__.return_value
+        nm.is_configured.return_value = False
+        nm.pop_first_failure.return_value = None
+
+        result = runner.invoke(main, ["cli", "anomalies"])
+
+        assert result.exit_code == 0, result.output
+        assert "No anomalies found in the last 24 hours." in result.stdout
+
+    @patch("cja_audit_log_monitor.cli.NotificationManager")
+    @patch("cja_audit_log_monitor.cli.get_client")
+    def test_anomalies_none_found_keeps_json_clean(
+        self, mock_get_client: MagicMock, mock_nm: MagicMock, runner: CliRunner
+    ) -> None:
+        mock_get_client.return_value = (_fake_client([]), _settings())
+        nm = mock_nm.return_value.__enter__.return_value
+        nm.is_configured.return_value = False
+        nm.pop_first_failure.return_value = None
+
+        result = runner.invoke(main, ["cli", "anomalies", "-F", "json", "--lookback", "6"])
+
+        assert json.loads(result.stdout) == {"anomalies": [], "count": 0}
+        assert "No anomalies" not in result.stdout
+
+    @patch("cja_audit_log_monitor.cli.get_client")
+    def test_show_finds_entry_on_third_page(
+        self, mock_get_client: MagicMock, runner: CliRunner
+    ) -> None:
+        from cja_audit_log_monitor.client import AuditLogsClient
+
+        def make(i: int) -> AuditLogEntry:
+            return AuditLogEntry(
+                id=f"e{i}",
+                timestamp=datetime(2026, 1, 1, tzinfo=UTC),
+                user_id="u1",
+                action="CREATE",
+                component_type="PROJECT",
+                component_name="Thing",
+            )
+
+        pages_requested: list[int] = []
+
+        def get_logs(query):
+            pages_requested.append(query.page)
+            size = query.page_size
+            start = query.page * size
+            return AuditLogResponse(
+                content=[make(i) for i in range(start, start + size)],
+                last=False,
+                number=query.page,
+                total_pages=50,
+            )
+
+        class PagedClient(AuditLogsClient):
+            def __init__(self) -> None:  # no network, no settings
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def get_logs(self, query=None):
+                return get_logs(query)
+
+        mock_get_client.return_value = (PagedClient(), _settings())
+
+        result = runner.invoke(main, ["cli", "show", "e2500"])
+
+        assert result.exit_code == 0, result.output
+        assert "CREATE" in result.stdout
+        assert pages_requested == [0, 1, 2]
+
+    @patch("cja_audit_log_monitor.cli.get_client")
+    def test_stats_lists_top_users_once(
+        self, mock_get_client: MagicMock, runner: CliRunner, sample_audit_entries
+    ) -> None:
+        mock_get_client.return_value = (_fake_client(sample_audit_entries), _settings())
+
+        result = runner.invoke(main, ["cli", "stats"], env={"COLUMNS": "120"})
+
+        assert result.exit_code == 0, result.output
+        assert result.stdout.count("user0@example.com") == 1
+
+    @patch("cja_audit_log_monitor.cli.get_client")
+    def test_list_details_fits_80_columns(
+        self, mock_get_client: MagicMock, runner: CliRunner, sample_audit_entry
+    ) -> None:
+        entry = sample_audit_entry.model_copy(
+            update={"description": "A long description " * 5, "ip_address": "203.0.113.200"}
+        )
+        mock_get_client.return_value = (_fake_client([entry]), _settings())
+
+        result = runner.invoke(main, ["cli", "list", "-D"], env={"COLUMNS": "80"})
+
+        assert result.exit_code == 0, result.output
+        assert max(len(line) for line in result.stdout.splitlines()) <= 80
+        assert "203.0.113." in result.stdout  # the IP folds rather than widening the table
+        assert "2024-01-15 10:30:00" in result.stdout
+
+    def test_alerts_list_fits_80_columns_with_whole_names(self, runner: CliRunner) -> None:
+        result = runner.invoke(main, ["cli", "alerts", "list"], env={"COLUMNS": "80"})
+
+        assert result.exit_code == 0, result.output
+        assert max(len(line) for line in result.stdout.splitlines()) <= 80
+        for name in ("bulk_delete", "bulk_export", "sensitive_component_delete", "bulk_share"):
+            assert name in result.stdout
