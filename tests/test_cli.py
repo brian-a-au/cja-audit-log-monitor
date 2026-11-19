@@ -3297,3 +3297,42 @@ def test_hostile_names_in_slack() -> None:
 
     payload = NotificationManager()._build_slack_payload("r", "m", _hostile_entry())
     assert "\x1b" not in json.dumps(payload, ensure_ascii=False)
+
+
+@pytest.mark.parametrize("encoding", ["cp1252", "ascii"])
+@pytest.mark.parametrize(
+    "args",
+    [["list"], ["search"], ["query", "--today"], ["stats"], ["verify"], ["alerts", "list"],
+     ["timeline"], ["show", "id-1"]],
+    ids=lambda a: " ".join(a),
+)
+def test_commands_run_on_a_narrow_stdout(fake_api, tmp_path, encoding, args) -> None:
+    import subprocess
+
+    from .fakeapi import command, raw_entry
+
+    fake_api.entries = [raw_entry(1, componentName="日本 report")]
+    env = fake_api.env(tmp_path / "missing.yaml")
+    env["PYTHONIOENCODING"] = encoding
+    result = subprocess.run(
+        [*command(), "cli", *args], env=env, cwd=tmp_path,
+        capture_output=True, timeout=60,
+    )
+    assert result.returncode == 0, result.stderr.decode(errors="replace")
+    assert b"UnicodeEncodeError" not in result.stderr
+
+
+def test_csv_to_stdout_is_utf8_on_cp1252(fake_api, tmp_path) -> None:
+    import subprocess
+
+    from .fakeapi import command, raw_entry
+
+    fake_api.entries = [raw_entry(1, componentName="日本 report")]
+    env = fake_api.env(tmp_path / "missing.yaml")
+    env["PYTHONIOENCODING"] = "cp1252"
+    result = subprocess.run(
+        [*command(), "cli", "export", "-F", "csv", "-o", "-"], env=env, cwd=tmp_path,
+        capture_output=True, timeout=60,
+    )
+    assert result.returncode == 0, result.stderr.decode(errors="replace")
+    assert "日本 report" in result.stdout.decode("utf-8")

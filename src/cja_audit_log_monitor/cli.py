@@ -2,6 +2,7 @@
 
 import asyncio
 import functools
+import io
 import json
 import logging
 import os
@@ -10,10 +11,11 @@ import sys
 import threading
 import time
 from collections.abc import Callable, Iterator
+from contextlib import contextmanager, suppress
 from datetime import UTC, datetime, timedelta
 from itertools import islice
 from pathlib import Path
-from typing import Any, ParamSpec, TypeVar
+from typing import Any, ParamSpec, TextIO, TypeVar
 
 import click
 from rich.console import Console
@@ -160,6 +162,36 @@ def check_output_path(output: Path | None, force: bool) -> Path | None:
     return path
 
 
+def _tolerate_narrow_encodings() -> None:
+    """Print a character the console cannot encode as '?' instead of crashing.
+
+    On Windows a pipe or redirect gets a narrow encoding such as cp1252, which has no
+    place for the tool's icons and bars, or for a CJK name. Exports to stdout write
+    UTF-8 bytes instead (see ``utf8_stdout``), so their data is never changed.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            with suppress(Exception):
+                reconfigure(errors="replace")
+
+
+@contextmanager
+def utf8_stdout(newline: str | None = None) -> Iterator[TextIO]:
+    """A text stream that writes UTF-8 to stdout, whatever the console encoding."""
+    buffer = getattr(sys.stdout, "buffer", None)
+    if buffer is None:  # e.g. a test runner's string stream: already text, any encoding
+        yield sys.stdout
+        return
+    sys.stdout.flush()
+    stream = io.TextIOWrapper(buffer, encoding="utf-8", newline=newline, write_through=True)
+    try:
+        yield stream
+    finally:
+        stream.flush()
+        stream.detach()  # leave sys.stdout's buffer open
+
+
 def setup_logging(verbose: bool) -> None:
     """Configure logging based on verbosity."""
     level = logging.DEBUG if verbose else logging.WARNING
@@ -283,6 +315,7 @@ def main(ctx: click.Context, verbose: bool, config: Path | None) -> None:
     Use 'cja-audit-log-monitor cli <command>' for traditional CLI commands.
     """
     setup_logging(verbose)
+    _tolerate_narrow_encodings()
     ctx.ensure_object(dict)
     ctx.obj["verbose"] = verbose
     ctx.obj["config_path"] = config
@@ -670,7 +703,7 @@ def export(
         suffix = Path(str(output)).suffix.lower().lstrip(".")
         if suffix in {"json", "csv", "tsv"}:
             format = suffix
-    destination: Any = sys.stdout if to_stdout else output
+    destination: Any = output
 
     start, end = parse_date_range(start_date, end_date)
     client, settings = get_client(config_path)
@@ -711,9 +744,13 @@ def export(
         # An empty result still writes an empty document, so a scheduled export never
         # leaves yesterday's file in place.
         try:
-            count = export_entries(
-                source, destination, output_format=format, pretty=pretty, overwrite=force
-            )
+            if to_stdout:
+                with utf8_stdout(newline="" if format != "json" else None) as stream:
+                    count = export_entries(source, stream, output_format=format, pretty=pretty)
+            else:
+                count = export_entries(
+                    source, destination, output_format=format, pretty=pretty, overwrite=force
+                )
         except FileExistsError:
             raise FileExistsError(
                 f"{output} appeared during the export; use --force to overwrite"
