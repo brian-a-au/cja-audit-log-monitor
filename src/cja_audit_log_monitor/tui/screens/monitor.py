@@ -14,7 +14,7 @@ from textual.worker import Worker
 
 from ...alerts import FiredAlert
 from ...config import MAX_MONITOR_INTERVAL
-from ...formatters import resolve_tcss_markup
+from ...formatters import cut_cells, literal, resolve_tcss_markup
 from ...models import AuditLogEntry
 from ...monitor import (
     POLL_PAGE_SIZE,
@@ -26,7 +26,7 @@ from ...monitor import (
 from ...utils import RecentIds, entry_key, to_local
 from ..state import AppState
 from ..widgets import AlertSummary, LogTable
-from .base import ContentView
+from .base import ContentView, classify_error
 
 logger = logging.getLogger(__name__)
 
@@ -196,6 +196,7 @@ class MonitorScreen(ContentView):
         monitor.alerts_triggered = 0
         monitor.last_check = None
         monitor.last_error = None
+        self.query_one("#alert-summary", AlertSummary).clear()
 
         # A new session starts from now with nothing seen.
         self._seen = RecentIds(SEEN_IDS_MAX)
@@ -247,14 +248,20 @@ class MonitorScreen(ContentView):
         "stopped": "[$danger]● stopped[/$danger]",
     }
 
-    def _set_status(self, status: str) -> None:
-        """Show ``running``, ``error`` or ``stopped`` in the status row."""
+    def _set_status(self, status: str, detail: str = "") -> None:
+        """Show ``running``, ``error`` or ``stopped`` in the status row; an error shows why."""
         status_container = self.query_one("#monitor-status")
         for name in self._STATUS_MARKUP:
             status_container.set_class(status == name, f"monitor-{name}")
-        self.query_one("#status-indicator", Static).update(
-            resolve_tcss_markup(self._STATUS_MARKUP[status])
-        )
+        markup = self._STATUS_MARKUP[status]
+        if status == "error" and detail:
+            first_line = " ".join(detail.split())
+            short = cut_cells(first_line, max(20, self.size.width - 40))
+            markup = (
+                f"[$warning]● error[/$warning] [$text-muted]· {literal(short)} "
+                f"· retrying each interval[/$text-muted]"
+            )
+        self.query_one("#status-indicator", Static).update(resolve_tcss_markup(markup))
 
     def on_unmount(self) -> None:
         """End the monitor loop when the view goes away, e.g., when the app quits.
@@ -399,12 +406,15 @@ class MonitorScreen(ContentView):
         if stop.is_set():
             return
         monitor = self._state.monitor
-        first_failure = monitor.last_error is None
+        new_error = monitor.last_error != str(error)  # a toast for each new error text
         monitor.last_error = str(error)
         if from_api:
             self.app.note_api_error(error)
-        self._set_status("error")
-        if first_failure:
+            if classify_error(error) == "access":
+                # The connection works but this account may not read the logs.
+                self.app.set_connection_status("disconnected", f"no access: {error}")
+        self._set_status("error", str(error))
+        if new_error:
             self._show_error(str(error))
 
     def _update_stats_display(self) -> None:

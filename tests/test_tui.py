@@ -5014,3 +5014,50 @@ async def test_detail_panel_is_wider_at_200(mock_app_state):
         assert await _wait_for(lambda: panel.display and not panel.has_class("hidden"), pilot)
         await pilot.pause()
         assert panel.region.width >= 60
+
+
+class TestMonitorStatusTexts:
+    """The monitor status row and toasts say what failed (G41)."""
+
+    async def test_status_row_and_toasts_show_each_new_error(self, mock_app_state, monkeypatch):
+        from cja_audit_log_monitor.client import APIError
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40), notifications=True) as pilot:
+            screen = await _start_monitor_without_loop(app, pilot, monkeypatch)
+            await _drive_poll(screen, pilot)
+            mock_app_state.client.get_logs.side_effect = APIError("upstream down", 503)
+            await _drive_poll(screen, pilot)
+            assert "upstream down" in _status_indicator(screen)
+            mock_app_state.client.get_logs.side_effect = APIError("gateway timeout", 504)
+            await _drive_poll(screen, pilot)
+            messages = [n.message for n in app._notifications]
+            assert any("upstream down" in m for m in messages)
+            assert any("gateway timeout" in m for m in messages)
+            screen._stop_monitoring()
+
+    async def test_403_marks_the_header(self, mock_app_state, monkeypatch):
+        from cja_audit_log_monitor.client import APIError
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            screen = await _start_monitor_without_loop(app, pilot, monkeypatch)
+            app.set_connection_status("connected")
+            mock_app_state.client.get_logs.side_effect = APIError("forbidden", 403)
+            await _drive_poll(screen, pilot)
+            assert "● connected" not in _status_text(app)
+            screen._stop_monitoring()
+
+    async def test_alerts_panel_clears_on_restart(self, mock_app_state, monkeypatch):
+        from cja_audit_log_monitor.tui.widgets import AlertSummary
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            screen = await _start_monitor_without_loop(app, pilot, monkeypatch)
+            screen.query_one(AlertSummary).add_alert("r: 1 event by u")
+            screen._stop_monitoring()
+            await pilot.pause()
+            screen._start_monitoring()
+            await pilot.pause()
+            assert "no alerts yet" in str(screen.query_one(AlertSummary).render())
+            screen._stop_monitoring()

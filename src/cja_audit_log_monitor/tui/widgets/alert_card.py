@@ -24,6 +24,11 @@ class AlertSummary(Static):
         self._alerts = self._alerts[-10:]
         self._refresh_display()
 
+    def clear(self) -> None:
+        """Forget the alerts of an earlier monitor session."""
+        self._alerts = []
+        self._refresh_display()
+
     def _refresh_display(self) -> None:
         """Refresh the alert display."""
         if not self._alerts:
