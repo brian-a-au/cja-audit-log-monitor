@@ -43,6 +43,9 @@ def _one_line(error: Exception) -> str:
 class ExportDialog(ModalScreen):
     """Modal dialog for exporting audit log data."""
 
+    # The app sets AUTO_FOCUS = None for the views; a dialog still focuses its first widget.
+    AUTO_FOCUS = "*"
+
     BINDINGS = [
         ("escape", "dismiss", "cancel"),
     ]

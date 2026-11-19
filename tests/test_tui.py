@@ -4851,3 +4851,23 @@ async def test_top_users_cjk_name_fits_one_line(
         assert lines
         for line in lines:
             assert cell_len(line.rstrip()) <= width - 1, line
+
+
+@pytest.mark.parametrize("modal_key", ["question_mark", "e"])
+@pytest.mark.parametrize("view_key", ["d", "s", "a", "c"])
+async def test_focus_and_scroll_survive_modal(mock_app_state, sample_audit_entries,
+                                              modal_key, view_key):
+    """G37: closing the help overlay or export dialog leaves focus and scroll as they were."""
+    mock_app_state.page_loaded = True
+    mock_app_state.entries = sample_audit_entries
+    app = _make_app(mock_app_state)
+    async with app.run_test(size=(80, 24)) as pilot:
+        view = await _show_and_load(app, pilot, view_key)
+        await pilot.pause()
+        before = (app.focused, [w.scroll_y for w in view.query("VerticalScroll")])
+        await pilot.press(modal_key)
+        await pilot.pause()
+        await pilot.press("escape")
+        await pilot.pause()
+        after = (app.focused, [w.scroll_y for w in view.query("VerticalScroll")])
+        assert after == before
