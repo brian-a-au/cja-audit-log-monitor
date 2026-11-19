@@ -2822,11 +2822,11 @@ class TestStaleLoads:
             table.focus()
             await pilot.press("n")
             assert await _wait_for(started.is_set, pilot)
-            await pilot.press("p")
-            assert await _wait_for(reload_started.is_set, pilot)
-            # The superseded page 1 fails while the page 0 reload is still running.
+            await pilot.press("p")  # waits as the pending load: one fetch at a time
+            # The superseded page 1 fails; the page 0 reload then starts and is slow.
             release.set()
             assert await _wait_for(delivered.is_set, pilot)
+            assert await _wait_for(reload_started.is_set, pilot)
             await pilot.pause()
             assert indicator.display, "a superseded load hid the loading indicator"
             assert table.row_count == 50
@@ -4568,3 +4568,47 @@ async def test_alert_test_run_across_reload_is_dropped(mock_app_state, outcome) 
         await pilot.pause()
         assert _plain(view.query_one("#test-results", Static)) == before
         assert "disconnected" not in _status_text(app)
+
+
+# ---------------------------------------------------------------------------
+# Hung requests do not use up the threads (G33)
+# ---------------------------------------------------------------------------
+
+
+async def test_hung_refreshes_use_one_thread_and_other_views_still_load(mock_app_state) -> None:
+    import asyncio
+    import threading
+
+    release = threading.Event()
+    verify_calls: list[int] = []
+    ok = dict(mock_app_state.client.verify_connection.return_value)
+
+    def hung_verify():
+        verify_calls.append(1)
+        release.wait(15)
+        return ok
+
+    mock_app_state.client.verify_connection.side_effect = hung_verify
+    app = _make_app(mock_app_state)
+    try:
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.pause()
+            dashboard = app._screens["dashboard"]
+            for _ in range(40):  # more presses of r than the thread pool has threads
+                dashboard.refresh_data()
+                await pilot.pause()
+            assert await _wait_for(lambda: len(verify_calls) >= 1, pilot)
+            assert len(verify_calls) == 1  # one fetch at a time for the view
+
+            mock_app_state.client.get_logs_sample.reset_mock()
+            await pilot.press("s")
+            await pilot.pause()
+            app._screens["stats"].refresh_data()
+            assert await _wait_for(lambda: mock_app_state.client.get_logs_sample.called, pilot)
+
+            release.set()  # the hung fetch ends; the newest pending one runs next
+            assert await _wait_for(lambda: len(verify_calls) == 2, pilot)
+            await app.workers.wait_for_complete()
+    finally:
+        release.set()
+        await asyncio.sleep(0)
