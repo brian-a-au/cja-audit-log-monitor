@@ -304,14 +304,67 @@ def _warn_if_not_private(config_path: Path) -> None:
 
 
 def create_default_config(config_path: Path | None = None) -> Path:
-    """Create a default configuration file."""
+    """Create a default configuration file.
+
+    Only a folder that this call creates is made private (0700); an existing folder keeps
+    its mode. A symlink at ``config_path`` is refused, never followed.
+    """
     if config_path is None:
         config_path = get_config_path()
 
+    created_folder = not config_path.parent.exists()
     config_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    config_path.parent.chmod(0o700)
+    if created_folder:
+        config_path.parent.chmod(0o700)  # mkdir's mode is masked by the umask
 
-    default_config = """# CJA Audit Log Monitor Configuration
+    if config_path.is_symlink():
+        raise ConfigError(f"{config_path} is a symlink; give the path of a real file")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(config_path, flags, 0o600)
+    except OSError as e:
+        raise ConfigError(f"{config_path}: cannot write ({e.strerror})") from None
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(_TEMPLATE_HEAD + _alert_rules_template() + "\n" + _TEMPLATE_NOTIFICATIONS)
+    config_path.chmod(0o600)  # os.open's mode is ignored when the file already exists
+    return config_path
+
+
+def _alert_rules_template() -> str:
+    """The built-in rules as a commented YAML block, so uncommenting keeps all of them."""
+    from .alerts import DEFAULT_ALERT_RULES
+
+    rules = [
+        rule.model_dump(mode="json", exclude_none=True, exclude={"enabled"})
+        for rule in DEFAULT_ALERT_RULES
+    ]
+    block = yaml.safe_dump({"alert_rules": rules}, sort_keys=False, indent=2)
+    lines = [
+        "# Alert rules. These are the built-in rules. If you define any rules here, they",
+        "# replace the built-in rules, so keep the ones you want. To use the block, remove",
+        "# the '# ' marks from the alert_rules lines.",
+        "# Fields: name (required), description, enabled (default true), actions, components,",
+        "# users, threshold_count (default 1), threshold_window_minutes (default 60),",
+        "# per_user (default false). Action and component names are not case sensitive.",
+        "# Off-hours activity (midnight to 5am) is an anomaly check, not a rule.",
+    ]
+    for line in block.splitlines():
+        # safe_dump puts list items at the key's indent; nest them under alert_rules:.
+        lines.append("# " + (line if line.startswith("alert_rules") else "  " + line))
+    lines += [
+        "#",
+        "# An example of an extra rule. To use it, add it under alert_rules: above.",
+        "#   - name: named_account_deletes",
+        "#     actions:",
+        "#     - DELETE",
+        "#     users:   # user id, email, or display name",
+        "#     - someone@example.com",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+_TEMPLATE_HEAD = """\
+# CJA Audit Log Monitor Configuration
 # See .env.example for authentication credentials
 
 # API settings
@@ -328,34 +381,9 @@ monitor_interval: 60
 # OAuth scopes
 scopes: openid,AdobeID,read_organizations,additional_info.projectedProductContext
 
-# Alert rules (example). If you define any rules here, they replace the built-in rules.
-# Fields: name (required), description, enabled (default true), actions, components,
-# users, threshold_count (default 1), threshold_window_minutes (default 60),
-# per_user (default false). Action and component names are not case sensitive.
-# Off-hours activity (midnight to 5am) is an anomaly check, not a rule.
-# alert_rules:
-#   - name: bulk_delete
-#     description: Alert on multiple delete operations
-#     enabled: true
-#     actions:
-#       - DELETE
-#     threshold_count: 5
-#     threshold_window_minutes: 60
-#     per_user: true   # count each user's events separately
-#   - name: bulk_export
-#     description: Multiple export operations
-#     enabled: true
-#     actions:
-#       - EXPORT
-#     threshold_count: 3
-#     threshold_window_minutes: 30
-#     per_user: true
-#   - name: named_account_deletes
-#     actions:
-#       - DELETE
-#     users:   # user id, email, or display name
-#       - someone@example.com
+"""
 
+_TEMPLATE_NOTIFICATIONS = """\
 # Notification channels (uncomment to enable delivery to Slack and/or webhooks)
 # notifications:
 #   slack_webhook_url: https://hooks.slack.com/services/XXX/YYY/ZZZ
@@ -370,13 +398,6 @@ scopes: openid,AdobeID,read_organizations,additional_info.projectedProductContex
 #       timeout: 30
 #       include_entry_details: true
 """
-
-    fd = os.open(config_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as f:
-        f.write(default_config)
-    config_path.chmod(0o600)  # os.open's mode is ignored when the file already exists
-
-    return config_path
 
 
 def get_config_path() -> Path:

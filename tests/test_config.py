@@ -422,3 +422,51 @@ def test_nested_typo_warns(tmp_path, caplog, yaml_text, where, key) -> None:
         load_config(path)
     expected = f"{path}: {where}: ignoring unknown setting {key!r}"
     assert expected in caplog.text
+
+
+def _uncomment_rules(text: str) -> str:
+    """Remove the '# ' marks from the commented alert_rules block, as the docs say to."""
+    out, inside = [], False
+    for line in text.splitlines():
+        if line.startswith("# alert_rules:"):
+            inside = True
+        elif inside and not line.startswith("#   "):
+            inside = False
+        out.append(line[2:] if inside else line)
+    return "\n".join(out) + "\n"
+
+
+def test_uncommented_template_keeps_the_builtin_rules(tmp_path) -> None:
+    from cja_audit_log_monitor.alerts import DEFAULT_ALERT_RULES
+
+    path = create_default_config(tmp_path / "config.yaml")
+    path.write_text(_uncomment_rules(path.read_text()))
+    names = [rule.name for rule in load_config(path).alert_rules]
+    assert names == [rule.name for rule in DEFAULT_ALERT_RULES]
+    loaded = {rule.name: rule for rule in load_config(path).alert_rules}
+    for rule in DEFAULT_ALERT_RULES:
+        assert loaded[rule.name] == rule
+
+
+def test_init_leaves_an_existing_folder_mode(tmp_path) -> None:
+    folder = tmp_path / "shared"
+    folder.mkdir()
+    folder.chmod(0o755)
+    create_default_config(folder / "config.yaml")
+    assert stat.S_IMODE(folder.stat().st_mode) == 0o755
+
+
+def test_init_makes_a_new_folder_private(tmp_path) -> None:
+    folder = tmp_path / "new"
+    create_default_config(folder / "config.yaml")
+    assert stat.S_IMODE(folder.stat().st_mode) == 0o700
+
+
+def test_init_refuses_a_symlink(tmp_path) -> None:
+    target = tmp_path / "important.txt"
+    target.write_text("keep me")
+    link = tmp_path / "config.yaml"
+    link.symlink_to(target)
+    with pytest.raises(ConfigError):
+        create_default_config(link)
+    assert target.read_text() == "keep me"
