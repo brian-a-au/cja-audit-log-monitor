@@ -4,7 +4,7 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ## [Unreleased]
 
-## [0.1.0] - Unreleased
+## [0.1.0] - 2026-11-19
 
 This is the first public release. It is an unofficial, community tool and is not affiliated with Adobe.
 
