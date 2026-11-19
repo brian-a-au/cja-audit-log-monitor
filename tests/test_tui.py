@@ -4792,3 +4792,20 @@ class TestExportDialogReports:
             )
             message = next(n.message for n in app._notifications if "exported" in n.message)
             assert "limit reached" not in message
+
+
+async def test_hostile_names_in_every_tui_view(mock_app_state) -> None:
+    """Review Focus 4 in the TUI: no control code from data in any view's output."""
+    from .test_cli import _hostile_entry
+
+    entry = _hostile_entry()
+    mock_app_state.client.get_logs_sample.return_value = ([entry], 1)
+    mock_app_state.client.get_logs.return_value = _logs_response([entry])
+    mock_app_state.client.get_all_logs.return_value = [entry]
+    app = _make_app(mock_app_state)
+    async with app.run_test(size=(140, 40)) as pilot:
+        for key in "dlsac":
+            await _show_and_load(app, pilot, key)
+            screen = app.export_screenshot()
+            assert "\x1b]0;" not in screen and "PWNED\x07" not in screen
+        assert app.is_running

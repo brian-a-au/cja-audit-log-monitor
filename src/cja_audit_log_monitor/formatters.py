@@ -10,7 +10,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from .models import ActionType, AuditLogEntry
+from .models import ActionType, AuditLogEntry, printable
 from .utils import get_user_identifier, to_local
 
 # Severity color tokens (matching tui/styles.tcss)
@@ -55,8 +55,9 @@ def literal(text: str) -> str:
     ``textual.markup.escape`` misses an unclosed ``[/`` and a trailing backslash, either
     of which can swallow a later tag. Here every ``[`` is escaped, and a trailing backslash
     is followed by a zero-width space so it cannot escape the tag that comes after it.
+    Control characters are replaced first (see ``models.printable``).
     """
-    out = text.replace("[", "\\[")
+    out = printable(text).replace("[", "\\[")
     return out + "\u200b" if out.endswith("\\") else out
 
 

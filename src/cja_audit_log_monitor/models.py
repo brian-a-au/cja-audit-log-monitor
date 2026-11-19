@@ -1,6 +1,7 @@
 """Pydantic models and enums for CJA audit logs."""
 
 import logging
+import re
 from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
@@ -66,6 +67,22 @@ def is_ims_user_id(value: str) -> bool:
     return "@" not in value or value.endswith(_IMS_ID_SUFFIXES)
 
 
+# C0 controls except tab and line feed, DEL, the C1 controls (which include CSI), and lone
+# surrogates, which no output encoding can write.
+_CONTROL = re.compile("[\x00-\x08\x0b-\x1f\x7f-\x9f\ud800-\udfff]")
+
+
+def printable(text: str) -> str:
+    """Replace control characters and lone surrogates with U+FFFD, tabs with spaces.
+
+    Line breaks are kept.
+
+    Audit data comes from anyone who can name a component. An escape sequence in a name
+    could set the terminal title, clear the screen or hide rows, so none reaches output.
+    """
+    return _CONTROL.sub("\ufffd", text.replace("\t", " "))
+
+
 class AuditLogEntry(BaseModel):
     """Single audit log entry from the API."""
 
@@ -84,6 +101,14 @@ class AuditLogEntry(BaseModel):
     changes: dict[str, Any] | None = None
 
     model_config = {"populate_by_name": True}
+
+    @field_validator(
+        "id", "user_id", "user_email", "user_name", "action", "component_type",
+        "component_id", "component_name", "description", "org_id", "ip_address",
+    )
+    @classmethod
+    def _printable(cls, value: str | None) -> str | None:
+        return printable(value) if isinstance(value, str) else value
 
     @field_validator("timestamp")
     @classmethod

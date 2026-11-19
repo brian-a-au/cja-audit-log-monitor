@@ -3240,3 +3240,60 @@ class TestExportFormatAndMessages:
         assert str(target) in result.stderr.replace("\n", "")
         assert "--force" in result.stderr
         assert ".tmp" not in result.stderr
+
+
+HOSTILE_NAME = "\x1b]0;PWNED\x07\x1b[2J[/b] 日本 \ud83d"
+
+
+def _hostile_entry() -> AuditLogEntry:
+    return AuditLogEntry.model_validate({
+        "id": "h1",
+        "dateCreated": "2026-01-15T10:00:00Z",
+        "action": "DELETE",
+        "componentName": HOSTILE_NAME,
+        "componentType": "PROJECT",
+        "user": {"id": "U1", "name": HOSTILE_NAME, "email": "h@example.com"},
+        "description": HOSTILE_NAME,
+    })
+
+
+@pytest.mark.parametrize(
+    "args",
+    [["list"], ["list", "-D"], ["search"], ["show", "h1"], ["stats"], ["timeline"],
+     ["top-users"], ["user", "-u", "h@example.com"], ["list", "-F", "json"]],
+    ids=lambda a: " ".join(a),
+)
+def test_hostile_names_on_every_output(args) -> None:
+    """Review Focus 4: odd names reach no terminal as control codes, and nothing crashes."""
+    entry = _hostile_entry()
+    client = MagicMock()
+    client.__enter__ = MagicMock(return_value=client)
+    client.__exit__ = MagicMock(return_value=False)
+    client.get_all_logs.return_value = [entry]
+    client.get_logs_paginated.side_effect = lambda *a, **k: iter([entry])
+    client.get_logs_sample.return_value = ([entry], 1)
+    with patch("cja_audit_log_monitor.cli.get_client", return_value=(client, _settings())):
+        result = CliRunner().invoke(main, ["cli", *args])
+    assert result.exit_code == 0, result.output
+    assert "\x1b]0;" not in result.output
+    assert "\x1b[2J" not in result.output
+    if "json" in args:
+        json.loads(result.stdout)
+
+
+@pytest.mark.parametrize("fmt", ["json", "csv", "tsv"])
+def test_hostile_names_in_exports(fmt) -> None:
+    from io import StringIO
+
+    from cja_audit_log_monitor.export import export_entries
+
+    out = StringIO()
+    export_entries([_hostile_entry()], out, output_format=fmt)
+    assert "\x1b" not in out.getvalue()
+
+
+def test_hostile_names_in_slack() -> None:
+    from cja_audit_log_monitor.notifications import NotificationManager
+
+    payload = NotificationManager()._build_slack_payload("r", "m", _hostile_entry())
+    assert "\x1b" not in json.dumps(payload, ensure_ascii=False)

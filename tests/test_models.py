@@ -338,3 +338,29 @@ class TestAlertRuleValidation:
         rule = AlertRule(name="x", actions=["delete", ActionType.EXPORT], components=["data_view"])
         assert rule.actions == ["DELETE", "EXPORT"]
         assert rule.components == ["DATA_VIEW"]
+
+
+class TestControlCharacters:
+    """Control characters in entry text never reach a terminal (G31)."""
+
+    HOSTILE = "name\x1b]0;PWNED\x07\x1b[2J\x1b[41mRED\x9b\x7f\ttab\rcr"
+
+    def test_printable_replaces_control_characters(self) -> None:
+        from cja_audit_log_monitor.models import printable
+
+        text = printable(self.HOSTILE + "\nline")
+        assert "\x1b" not in text and "\x07" not in text and "\x9b" not in text
+        assert "\x7f" not in text and "\r" not in text
+        assert "\ttab" not in text and " tab" in text
+        assert "\nline" in text  # a line break stays
+
+    def test_entry_text_fields_are_printable(self) -> None:
+        entry = AuditLogEntry.model_validate({
+            "id": "1",
+            "componentName": self.HOSTILE,
+            "description": self.HOSTILE,
+            "user": {"id": "U1", "name": self.HOSTILE, "email": "e\x1b@example.com"},
+        })
+        for value in (entry.component_name, entry.description, entry.user_name,
+                      entry.user_email):
+            assert "\x1b" not in value
