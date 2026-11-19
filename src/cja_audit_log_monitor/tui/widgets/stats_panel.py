@@ -30,7 +30,7 @@ class ActionBarChart(Static):
         self._max_width = width
         self._redraw()
 
-    def set_loading(self, loading: bool) -> None:
+    def show_loading(self, loading: bool) -> None:
         """Show "loading…" in place of the chart while a load runs."""
         self._loading = loading
         self._redraw()
@@ -93,7 +93,7 @@ class HourlyChart(Static):
         self._data = data
         self._redraw()
 
-    def set_loading(self, loading: bool) -> None:
+    def show_loading(self, loading: bool) -> None:
         """Show "loading…" in place of the chart while a load runs."""
         self._loading = loading
         self._redraw()

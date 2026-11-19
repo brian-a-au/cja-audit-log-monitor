@@ -178,14 +178,14 @@ class ContentView(Vertical):
             empty.display = True
             body.display = False
 
-    def set_loading(self, loading: bool) -> None:
+    def show_loading(self, loading: bool) -> None:
         """Show or hide the view's loading indicator, and put its charts in "loading…"."""
         for indicator in self.query(LoadingIndicator):
             indicator.display = loading
         for chart in self.query(ActionBarChart):
-            chart.set_loading(loading)
+            chart.show_loading(loading)
         for chart in self.query(HourlyChart):
-            chart.set_loading(loading)
+            chart.show_loading(loading)
 
     def run_load(
         self,
@@ -208,7 +208,7 @@ class ContentView(Vertical):
         self._load_generation += 1
         generation = self._load_generation
         handle_error = on_error or self.show_load_error
-        self.set_loading(True)
+        self.show_loading(True)
 
         def deliver(callback: Callable, value: object) -> None:
             if generation != self._load_generation:
@@ -227,7 +227,7 @@ class ContentView(Vertical):
                 except Exception:
                     logger.exception("Showing a load error failed")
             finally:
-                self.set_loading(False)
+                self.show_loading(False)
 
         def work() -> None:
             try:
@@ -262,7 +262,7 @@ class ContentView(Vertical):
     def cancel_loads(self) -> None:
         """Drop the result of any load in progress (e.g. one sent before a settings reload)."""
         self._load_generation += 1
-        self.set_loading(False)
+        self.show_loading(False)
 
     def show_load_error(self, error: Exception) -> None:
         """Show why a load failed in place of the view body, and in the header."""

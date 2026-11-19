@@ -5061,3 +5061,19 @@ class TestMonitorStatusTexts:
             await pilot.pause()
             assert "no alerts yet" in str(screen.query_one(AlertSummary).render())
             screen._stop_monitoring()
+
+
+def test_no_private_textual_imports() -> None:
+    """G53: a private Textual module could be renamed in any release."""
+    import re
+    from pathlib import Path
+
+    import cja_audit_log_monitor
+
+    root = Path(cja_audit_log_monitor.__file__).parent
+    hits = [
+        str(path.relative_to(root))
+        for path in root.rglob("*.py")
+        if re.search(r"textual(\.\w+)*\._\w+", path.read_text())
+    ]
+    assert hits == []
