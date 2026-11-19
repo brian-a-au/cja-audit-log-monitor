@@ -205,7 +205,7 @@ class SettingsScreen(ContentView):
         await self.recompose()
         self.app.set_connection_status("connecting")
         self.refresh_data()
-        self.app.notify("Settings reloaded", severity="information")
+        self.app.notify("settings reloaded", severity="information")
 
     def _update_connection_status(self, result: dict) -> None:
         """Update connection status display."""

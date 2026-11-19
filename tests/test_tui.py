@@ -1015,7 +1015,7 @@ async def _wait_for(condition, pilot, timeout: float = 3.0) -> bool:
 
 def _reloaded(app, times: int = 1) -> bool:
     """True once the config view's reload handler has run to its end ``times`` times."""
-    return sum("Settings reloaded" in n.message for n in app._notifications) >= times
+    return sum("settings reloaded" in n.message for n in app._notifications) >= times
 
 
 class TestMonitorScreen:
@@ -1814,7 +1814,7 @@ class TestAlertsViewRealEngine:
             await pilot.pause()
             app.query_one("#reload-button", Button).press()
             assert await _wait_for(
-                lambda: any("Settings reloaded" in n.message for n in app._notifications), pilot
+                lambda: any("settings reloaded" in n.message for n in app._notifications), pilot
             )
             await pilot.press("a")
             assert await _wait_for(lambda: labels() == ["rule_c", "rule_d", "rule_e"], pilot)

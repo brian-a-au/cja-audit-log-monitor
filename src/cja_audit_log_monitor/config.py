@@ -1,4 +1,4 @@
-"""Configuration handling for CJA Audit CLI."""
+"""Configuration handling for CJA Audit Log Monitor."""
 
 import logging
 import os

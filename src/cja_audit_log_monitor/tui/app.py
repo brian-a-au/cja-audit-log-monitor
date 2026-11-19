@@ -364,7 +364,7 @@ class CJAAuditApp(App):
         current = self._screens.get(self._current_screen)
         refresh_method = getattr(current, "refresh_data", None)
         if callable(refresh_method) and refresh_method() is not False:
-            self.notify("Refreshing...", severity="information")
+            self.notify("refreshing…", severity="information")
 
     def action_export(self) -> None:
         """Show export dialog."""

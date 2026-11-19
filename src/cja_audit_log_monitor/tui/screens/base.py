@@ -275,5 +275,8 @@ class ContentView(Vertical):
     def on_content_mounted(self) -> None:
         """Hook called once, the first time the view is shown."""
 
-    def refresh_data(self) -> None:
-        """Reload the view's data (bound to the ``r`` key)."""
+    def refresh_data(self) -> bool | None:
+        """Reload the view's data (bound to the ``r`` key).
+
+        A view may return False when there was nothing to reload (the monitor does).
+        """

@@ -166,7 +166,7 @@ class AlertsScreen(ContentView):
     def _reset_rules(self) -> None:
         """Rebuild the rules from settings, undoing this session's toggles."""
         self._state.reset_alert_rules()
-        self.app.notify("Rules reset", severity="information")
+        self.app.notify("rules reset", severity="information")
         self.refresh_data()
 
     def _test_rules(self) -> str:
@@ -174,7 +174,9 @@ class AlertsScreen(ContentView):
         query = build_date_range_query(1)
         entries = self._state.client.get_all_logs(query, max_entries=TEST_RULES_MAX_ENTRIES)
         if not entries:
-            return "[dim]No audit logs found to test against[/dim]"
+            return resolve_tcss_markup(
+                "[$text-muted]no audit logs found to test against[/$text-muted]"
+            )
 
         fired = self._state.new_test_engine().check_batch(entries)
         if len(entries) >= TEST_RULES_MAX_ENTRIES:

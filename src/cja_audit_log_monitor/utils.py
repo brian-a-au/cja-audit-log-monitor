@@ -1,4 +1,4 @@
-"""Shared utilities for CJA Audit CLI."""
+"""Shared utilities for CJA Audit Log Monitor."""
 
 from collections import OrderedDict, defaultdict
 from datetime import UTC, datetime
