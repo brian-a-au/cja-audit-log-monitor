@@ -44,8 +44,14 @@ def _noop(*args, **kwargs):
 
 
 @pytest.fixture(autouse=True)
-def _patch_screen_workers():
-    """Patch screen on_content_mounted workers for all TUI tests."""
+def _patch_screen_workers(request):
+    """Patch screen on_content_mounted workers for all TUI tests.
+
+    A test marked ``real_mount`` keeps the real hooks, so views load as in the real app.
+    """
+    if request.node.get_closest_marker("real_mount"):
+        yield
+        return
     patchers = [patch(p, _noop) for p in _SCREEN_WORKER_PATCHES]
     for p in patchers:
         p.start()
@@ -4147,3 +4153,63 @@ class TestWideDashboardFill:
             users = [str(table.get_row_at(i)[1]) for i in range(table.row_count)]
             assert all(u.endswith("…") for u in users), users
             assert all(cell_len(u) <= table.columns["user"].width for u in users), users
+
+
+# ---------------------------------------------------------------------------
+# Guards that see what a user sees: real toasts and the first load (G38)
+# ---------------------------------------------------------------------------
+
+
+async def test_monitor_toasts_show_markup_literally(mock_app_state):
+    """Toasts are rendered (notifications=True), so markup in data would raise here."""
+    from cja_audit_log_monitor.tui.screens.monitor import MonitorScreen
+
+    app = _make_app(mock_app_state)
+    async with app.run_test(size=(100, 30), notifications=True) as pilot:
+        await pilot.press("m")
+        await pilot.pause()
+        screen = app._screens["monitor"]
+        assert isinstance(screen, MonitorScreen)
+        screen._show_alert("[/rule]", "[bold]msg[/")
+        screen._show_error("[bold red]boom[/] [/oops]")
+        screen._show_warning("[/warn]")
+        await pilot.pause()
+        assert await _wait_for(lambda: len(app.screen.query("Toast")) == 3, pilot)
+        await pilot.pause()
+        assert app.is_running
+        assert any("[/rule]" in n.message for n in app._notifications)
+
+
+@pytest.mark.real_mount
+@pytest.mark.parametrize(
+    ("key", "loaded"),
+    [
+        ("s", lambda state: state.client.get_logs_sample.called),
+        ("c", lambda state: state.client.verify_connection.called),
+    ],
+)
+async def test_views_load_data_when_first_shown(mock_app_state, key, loaded):
+    """With the real on_content_mounted, showing a view the first time starts its load."""
+    app = _make_app(mock_app_state)
+    async with app.run_test(size=(100, 30)) as pilot:
+        await app.workers.wait_for_complete()
+        mock_app_state.client.get_logs_sample.reset_mock()
+        mock_app_state.client.verify_connection.reset_mock()
+        await pilot.press(key)
+        assert await _wait_for(lambda: loaded(mock_app_state), pilot)
+        await app.workers.wait_for_complete()
+
+
+@pytest.mark.real_mount
+async def test_app_loads_dashboard_on_start(mock_app_state):
+    """Starting the app shows dashboard data without any key press."""
+    from cja_audit_log_monitor.tui.screens.dashboard import DashboardScreen
+
+    app = _make_app(mock_app_state)
+    async with app.run_test(size=(100, 30)) as pilot:
+        assert await _wait_for(lambda: mock_app_state.client.get_logs_sample.called, pilot)
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        view = app._screens["dashboard"]
+        assert isinstance(view, DashboardScreen)
+        assert await _wait_for(lambda: "user" in _plain(view.query_one("#top-users")), pilot)

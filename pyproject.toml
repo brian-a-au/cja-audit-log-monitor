@@ -74,3 +74,6 @@ select = ["E", "F", "I", "N", "W", "UP"]
 testpaths = ["tests"]
 pythonpath = ["src"]
 asyncio_mode = "auto"
+markers = [
+    "real_mount: keep the real on_content_mounted hooks in TUI tests",
+]
