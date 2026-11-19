@@ -1252,6 +1252,25 @@ def _status_indicator(screen) -> str:
 class TestMonitorStream:
     """The live stream stays bounded and ordered, and its status tells the truth."""
 
+    async def test_tui_failed_poll_keeps_the_poll_window(self, mock_app_state, monkeypatch):
+        from cja_audit_log_monitor.monitor import POLL_OVERLAP
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            screen = await _start_monitor_without_loop(app, pilot, monkeypatch)
+            await _drive_poll(screen, pilot)  # baseline
+            last_good = screen._last_poll_time
+            assert last_good is not None
+            mock_app_state.client.get_logs.side_effect = [
+                RuntimeError("network down"),
+                mock_app_state.client.get_logs.return_value,
+            ]
+            await _drive_poll(screen, pilot)
+            await _drive_poll(screen, pilot)
+            query = mock_app_state.client.get_logs.call_args.args[0]
+            assert query.start_date == last_good - POLL_OVERLAP
+            screen._stop_monitoring()
+
     async def test_monitor_query_has_end_date(self, mock_app_state, monkeypatch):
         app = _make_app(mock_app_state)
         async with app.run_test(size=(140, 40)) as pilot:
