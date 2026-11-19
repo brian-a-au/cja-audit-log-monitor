@@ -86,9 +86,16 @@ console = Console()
 err_console = Console(stderr=True)
 
 
-def emit_json(data: Any) -> None:
-    """Write machine-readable JSON to stdout, bypassing Rich markup and wrapping."""
-    click.echo(json.dumps(data, indent=2, default=str))
+def emit_json(data: Any, compact: bool = False) -> None:
+    """Write machine-readable JSON to stdout, bypassing Rich markup and wrapping.
+
+    ``compact`` writes one object on a single line (for streams of documents).
+    """
+    if compact:
+        click.echo(json.dumps(data, separators=(",", ":"), default=str))
+        sys.stdout.flush()
+    else:
+        click.echo(json.dumps(data, indent=2, default=str))
 
 
 def handle_cli_errors(func: Callable[P, R]) -> Callable[P, R]:
@@ -826,8 +833,8 @@ def anomalies(
 ) -> None:
     """Detect anomalies and dispatch to configured notification channels.
 
-    With -F json each scan prints one JSON document on stdout (so --watch prints
-    one per cycle); status messages go to stderr.
+    With -F json each scan prints one JSON document on stdout; with --watch, one JSON
+    object per line (one per cycle). Status messages go to stderr.
     """
     config_path = ctx.obj.get("config_path")
 
@@ -860,7 +867,7 @@ def anomalies(
             while True:
                 cycle_delay = interval
                 try:
-                    _run_anomalies_cycle(client, nm, dedup, lookback, output_format)
+                    _run_anomalies_cycle(client, nm, dedup, lookback, output_format, watch)
                 except APIError as e:
                     if not watch or not _is_retryable_anomalies_error(e):
                         raise
@@ -915,6 +922,7 @@ def _run_anomalies_cycle(
     dedup: AnomalyDedupFilter,
     lookback: int,
     output_format: str = "table",
+    watch: bool = False,
 ) -> None:
     """One scan cycle: fetch → detect → dedup → print + dispatch → drain warnings."""
     end = datetime.now(UTC)
@@ -929,7 +937,7 @@ def _run_anomalies_cycle(
 
     as_json = output_format == "json"
     if as_json:
-        emit_json({"anomalies": new_anomalies, "count": len(new_anomalies)})
+        emit_json({"anomalies": new_anomalies, "count": len(new_anomalies)}, compact=watch)
 
     if not raw_anomalies and not as_json:
         unit = "hour" if lookback == 1 else "hours"

@@ -2558,3 +2558,50 @@ class TestSmallCliBehaviours:
         assert max(len(line) for line in result.stdout.splitlines()) <= 80
         for name in ("bulk_delete", "bulk_export", "sensitive_component_delete", "bulk_share"):
             assert name in result.stdout
+
+
+class TestWatchJsonAndHelpDefaults:
+    @patch("cja_audit_log_monitor.cli._install_anomalies_signal_handlers")
+    @patch("cja_audit_log_monitor.cli.time.sleep")
+    @patch("cja_audit_log_monitor.cli.NotificationManager")
+    @patch("cja_audit_log_monitor.cli.get_client")
+    def test_watch_json_is_one_compact_object_per_line(
+        self,
+        mock_get_client: MagicMock,
+        mock_nm: MagicMock,
+        mock_sleep: MagicMock,
+        mock_signals: MagicMock,
+        runner: CliRunner,
+    ) -> None:
+        mock_get_client.return_value = (_fake_client([]), _settings())
+        nm = mock_nm.return_value.__enter__.return_value
+        nm.is_configured.return_value = False
+        nm.pop_first_failure.return_value = None
+        mock_sleep.side_effect = [None, KeyboardInterrupt]
+
+        result = runner.invoke(main, ["cli", "anomalies", "--watch", "-F", "json"])
+
+        lines = result.stdout.splitlines()
+        assert len(lines) == 2
+        assert [json.loads(line) for line in lines] == [{"anomalies": [], "count": 0}] * 2
+
+    def test_help_defaults_match_settings(self, runner: CliRunner) -> None:
+        from cja_audit_log_monitor.config import CJASettings
+
+        fields = CJASettings.model_fields
+        stats_help = " ".join(
+            runner.invoke(main, ["cli", "stats", "--help"], env={"COLUMNS": "200"}).output.split()
+        )
+        monitor_help = " ".join(
+            runner.invoke(main, ["cli", "monitor", "--help"], env={"COLUMNS": "200"}).output.split()
+        )
+        assert f"from config ({fields['default_days'].default})" in stats_help
+        assert f"from config ({fields['monitor_interval'].default})" in monitor_help
+
+    def test_anomalies_help_mentions_one_object_per_line(self, runner: CliRunner) -> None:
+        out = " ".join(
+            runner.invoke(
+                main, ["cli", "anomalies", "--help"], env={"COLUMNS": "200"}
+            ).output.split()
+        )
+        assert "with --watch, one JSON object per line" in out
