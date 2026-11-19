@@ -32,10 +32,10 @@ def _make_app(mock_app_state) -> CJAAuditApp:
 # check layout/navigation don't race background threads. Tests that need real workers
 # run them explicitly.
 _SCREEN_WORKER_PATCHES = [
-    "cja_audit_log_monitor.tui.screens.dashboard.DashboardScreen.on_content_mounted",
-    "cja_audit_log_monitor.tui.screens.log_browser.LogBrowserScreen.on_content_mounted",
-    "cja_audit_log_monitor.tui.screens.settings.SettingsScreen.on_content_mounted",
-    "cja_audit_log_monitor.tui.screens.stats.StatsScreen.on_content_mounted",
+    "cja_audit_log_monitor.tui.screens.dashboard.DashboardView.on_content_mounted",
+    "cja_audit_log_monitor.tui.screens.log_browser.LogBrowserView.on_content_mounted",
+    "cja_audit_log_monitor.tui.screens.settings.SettingsView.on_content_mounted",
+    "cja_audit_log_monitor.tui.screens.stats.StatsView.on_content_mounted",
 ]
 
 
@@ -244,7 +244,7 @@ class TestViewRendering:
     async def test_on_content_mounted_called_once_per_view(self, mock_app_state):
         hook = MagicMock()
         with patch(
-            "cja_audit_log_monitor.tui.screens.log_browser.LogBrowserScreen.on_content_mounted",
+            "cja_audit_log_monitor.tui.screens.log_browser.LogBrowserView.on_content_mounted",
             hook,
         ):
             app = _make_app(mock_app_state)
@@ -793,13 +793,13 @@ class TestViewFocusAndScroll:
             assert mock_app_state.filters.page == 1
 
     async def test_space_starts_monitor_right_after_m(self, mock_app_state):
-        from cja_audit_log_monitor.tui.screens.monitor import MonitorScreen
+        from cja_audit_log_monitor.tui.screens.monitor import MonitorView
 
         async def _no_loop(self, stop):
             return None
 
         app = _make_app(mock_app_state)
-        with patch.object(MonitorScreen, "_monitoring_loop", _no_loop):
+        with patch.object(MonitorView, "_monitoring_loop", _no_loop):
             async with app.run_test(size=(140, 40)) as pilot:
                 await pilot.press("m")
                 await pilot.pause()
@@ -971,7 +971,7 @@ class TestLogBrowserScreen:
 
 
 def _track_monitor_loops(monkeypatch):
-    """Wrap MonitorScreen._monitoring_loop to record when each loop starts and ends.
+    """Wrap MonitorView._monitoring_loop to record when each loop starts and ends.
 
     Returns (started, ended): lists that get a threading.Event per loop. The default
     interval of 60 seconds stays in place, so a loop that only notices a stop after its
@@ -979,9 +979,9 @@ def _track_monitor_loops(monkeypatch):
     """
     import threading
 
-    from cja_audit_log_monitor.tui.screens.monitor import MonitorScreen
+    from cja_audit_log_monitor.tui.screens.monitor import MonitorView
 
-    original = MonitorScreen._monitoring_loop
+    original = MonitorView._monitoring_loop
     started: list[threading.Event] = []
     ended: list[threading.Event] = []
 
@@ -995,7 +995,7 @@ def _track_monitor_loops(monkeypatch):
         finally:
             done.set()
 
-    monkeypatch.setattr(MonitorScreen, "_monitoring_loop", tracked)
+    monkeypatch.setattr(MonitorView, "_monitoring_loop", tracked)
     return started, ended
 
 
@@ -1230,12 +1230,12 @@ def _page_zero_batches(batches, pages_seen: list | None = None):
 
 async def _start_monitor_without_loop(app, pilot, monkeypatch):
     """Show the monitor and start a session whose loop does nothing; tests drive polls."""
-    from cja_audit_log_monitor.tui.screens.monitor import MonitorScreen
+    from cja_audit_log_monitor.tui.screens.monitor import MonitorView
 
     async def _no_loop(self, stop):
         return None
 
-    monkeypatch.setattr(MonitorScreen, "_monitoring_loop", _no_loop)
+    monkeypatch.setattr(MonitorView, "_monitoring_loop", _no_loop)
     await pilot.press("m")
     await pilot.pause()
     screen = app._screens["monitor"]
@@ -1534,12 +1534,12 @@ class TestMonitorStream:
     async def test_space_in_interval_input_starts_monitor(self, mock_app_state, monkeypatch):
         from textual.widgets import Input
 
-        from cja_audit_log_monitor.tui.screens.monitor import MonitorScreen
+        from cja_audit_log_monitor.tui.screens.monitor import MonitorView
 
         async def _no_loop(self, stop):
             return None
 
-        monkeypatch.setattr(MonitorScreen, "_monitoring_loop", _no_loop)
+        monkeypatch.setattr(MonitorView, "_monitoring_loop", _no_loop)
         app = _make_app(mock_app_state)
         async with app.run_test(size=(140, 40)) as pilot:
             await pilot.press("m")
@@ -1646,10 +1646,10 @@ class TestMonitorPolling:
         """A bug while showing one poll leaves the app and the monitor loop running."""
         from textual.worker import WorkerState
 
-        from cja_audit_log_monitor.tui.screens.monitor import MonitorScreen
+        from cja_audit_log_monitor.tui.screens.monitor import MonitorView
         from cja_audit_log_monitor.tui.widgets import LogTable
 
-        original = MonitorScreen._apply_poll
+        original = MonitorView._apply_poll
         raised: list[bool] = []
 
         def flaky(self, *args, **kwargs):
@@ -1658,7 +1658,7 @@ class TestMonitorPolling:
                 raise RuntimeError("ui bug")
             return original(self, *args, **kwargs)
 
-        monkeypatch.setattr(MonitorScreen, "_apply_poll", flaky)
+        monkeypatch.setattr(MonitorView, "_apply_poll", flaky)
         app = _make_app(mock_app_state)
         async with app.run_test(size=(140, 40)) as pilot:
             await pilot.press("m")
@@ -1976,7 +1976,7 @@ class TestSettingsScreen:
         from unittest.mock import MagicMock
 
         from cja_audit_log_monitor.models import NotificationConfig, WebhookConfig
-        from cja_audit_log_monitor.tui.screens.settings import SettingsScreen
+        from cja_audit_log_monitor.tui.screens.settings import SettingsView
 
         state = MagicMock()
         state.settings.notifications = NotificationConfig(
@@ -1994,7 +1994,7 @@ class TestSettingsScreen:
         state.settings.alert_rules = []
         state.config_path = "/tmp/config"
 
-        screen = SettingsScreen(state=state)
+        screen = SettingsView(state=state)
         # Iterate compose_content to ensure no exception is raised when building the widget tree
         widgets = list(screen.compose_content())
 
@@ -2053,7 +2053,7 @@ class TestModals:
         """Pressing Esc (via `action_dismiss_details`) hides the panel.
 
         Note: We invoke `action_dismiss_details()` directly rather than
-        `pilot.press("escape")` because LogBrowserScreen is mounted as a
+        `pilot.press("escape")` because LogBrowserView is mounted as a
         widget (not pushed onto Textual's screen stack), so its BINDINGS
         never enter the headless test's key-dispatch chain. This asserts
         the contract that the action method hides the panel — which is
@@ -2062,7 +2062,7 @@ class TestModals:
         diverge from how the app actually mounts it.
         """
         from cja_audit_log_monitor.tui.modals import EntryDetailPanel
-        from cja_audit_log_monitor.tui.screens import LogBrowserScreen
+        from cja_audit_log_monitor.tui.screens import LogBrowserView
         from cja_audit_log_monitor.tui.widgets import LogTable
 
         app = _make_app(mock_app_state)
@@ -2079,7 +2079,7 @@ class TestModals:
             await pilot.pause()
             assert panel.is_visible()
 
-            log_screen = app.query_one(LogBrowserScreen)
+            log_screen = app.query_one(LogBrowserView)
             log_screen.action_dismiss_details()
             await pilot.pause()
             assert not panel.is_visible()
@@ -2162,7 +2162,7 @@ class TestModals:
             assert entry_a.id in body_text_a
 
             # Move cursor to second row and fire the highlighted handler directly.
-            # (pilot key dispatch doesn't reach LogBrowserScreen BINDINGS in this
+            # (pilot key dispatch doesn't reach LogBrowserView BINDINGS in this
             # widget-mounted test setup; calling the handler is equivalent.)
             table.move_cursor(row=1)
             log_screen.on_data_table_row_highlighted(event=None)
@@ -3590,7 +3590,7 @@ async def test_bracket_data_shows_literally_in_every_view(
     mock_app_state, sample_audit_entry, monkeypatch
 ):
     from cja_audit_log_monitor.tui.modals import EntryDetailPanel
-    from cja_audit_log_monitor.tui.screens.monitor import MonitorScreen
+    from cja_audit_log_monitor.tui.screens.monitor import MonitorView
     from cja_audit_log_monitor.tui.widgets import LogTable
 
     entry = sample_audit_entry.model_copy(
@@ -3639,7 +3639,7 @@ async def test_bracket_data_shows_literally_in_every_view(
         )
         monkeypatch.setattr(state, "check_alerts", lambda entries: [fired])
         screen = await _start_monitor_without_loop(app, pilot, monkeypatch)
-        assert isinstance(screen, MonitorScreen)
+        assert isinstance(screen, MonitorView)
         screen._last_poll_time = screen._last_poll_time or datetime.now(UTC)
         await _drive_poll(screen, pilot)
         assert await _wait_for(lambda: len(app._notifications) > 0, pilot)
@@ -4301,14 +4301,14 @@ class TestWideDashboardFill:
 
 async def test_monitor_toasts_show_markup_literally(mock_app_state):
     """Toasts are rendered (notifications=True), so markup in data would raise here."""
-    from cja_audit_log_monitor.tui.screens.monitor import MonitorScreen
+    from cja_audit_log_monitor.tui.screens.monitor import MonitorView
 
     app = _make_app(mock_app_state)
     async with app.run_test(size=(100, 30), notifications=True) as pilot:
         await pilot.press("m")
         await pilot.pause()
         screen = app._screens["monitor"]
-        assert isinstance(screen, MonitorScreen)
+        assert isinstance(screen, MonitorView)
         screen._show_alert("[/rule]: [bold]msg[/")
         screen._show_error("[bold red]boom[/] [/oops]")
         screen._show_warning("[/warn]")
@@ -4342,7 +4342,7 @@ async def test_views_load_data_when_first_shown(mock_app_state, key, loaded):
 @pytest.mark.real_mount
 async def test_app_loads_dashboard_on_start(mock_app_state):
     """Starting the app shows dashboard data without any key press."""
-    from cja_audit_log_monitor.tui.screens.dashboard import DashboardScreen
+    from cja_audit_log_monitor.tui.screens.dashboard import DashboardView
 
     app = _make_app(mock_app_state)
     async with app.run_test(size=(100, 30)) as pilot:
@@ -4350,7 +4350,7 @@ async def test_app_loads_dashboard_on_start(mock_app_state):
         await app.workers.wait_for_complete()
         await pilot.pause()
         view = app._screens["dashboard"]
-        assert isinstance(view, DashboardScreen)
+        assert isinstance(view, DashboardView)
         assert await _wait_for(lambda: "user" in _plain(view.query_one("#top-users")), pilot)
 
 
@@ -4523,10 +4523,10 @@ async def test_quit_during_hung_request_exits_fast(fake_api, tmp_path, monkeypat
     fake_api.block.set()
     # Release the server after 10 seconds, so a regression fails instead of hanging.
     threading.Timer(10, fake_api.block.clear).start()
-    from cja_audit_log_monitor.tui.screens.dashboard import DashboardScreen
+    from cja_audit_log_monitor.tui.screens.dashboard import DashboardView
 
     fetch_done = threading.Event()
-    real_fetch = DashboardScreen._fetch
+    real_fetch = DashboardView._fetch
 
     def tracked_fetch(self):
         try:
@@ -4534,7 +4534,7 @@ async def test_quit_during_hung_request_exits_fast(fake_api, tmp_path, monkeypat
         finally:
             fetch_done.set()
 
-    monkeypatch.setattr(DashboardScreen, "_fetch", tracked_fetch)
+    monkeypatch.setattr(DashboardView, "_fetch", tracked_fetch)
     app = CJAAuditApp()
     async with app.run_test(size=(100, 30)) as pilot:
         assert await asyncio.to_thread(fake_api.blocked.wait, 10)
@@ -5073,3 +5073,14 @@ async def test_tui_monitor_stops_on_an_error_retrying_cannot_fix(mock_app_state,
         assert await _wait_for(lambda: not mock_app_state.monitor.is_running, pilot)
         assert "stopped" in _status_indicator(screen)
         assert any("forbidden" in n.message for n in app._notifications)
+
+
+@pytest.mark.parametrize(("size", "taller"), [((200, 60), True), ((100, 30), False)])
+async def test_stats_hourly_chart_uses_the_height_on_wide_screens(mock_app_state, size, taller):
+    """G40: at 160 columns and more the stats view fills the screen instead of half of it."""
+    app = _make_app(mock_app_state)
+    async with app.run_test(size=size) as pilot:
+        view = await _show_and_load(app, pilot, "s")
+        await pilot.pause()
+        chart = view.query_one("#stats-hourly-chart")
+        assert (chart.region.height >= 15) is taller

@@ -118,7 +118,8 @@ def group_by_user(entries: list[AuditLogEntry]) -> dict[str, list[AuditLogEntry]
     """Group entries by account, keyed by a display label that is unique per account.
 
     The label is the usual user identifier. When two accounts share it, each
-    gets the start of its id appended, e.g. ``Integration (AAA11111)``.
+    gets the start of its id appended, e.g. ``Integration (AAA11111)``, or the whole
+    id when the starts are the same too.
     """
     labels: dict[str, str] = {}
     groups: dict[str, list[AuditLogEntry]] = defaultdict(list)
@@ -135,6 +136,8 @@ def group_by_user(entries: list[AuditLogEntry]) -> dict[str, list[AuditLogEntry]
     for key, group in groups.items():
         label = labels[key]
         if keys_per_label[label] > 1:
-            label = f"{label} ({key[:8]})"
+            short = f"{label} ({key[:8]})"
+            # Two ids can start alike; then the whole id keeps the accounts apart.
+            label = short if short not in result else f"{label} ({key})"
         result[label] = group
     return result

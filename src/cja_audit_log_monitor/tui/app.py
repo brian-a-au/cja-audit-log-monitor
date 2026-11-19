@@ -243,21 +243,21 @@ class CJAAuditApp(App):
     async def on_mount(self) -> None:
         """Handle application mount."""
         from .screens import (
-            AlertsScreen,
-            DashboardScreen,
-            LogBrowserScreen,
-            MonitorScreen,
-            SettingsScreen,
-            StatsScreen,
+            AlertsView,
+            DashboardView,
+            LogBrowserView,
+            MonitorView,
+            SettingsView,
+            StatsView,
         )
 
         views = {
-            "dashboard": DashboardScreen,
-            "logs": LogBrowserScreen,
-            "monitor": MonitorScreen,
-            "stats": StatsScreen,
-            "alerts": AlertsScreen,
-            "settings": SettingsScreen,
+            "dashboard": DashboardView,
+            "logs": LogBrowserView,
+            "monitor": MonitorView,
+            "stats": StatsView,
+            "alerts": AlertsView,
+            "settings": SettingsView,
         }
         self._screens = {name: cls(self.state, id=f"view-{name}") for name, cls in views.items()}
 

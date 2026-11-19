@@ -3827,3 +3827,58 @@ class TestCountWording:
     def test_export_of_one_entry(self, tmp_path, sample_audit_entry) -> None:
         result = self._run(["export", "-o", str(tmp_path / "o.json")], [sample_audit_entry])
         assert "Exported 1 entry " in result.stderr
+
+
+@pytest.mark.parametrize("signal_name", ["SIGTERM", "SIGHUP"])
+def test_signal_during_export_leaves_no_temp_file(fake_api, tmp_path, signal_name) -> None:
+    """G44: a stopped export removes its hidden temp file."""
+    import signal
+    import subprocess
+
+    from .fakeapi import command, raw_entry
+
+    fake_api.entries = [raw_entry(i) for i in range(1500)]  # two pages of 1,000
+    fake_api.block_after = 1  # hold the second page, while the temp file is open
+    out = tmp_path / "out"
+    out.mkdir()
+    proc = subprocess.Popen(
+        [*command(), "cli", "export", "-F", "csv", "-o", str(out / "audit.csv")],
+        env=fake_api.env(tmp_path / "missing.yaml"),
+        cwd=tmp_path,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        assert fake_api.blocked.wait(30)
+        proc.send_signal(getattr(signal, signal_name))
+        proc.communicate(timeout=10)
+    finally:
+        fake_api.block.clear()
+        if proc.poll() is None:
+            proc.kill()
+    assert list(out.iterdir()) == []
+    assert proc.returncode != 0
+
+
+class TestOneJsonShape:
+    """Users are objects and hours are "00" to "23" in every JSON output (G45)."""
+
+    @staticmethod
+    def _run(args, entries):
+        client = MagicMock()
+        client.__enter__ = MagicMock(return_value=client)
+        client.__exit__ = MagicMock(return_value=False)
+        client.get_all_logs.return_value = entries
+        with patch("cja_audit_log_monitor.cli.get_client", return_value=(client, _settings())):
+            return CliRunner().invoke(main, ["cli", *args])
+
+    def test_stats_top_users_are_objects(self, sample_audit_entries) -> None:
+        data = json.loads(self._run(["stats", "-F", "json"], sample_audit_entries).stdout)
+        users = data["statistics"]["top_users"]
+        assert users and all(set(u) == {"user", "count"} for u in users)
+
+    def test_report_hours_and_users(self, sample_audit_entries) -> None:
+        data = json.loads(self._run(["report"], sample_audit_entries).stdout)
+        assert list(data["hourly_distribution"])[:2] == ["00", "01"]
+        assert all(set(u) == {"user", "count"} for u in data["summary"]["top_users"])
+        assert all(set(u) == {"user", "count"} for u in data["user_activity"])

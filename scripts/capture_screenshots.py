@@ -217,9 +217,6 @@ def setup_mock_state(app, entries: list[AuditLogEntry]) -> None:
     # Pre-populate state data
     app.state.entries = entries
     app.state.total_entries = len(entries)
-    app.state.is_connected = True
-    app.state.connection_error = None
-    app.state.last_refresh = datetime.now(UTC)
 
     # Provide a SYNC verify_connection (dashboard calls it synchronously from a thread)
     def sync_verify_connection():

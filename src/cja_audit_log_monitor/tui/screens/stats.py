@@ -40,15 +40,15 @@ class _DaysInput(Input):
         self.screen.set_focus(None)
 
 
-class StatsScreen(ContentView):
-    """Screen for viewing statistics and analytics."""
+class StatsView(ContentView):
+    """View for viewing statistics and analytics."""
 
     def __init__(self, state: AppState, **kwargs) -> None:
-        """Initialize StatsScreen.
+        """Initialize StatsView.
 
         Args:
             state: Application state.
-            **kwargs: Additional arguments for Screen.
+            **kwargs: Additional arguments for the view.
         """
         super().__init__(state, **kwargs)
         self._daily: list[tuple[str, int]] = []
@@ -93,6 +93,7 @@ class StatsScreen(ContentView):
                 HourlyChart(id="stats-hourly-chart"),
                 classes="stats-column",
             ),
+            id="stats-charts-row",
             classes="stats-row",
         )
         yield Horizontal(

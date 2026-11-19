@@ -47,7 +47,7 @@ from .formatters import (
 from .models import API_EARLIEST, ActionType, AuditLogEntry, AuditLogQuery, ComponentType
 from .monitor import AuditLogMonitor, is_retryable
 from .notifications import AnomalyDedupFilter, NotificationManager
-from .stats import build_date_range_query, calculate_stats, generate_report
+from .stats import build_date_range_query, calculate_stats, generate_report, stats_for_json
 from .utils import user_identities
 
 P = ParamSpec("P")
@@ -226,6 +226,35 @@ def utf8_stdout(newline: str | None = None) -> Iterator[TextIO]:
     finally:
         stream.flush()
         stream.detach()  # leave sys.stdout's buffer open
+
+
+@contextmanager
+def exit_on_termination() -> Iterator[None]:
+    """Turn SIGTERM and SIGHUP into a normal exit while a file is written.
+
+    Python's default for these signals ends the process at once, which would leave the
+    hidden temp file of an export behind. A normal exit runs the cleanup instead.
+    """
+    import signal
+
+    def stop(signum: int, frame: object) -> None:
+        raise SystemExit(128 + signum)
+
+    names = ("SIGTERM", "SIGHUP")
+    saved: dict[int, Any] = {}
+    for name in names:
+        sig = getattr(signal, name, None)
+        if sig is None:  # SIGHUP does not exist on Windows
+            continue
+        try:
+            saved[sig] = signal.signal(sig, stop)
+        except ValueError:  # not the main thread, e.g. under a test runner
+            pass
+    try:
+        yield
+    finally:
+        for sig, handler in saved.items():
+            signal.signal(sig, handler)
 
 
 def setup_logging(verbose: bool) -> None:
@@ -801,7 +830,7 @@ def export(
                 return
             yield entry
 
-    with client:
+    with client, exit_on_termination():
         if format in {"csv", "tsv"}:
             query.page_size = MAX_PAGE_SIZE  # fewer requests for a long export
             source: Any = up_to_limit(client.get_logs_paginated(query))
@@ -858,7 +887,9 @@ def stats(ctx: click.Context, days: int | None, top: int, output_format: str) ->
 
     if not entries:
         if output_format == "json":
-            emit_json({"days": days, "statistics": calculate_stats([]), "anomalies": []})
+            emit_json(
+                {"days": days, "statistics": stats_for_json(calculate_stats([])), "anomalies": []}
+            )
         else:
             console.print("[dim]No audit logs found for the specified period.[/dim]")
         return
@@ -869,7 +900,7 @@ def stats(ctx: click.Context, days: int | None, top: int, output_format: str) ->
     if output_format == "json":
         data = {
             "days": days,
-            "statistics": stats_data,
+            "statistics": stats_for_json(stats_data),
             "anomalies": anomalies,
         }
         emit_json(data)
@@ -1298,7 +1329,7 @@ def report(
     json_output = json.dumps(report_data, indent=indent, default=str)
 
     if output and str(output) != "-":
-        with atomic_write(output, overwrite=force) as f:
+        with exit_on_termination(), atomic_write(output, overwrite=force) as f:
             f.write(json_output)
         err_console.print(f"[green]Report saved to {literal(str(output))}[/green]")
     else:

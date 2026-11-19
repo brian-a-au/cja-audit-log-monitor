@@ -1,7 +1,6 @@
 """Log browser screen for viewing and filtering audit logs."""
 
 from collections.abc import Iterator
-from datetime import datetime
 
 from textual.binding import Binding
 from textual.containers import Container, Horizontal
@@ -16,8 +15,8 @@ from ..widgets import FilterBar, LogTable
 from .base import ContentView, error_message
 
 
-class LogBrowserScreen(ContentView):
-    """Screen for browsing and filtering audit logs."""
+class LogBrowserView(ContentView):
+    """View for browsing and filtering audit logs."""
 
     # Page count from the last load; bounds the n key like the next button.
     _total_pages: int = 1
@@ -43,7 +42,7 @@ class LogBrowserScreen(ContentView):
 
         # The table sits side-by-side with the (initially hidden) detail panel.
         table_and_panel = Horizontal(
-            LogTable(id="log-table", show_details=False),
+            LogTable(id="log-table"),
             EntryDetailPanel(id="entry-detail-panel"),
             id="log-table-and-panel",
         )
@@ -94,7 +93,6 @@ class LogBrowserScreen(ContentView):
         table.load_entries(entries)
         self._state.entries = entries
         self._state.total_entries = total
-        self._state.last_refresh = datetime.now()
         self._state.page_loaded = True  # the export dialog may now offer "this page"
         if entries:
             self._set_table_message(None)
