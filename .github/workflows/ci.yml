@@ -21,7 +21,7 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12", "3.13", "3.14"]
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
@@ -31,6 +31,8 @@ jobs:
         run: uv sync --all-extras
       - name: Lint
         run: uv run ruff check src tests scripts
+      - name: Format
+        run: uv run ruff format --check src tests scripts
       - name: Test
         run: uv run pytest -q
 
@@ -41,7 +43,7 @@ jobs:
     if: ${{ !github.event.repository.private }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
@@ -54,6 +56,26 @@ jobs:
       - name: Test
         run: .ci/lowest/bin/pytest -q
 
+  newest:
+    name: Newest dependency versions
+    # Skipped while the repo is private (Actions minutes are limited).
+    # Run scripts/ci.sh locally instead.
+    if: ${{ !github.event.repository.private }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          python-version: "3.14"
+      - name: Install the newest allowed versions
+        run: |
+          uv venv .ci/newest --python 3.14
+          uv pip install --python .ci/newest --resolution highest -e ".[dev]"
+      - name: Test
+        run: .ci/newest/bin/pytest -q
+
   build:
     name: Build package
     # Skipped while the repo is private (Actions minutes are limited).
@@ -61,7 +83,7 @@ jobs:
     if: ${{ !github.event.repository.private }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6

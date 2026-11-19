@@ -20,6 +20,7 @@ for v in "${VERSIONS[@]}"; do
     export UV_PROJECT_ENVIRONMENT=".ci/venv-$v"
     if uv sync --quiet --all-extras --python "$v" \
         && uv run --python "$v" ruff check src tests scripts \
+        && uv run --python "$v" ruff format --check src tests scripts \
         && uv run --python "$v" pytest -q; then
         echo "==> Python $v: passed"
     else
@@ -38,6 +39,17 @@ if uv venv --quiet .ci/lowest --python 3.11 \
 else
     echo "==> Floors: FAILED"
     failed+=("floors")
+fi
+
+echo "==> Newest dependency versions (Python 3.14)"
+rm -rf .ci/newest
+if uv venv --quiet .ci/newest --python 3.14 \
+    && uv pip install --quiet --python .ci/newest --resolution highest -e ".[dev]" \
+    && .ci/newest/bin/pytest -q; then
+    echo "==> Newest: passed"
+else
+    echo "==> Newest: FAILED"
+    failed+=("newest")
 fi
 
 echo "==> Build sdist and wheel"

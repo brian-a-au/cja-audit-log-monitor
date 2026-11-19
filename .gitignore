@@ -39,7 +39,7 @@ ENV/
 !.env.example
 audit_logs_export.*
 report.json
-config.json
+config.yaml
 *.pem
 private.key
 credentials/
@@ -56,7 +56,6 @@ htmlcov/
 Thumbs.db
 
 # uv
-uv.lock
 CLAUDE.md
 
 # Local PM/planning artifacts (Superpowers brainstorms, specs, plans)
