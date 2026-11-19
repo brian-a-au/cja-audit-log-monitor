@@ -1441,6 +1441,23 @@ class TestMonitorStream:
             assert len(warnings) == 1 and "60" in warnings[0]
             screen._stop_monitoring()
 
+    async def test_huge_interval_is_refused(self, mock_app_state, monkeypatch):
+        from textual.widgets import Input
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40), notifications=True) as pilot:
+            screen = await _start_monitor_without_loop(app, pilot, monkeypatch)
+            screen._stop_monitoring()
+            await pilot.pause()
+            box = screen.query_one("#interval-input", Input)
+            box.value = "9999999999"
+            await pilot.pause()
+            screen._start_monitoring()
+            await pilot.pause()
+            assert mock_app_state.monitor.interval == 60
+            assert any("86,400" in n.message for n in app._notifications)
+            screen._stop_monitoring()
+
     async def test_good_interval_applies_on_enter(self, mock_app_state):
         from textual.widgets import Input
 

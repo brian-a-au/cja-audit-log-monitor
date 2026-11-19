@@ -27,6 +27,10 @@ logger = logging.getLogger(__name__)
 DEFAULT_CONFIG_DIR = Path.home() / ".cja-audit-log-monitor"
 DEFAULT_CONFIG_FILE = DEFAULT_CONFIG_DIR / "config.yaml"
 
+# Upper limits, so a typo cannot overflow a date or a timer.
+MAX_MONITOR_INTERVAL = 86_400  # one day, in seconds
+MAX_DAYS = 3_650  # about ten years
+
 # Parsed YAML for the load_config call in progress; read by ConfigFileSource.
 _config_file_data: ContextVar[dict[str, Any]] = ContextVar("_config_file_data", default={})
 
@@ -101,12 +105,15 @@ class CJASettings(BaseSettings):
         default=100, ge=1, le=1000, description="Default page size for queries (1 to 1000)"
     )
     default_days: int = Field(
-        default=7, ge=1, description="Default number of days for date range"
+        default=7, ge=1, le=MAX_DAYS, description="Default number of days for date range"
     )
 
     # Monitoring settings
     monitor_interval: int = Field(
-        default=60, ge=5, description="Polling interval in seconds (at least 5)"
+        default=60,
+        ge=5,
+        le=MAX_MONITOR_INTERVAL,
+        description="Polling interval in seconds (5 to 86,400)",
     )
 
     # Alert settings
@@ -146,6 +153,8 @@ class CJASettings(BaseSettings):
     def validate_endpoint_url(cls, v: str) -> str:
         """Require https, allowing plain http only for localhost (tests, local mocks)."""
         parsed = urlparse(v)
+        if parsed.username is not None or parsed.password is not None:
+            raise ValueError("must not hold a user name or password")
         if parsed.scheme == "https" and parsed.hostname:
             return v
         if parsed.scheme == "http" and parsed.hostname in ("localhost", "127.0.0.1"):
@@ -176,12 +185,15 @@ def load_config(config_path: Path | None = None, *, use_file: bool = True) -> CJ
     config_data: dict[str, Any] = {}
 
     # Determine config file path
+    explicit = config_path is not None
     if config_path is None:
         config_path = get_config_path()
 
     # Load from YAML config file if it exists
     if use_file and config_path.exists():
         config_data.update(_read_config_file(config_path))
+    elif use_file and explicit and not config_path.is_symlink():
+        logger.warning("config file %s not found; using environment only", config_path)
 
     token = _config_file_data.set(config_data)
     try:
@@ -405,5 +417,5 @@ def get_config_path() -> Path:
     # Check environment variable first
     env_path = os.getenv("CJA_CONFIG_PATH")
     if env_path:
-        return Path(env_path)
+        return Path(env_path).expanduser()
     return DEFAULT_CONFIG_FILE

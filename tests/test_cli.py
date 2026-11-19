@@ -2867,3 +2867,17 @@ def test_env_value_overriding_a_file_value_is_blamed_on_the_environment(tmp_path
 
         load_config(path)
     assert str(info.value).startswith("environment or .env: monitor_interval")
+
+
+def test_cli_config_marks_a_missing_file(tmp_path) -> None:
+    missing = tmp_path / "missing.yaml"
+    result = CliRunner().invoke(main, ["-c", str(missing), "cli", "config"])
+    assert result.exit_code == 0
+    assert "(not found)" in result.stdout
+
+
+def test_init_message_does_not_ask_for_scopes(tmp_path) -> None:
+    result = CliRunner().invoke(main, ["-c", str(tmp_path / "c.yaml"), "cli", "init"])
+    assert result.exit_code == 0
+    assert "SCOPES" not in result.stdout
+    assert ".env.example" not in result.stdout

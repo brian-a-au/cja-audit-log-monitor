@@ -986,8 +986,7 @@ def init(ctx: click.Context) -> None:
     console.print("  ORG_ID=your_org_id@AdobeOrg")
     console.print("  CLIENT_ID=your_client_id")
     console.print("  SECRET=your_client_secret")
-    console.print("  SCOPES=<copy from Developer Console>")
-    console.print("\n[dim]Or add them to a .env file. See .env.example for details.[/dim]")
+    console.print("\n[dim]Or add them to a .env file in the folder you run from.[/dim]")
 
 
 @cli.command()
@@ -1001,7 +1000,8 @@ def config(ctx: click.Context) -> None:
 
     console.print("[bold]Current Configuration[/bold]\n")
     effective_config_path = config_path or get_config_path()
-    console.print(f"Config file: {escape(str(effective_config_path))}")
+    missing = "" if effective_config_path.exists() else " (not found)"
+    console.print(f"Config file: {escape(str(effective_config_path))}{missing}")
     console.print(f"API base URL: {escape(str(settings.api_base_url))}")
     console.print(f"IMS base URL: {escape(str(settings.ims_base_url))}")
     console.print(f"Log browser page size (TUI): {settings.default_page_size}")

@@ -470,3 +470,59 @@ def test_init_refuses_a_symlink(tmp_path) -> None:
     with pytest.raises(ConfigError):
         create_default_config(link)
     assert target.read_text() == "keep me"
+
+
+@pytest.mark.parametrize(
+    ("text", "field"),
+    [("monitor_interval: 86401\n", "monitor_interval"), ("default_days: 3651\n", "default_days")],
+)
+def test_upper_limits(tmp_path, text, field) -> None:
+    path = tmp_path / "config.yaml"
+    path.write_text(text)
+    path.chmod(0o600)
+    with pytest.raises(ConfigError, match=field):
+        load_config(path)
+
+
+def test_values_at_the_upper_limits_load(tmp_path) -> None:
+    path = tmp_path / "config.yaml"
+    path.write_text("monitor_interval: 86400\ndefault_days: 3650\n")
+    path.chmod(0o600)
+    settings = load_config(path)
+    assert (settings.monitor_interval, settings.default_days) == (86400, 3650)
+
+
+def test_endpoint_with_userinfo_is_rejected() -> None:
+    with pytest.raises(ValidationError):
+        CJASettings(api_base_url="https://user:pass@cja.adobe.io")
+
+
+def test_tilde_config_path_is_expanded(monkeypatch) -> None:
+    from cja_audit_log_monitor.config import get_config_path
+
+    monkeypatch.setenv("CJA_CONFIG_PATH", "~/x.yaml")
+    assert get_config_path() == Path.home() / "x.yaml"
+
+
+def test_missing_explicit_config_warns(tmp_path, caplog) -> None:
+    missing = tmp_path / "missing.yaml"
+    with caplog.at_level(logging.WARNING):
+        load_config(missing)
+    assert f"config file {missing} not found; using environment only" in caplog.text
+
+
+def test_missing_default_config_is_quiet(caplog) -> None:
+    with caplog.at_level(logging.WARNING):
+        load_config()
+    assert "not found" not in caplog.text
+
+
+def test_first_message_names_only_the_needed_credentials(sample_settings) -> None:
+    from cja_audit_log_monitor.auth import AuthenticationError, TokenManager
+
+    with pytest.raises(AuthenticationError) as info:
+        TokenManager(CJASettings(_env_file=None)).get_token()
+    text = str(info.value)
+    assert "ORG_ID" in text and "CLIENT_ID" in text and "SECRET" in text
+    assert "SCOPES" not in text
+    assert ".env.example" not in text
