@@ -398,7 +398,7 @@ class TestExportSafety:
     ) -> None:
         mock_get_client.return_value = (self._client(sample_audit_entries), _settings())
 
-        result = runner.invoke(main, ["cli", "export", "-f", "csv", "-o", "-", "--days", "1"])
+        result = runner.invoke(main, ["cli", "export", "-F", "csv", "-o", "-", "--days", "1"])
 
         assert result.exit_code == 0, result.output
         assert result.stdout.splitlines()[0].startswith("id,timestamp")
@@ -439,7 +439,7 @@ class TestExportSafety:
         target = tmp_path / "missing" / "x.csv"
 
         result = runner.invoke(
-            main, ["cli", "export", "-f", "csv", "-o", str(target)], env={"COLUMNS": "500"}
+            main, ["cli", "export", "-F", "csv", "-o", str(target)], env={"COLUMNS": "500"}
         )
 
         assert result.exit_code == 1
@@ -888,7 +888,7 @@ class TestAnomaliesCommand:
 
         assert result.exit_code == 0
         mock_cycle.assert_called_once()
-        assert mock_cycle.call_args.args[-1] == 1
+        assert mock_cycle.call_args.args[3] == 1
 
     @patch("cja_audit_log_monitor.cli.NotificationManager")
     @patch("cja_audit_log_monitor.cli.get_client")
@@ -2217,7 +2217,7 @@ class TestExportRaces:
         self, mock_get_client: MagicMock, runner: CliRunner, sample_audit_entries
     ) -> None:
         mock_get_client.return_value = (self._client(sample_audit_entries), _settings())
-        result = runner.invoke(main, ["cli", "export", "-f", "tsv", "-o", "-", "--days", "1"])
+        result = runner.invoke(main, ["cli", "export", "-F", "tsv", "-o", "-", "--days", "1"])
         assert result.exit_code == 0, result.output
         assert result.stdout.splitlines()[0].startswith("id\ttimestamp")
 
@@ -2292,3 +2292,150 @@ class TestConfiguredDefaults:
         with runner.isolated_filesystem():
             runner.invoke(main, ["--config", "c.yaml", "cli", "init"])
             assert "output_format" not in Path("c.yaml").read_text()
+
+
+class TestConsistentFlags:
+    """Short flags mean one thing each; -F picks the format everywhere (F33)."""
+
+    @pytest.mark.parametrize(
+        "args",
+        [
+            ["tail", "-c", "x"],
+            ["monitor", "-D", "5"],
+            ["stats", "-t", "3"],
+            ["top-users", "-t", "3"],
+        ],
+    )
+    def test_clashing_short_flags_are_gone(self, runner: CliRunner, args: list[str]) -> None:
+        result = runner.invoke(main, ["cli", *args])
+        assert result.exit_code == 2
+        assert "No such option" in result.output
+
+    @patch("cja_audit_log_monitor.cli.AuditLogMonitor")
+    @patch("cja_audit_log_monitor.cli.NotificationManager")
+    @patch("cja_audit_log_monitor.cli.get_client")
+    def test_tail_component_id_long_flag_works(
+        self, mock_get_client: MagicMock, mock_nm: MagicMock, mock_monitor: MagicMock,
+        runner: CliRunner,
+    ) -> None:
+        mock_get_client.return_value = (_fake_client([]), _settings())
+        mock_monitor.return_value.successful_polls = 1
+        result = runner.invoke(main, ["cli", "tail", "--component-id", "x"])
+        assert result.exit_code == 0
+
+    @patch("cja_audit_log_monitor.cli.AuditLogMonitor")
+    @patch("cja_audit_log_monitor.cli.NotificationManager")
+    @patch("cja_audit_log_monitor.cli.get_client")
+    def test_monitor_duration_long_flag_works(
+        self, mock_get_client: MagicMock, mock_nm: MagicMock, mock_monitor: MagicMock,
+        runner: CliRunner,
+    ) -> None:
+        mock_get_client.return_value = (_fake_client([]), _settings())
+        mock_monitor.return_value.successful_polls = 1
+        result = runner.invoke(main, ["cli", "monitor", "--duration", "5"])
+        assert result.exit_code == 0
+        mock_monitor.return_value.start.assert_called_once_with(duration=5)
+
+    @pytest.mark.parametrize("command", ["stats", "top-users"])
+    @patch("cja_audit_log_monitor.cli.get_client")
+    def test_top_uses_n(
+        self, mock_get_client: MagicMock, runner: CliRunner, command: str
+    ) -> None:
+        mock_get_client.return_value = (_fake_client([]), _settings())
+        result = runner.invoke(main, ["cli", command, "-n", "3"])
+        assert result.exit_code == 0
+
+    @patch("cja_audit_log_monitor.cli.get_client")
+    def test_export_format_short_flag_is_capital_f(
+        self, mock_get_client: MagicMock, runner: CliRunner, sample_audit_entries
+    ) -> None:
+        mock_get_client.return_value = (_fake_client(sample_audit_entries), _settings())
+        result = runner.invoke(main, ["cli", "export", "-F", "csv", "-o", "-"])
+        assert result.exit_code == 0
+        assert result.stdout.startswith("id,")
+        old = runner.invoke(main, ["cli", "export", "-f", "csv", "-o", "-"])
+        assert old.exit_code == 2
+
+    @patch("cja_audit_log_monitor.cli.get_client")
+    def test_choices_ignore_case(
+        self, mock_get_client: MagicMock, runner: CliRunner
+    ) -> None:
+        mock_get_client.return_value = (_fake_client([]), _settings())
+        result = runner.invoke(main, ["cli", "find-action", "-a", "export"])
+        assert result.exit_code == 0
+        result = runner.invoke(main, ["cli", "list", "-F", "JSON"])
+        assert result.exit_code == 0
+
+    @patch("cja_audit_log_monitor.cli.get_client")
+    def test_query_presets_are_exclusive(
+        self, mock_get_client: MagicMock, runner: CliRunner
+    ) -> None:
+        mock_get_client.return_value = (_fake_client([]), _settings())
+        result = runner.invoke(main, ["cli", "query", "--today", "--yesterday"])
+        assert result.exit_code == 2
+        assert "mutually exclusive" in result.output
+
+    @pytest.mark.parametrize(
+        "args", [["component", "-i", ""], ["dashboard", "-i", "  "], ["user", "-u", ""]]
+    )
+    @patch("cja_audit_log_monitor.cli.get_client")
+    def test_blank_ids_are_usage_errors(
+        self, mock_get_client: MagicMock, runner: CliRunner, args: list[str]
+    ) -> None:
+        mock_get_client.return_value = (_fake_client([]), _settings())
+        result = runner.invoke(main, ["cli", *args])
+        assert result.exit_code == 2
+        mock_get_client.assert_not_called()
+
+    def test_help_shows_real_defaults_and_hides_none(self, runner: CliRunner) -> None:
+        result = runner.invoke(main, ["cli", "list", "--help"], env={"COLUMNS": "200"})
+        assert "default: 50" in " ".join(result.output.split())
+        stats_help = runner.invoke(main, ["cli", "stats", "--help"], env={"COLUMNS": "200"})
+        assert "[default: None]" not in stats_help.output
+        assert "from config" in " ".join(stats_help.output.split())
+        monitor_help = runner.invoke(main, ["cli", "monitor", "--help"], env={"COLUMNS": "200"})
+        assert "[default: None]" not in monitor_help.output
+        assert "from config" in " ".join(monitor_help.output.split())
+
+
+class TestJsonFormatEverywhere:
+    """Every read command can print one JSON document on stdout; progress is on stderr."""
+
+    @pytest.mark.parametrize(
+        ("args", "keys"),
+        [
+            (["dashboard", "-i", "d1"], {"dashboard_id", "entries", "count"}),
+            (["find-action", "-a", "CREATE"], {"action", "days", "entries", "count"}),
+            (["top-users"], {"days", "users"}),
+            (["timeline"], {"days", "daily", "hourly"}),
+            (["anomalies"], {"anomalies", "count"}),
+        ],
+    )
+    @pytest.mark.parametrize("empty", [False, True])
+    @patch("cja_audit_log_monitor.cli.NotificationManager")
+    @patch("cja_audit_log_monitor.cli.get_client")
+    def test_format_json_is_parseable(
+        self,
+        mock_get_client: MagicMock,
+        mock_nm: MagicMock,
+        runner: CliRunner,
+        sample_audit_entries,
+        args: list[str],
+        keys: set[str],
+        empty: bool,
+    ) -> None:
+        entries = [] if empty else sample_audit_entries
+        client = _fake_client(entries)
+        client.get_component_logs.return_value = entries
+        mock_get_client.return_value = (client, _settings())
+        nm = mock_nm.return_value.__enter__.return_value
+        nm.is_configured.return_value = False
+        nm.pop_first_failure.return_value = None
+
+        result = runner.invoke(main, ["cli", *args, "-F", "json"])
+
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.stdout)
+        assert keys <= set(data)
+        if "count" in data and "entries" in data:
+            assert data["count"] == len(entries)
