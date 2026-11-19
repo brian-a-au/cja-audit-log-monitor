@@ -4463,3 +4463,108 @@ async def test_quit_during_hung_request_exits_fast(fake_api, tmp_path, monkeypat
     assert elapsed < 2, f"quit took {elapsed:.1f}s"
     assert [t for t in built if t > pressed] == [], "a new HTTP client was built after quit"
     assert len(fake_api.requests) == requests_before, "a request was sent after quit"
+
+
+# ---------------------------------------------------------------------------
+# A late or failing load never ends the app (G32, G34)
+# ---------------------------------------------------------------------------
+
+
+async def test_on_error_that_raises_does_not_end_the_app(mock_app_state) -> None:
+    app = _make_app(mock_app_state)
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        view = app._screens["dashboard"]
+
+        def fetch():
+            raise RuntimeError("fetch failed")
+
+        def on_error(error):
+            raise ValueError("the error handler failed too")
+
+        view.run_load(fetch, lambda result: None, on_error=on_error)
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert app._exception is None
+        assert app.is_running
+
+
+async def test_verify_result_during_reload_is_dropped(mock_app_state, monkeypatch) -> None:
+    """The config view's verify that ends while the view is rebuilt is dropped, no crash."""
+    import asyncio
+    import threading
+
+    started, release, queued = threading.Event(), threading.Event(), threading.Event()
+    ok = dict(mock_app_state.client.verify_connection.return_value)
+    slow: list[int] = []
+
+    def verify():
+        if slow:
+            slow.pop()
+            started.set()
+            release.wait(10)
+        return ok
+
+    mock_app_state.client.verify_connection.side_effect = verify
+    monkeypatch.setattr(mock_app_state, "reload_settings", lambda: None)
+    app = _make_app(mock_app_state)
+    async with app.run_test(size=(140, 40), notifications=True) as pilot:
+        await pilot.press("c")
+        await pilot.pause()
+        view = app._screens["settings"]
+        slow.append(1)
+        view.refresh_data()
+        assert await asyncio.to_thread(started.wait, 10)
+        original = app.call_from_thread
+
+        def spy(callback, *args, **kwargs):
+            queued.set()
+            return original(callback, *args, **kwargs)
+
+        app.call_from_thread = spy
+        real_mount_all = view.mount_all
+
+        def mount_all(widgets, **kwargs):
+            # recompose() removed the old children; the old request ends right now.
+            release.set()
+            assert queued.wait(5)
+            return real_mount_all(widgets, **kwargs)
+
+        monkeypatch.setattr(view, "mount_all", mount_all)
+        await view._reload_settings()
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert app._exception is None
+        assert app.is_running
+
+
+@pytest.mark.parametrize("outcome", ["fails", "succeeds"])
+async def test_alert_test_run_across_reload_is_dropped(mock_app_state, outcome) -> None:
+    """A "test rules" run that started before a reload does not land after it (G34)."""
+    import asyncio
+    import threading
+
+    started, release = threading.Event(), threading.Event()
+
+    def get_all_logs(*args, **kwargs):
+        started.set()
+        release.wait(10)
+        if outcome == "fails":
+            raise RuntimeError("Request failed: client has been closed")
+        return mock_app_state.client.get_logs_sample.return_value[0]
+
+    mock_app_state.client.get_all_logs.side_effect = get_all_logs
+    app = _make_app(mock_app_state)
+    async with app.run_test(size=(140, 40), notifications=True) as pilot:
+        await pilot.press("a")
+        await pilot.pause()
+        view = app._screens["alerts"]
+        app.query_one("#test-rules").press()
+        assert await asyncio.to_thread(started.wait, 10)
+        before = _plain(view.query_one("#test-results", Static))
+        app.settings_reloaded()
+        release.set()
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert _plain(view.query_one("#test-results", Static)) == before
+        assert "disconnected" not in _status_text(app)

@@ -331,6 +331,8 @@ class CJAAuditApp(App):
         the defaults up when they are first built. The config view redraws itself.
         """
         for name in self._mounted_views:
+            # A load sent with the old settings must not land after the reload.
+            self._screens[name].cancel_loads()
             if name != "settings":
                 self._screens[name].on_settings_reloaded()
 

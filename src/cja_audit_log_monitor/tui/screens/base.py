@@ -210,9 +210,15 @@ class ContentView(Vertical):
                 callback(value)
             except Exception as error:  # a failure while showing data is shown too
                 if callback is handle_error:
-                    raise
+                    # Showing the error failed (e.g. the view is being rebuilt). Raising
+                    # here would end the app, so log it and leave the view as it is.
+                    logger.exception("Showing a load error failed")
+                    return
                 logger.exception("Applying loaded data failed")
-                handle_error(error)
+                try:
+                    handle_error(error)
+                except Exception:
+                    logger.exception("Showing a load error failed")
             finally:
                 self.set_loading(False)
 
@@ -225,6 +231,11 @@ class ContentView(Vertical):
                 self.app.call_from_thread(deliver, apply, result)
 
         self.run_worker(work, group="load", exclusive=True, thread=True)
+
+    def cancel_loads(self) -> None:
+        """Drop the result of any load in progress (e.g. one sent before a settings reload)."""
+        self._load_generation += 1
+        self.set_loading(False)
 
     def show_load_error(self, error: Exception) -> None:
         """Show why a load failed in place of the view body, and in the header."""
