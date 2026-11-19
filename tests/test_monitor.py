@@ -584,10 +584,24 @@ class TestPollErrors:
         err_console.print.assert_called_once()
 
     def test_stopping_message_prints_once(self, mock_client: MagicMock) -> None:
+        """Two signals, one message, printed by start() and not by the signal handler."""
+        import itertools
+
         console = MagicMock()
-        monitor = AuditLogMonitor(mock_client, console=console, interval=1)
-        monitor._signal_handler(2, None)
-        monitor._signal_handler(15, None)
+        mock_client.get_logs.return_value = AuditLogResponse(content=[], last=True)
+        monitor = AuditLogMonitor(mock_client, console=console, interval=5)
+        ticks = itertools.count(0, 1)
+
+        def sleep(seconds):
+            monitor._signal_handler(2, None)
+            monitor._signal_handler(15, None)
+            assert not any("Monitor stopped" in str(c) for c in console.print.call_args_list)
+
+        with (
+            patch("cja_audit_log_monitor.monitor.time.monotonic", lambda: next(ticks)),
+            patch("cja_audit_log_monitor.monitor.time.sleep", sleep),
+        ):
+            monitor.start()
         stops = [c for c in console.print.call_args_list if "Monitor stopped" in str(c)]
         assert len(stops) == 1
 

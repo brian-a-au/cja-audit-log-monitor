@@ -163,6 +163,7 @@ class AuditLogMonitor:
         self._in_poll = False
         # True once Ctrl+C or SIGTERM stopped the monitor.
         self.stopped_by_user = False
+        self._interrupted = False
         self._on_new_entry: Callable[[AuditLogEntry], None] | None = None
 
     def _get_new_entries(self) -> list[AuditLogEntry]:
@@ -295,12 +296,13 @@ class AuditLogMonitor:
         A poll can block on the network or on a webhook for minutes, so waiting for it
         would make Ctrl+C look broken. The entries of an interrupted poll are dropped.
         """
+        # Only set flags and raise here. A signal handler runs in the middle of whatever
+        # the main thread was doing, possibly inside Rich, so printing from it can hang;
+        # start() prints "Monitor stopped." once the loop has ended.
         self._running = False
         self.stopped_by_user = True
-        if not self._stop_announced:
-            self._stop_announced = True
-            self.console.print("\n[yellow]Monitor stopped.[/yellow]")
-        if self._in_poll:
+        if self._in_poll and not self._interrupted:
+            self._interrupted = True  # one interrupt; a second Ctrl+C must not break cleanup
             raise KeyboardInterrupt
 
     def _run_poll(self, status: Status) -> None:
@@ -361,6 +363,7 @@ class AuditLogMonitor:
         """
         self._running = True
         self._stop_announced = False
+        self._interrupted = False
 
         # Register signal handlers
         original_sigint = signal.signal(signal.SIGINT, self._signal_handler)
@@ -405,6 +408,9 @@ class AuditLogMonitor:
             signal.signal(signal.SIGINT, original_sigint)
             signal.signal(signal.SIGTERM, original_sigterm)
             self._running = False
+            if self.stopped_by_user and not self._stop_announced:
+                self._stop_announced = True
+                self.console.print("\n[yellow]Monitor stopped.[/yellow]")
 
     def stop(self) -> None:
         """Stop the monitor."""
