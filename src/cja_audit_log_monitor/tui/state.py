@@ -103,6 +103,8 @@ class AppState:
         self.connection_error: str | None = None
         self.config_error: str | None = None
         self.config_error_summary: str | None = None
+        # Names of rules turned off this session; kept across a settings reload.
+        self._disabled_rules: set[str] = set()
         self.last_refresh: datetime | None = None
 
     @property
@@ -143,7 +145,11 @@ class AppState:
     def alert_engine(self) -> AlertEngine:
         """Get alert engine, creating if necessary."""
         if self._alert_engine is None:
-            self._alert_engine = AlertEngine(self.settings.alert_rules or None)
+            engine = AlertEngine(self.settings.alert_rules or None)
+            for rule in engine.rules:  # toggles from before a reload stay as they were
+                if rule.name in self._disabled_rules:
+                    rule.enabled = False
+            self._alert_engine = engine
         return self._alert_engine
 
     def new_test_engine(self) -> AlertEngine:
@@ -160,6 +166,7 @@ class AppState:
         monitor worker mid-``check_alerts`` finishes on the old engine and the next
         call picks up the new one. Nothing is mutated in place, so nothing can crash.
         """
+        self._disabled_rules = set()
         self._alert_engine = AlertEngine(self.settings.alert_rules or None)
 
     @property
@@ -180,17 +187,27 @@ class AppState:
     def reload_settings(self) -> None:
         """Re-read the config file and drop everything built from the old settings.
 
-        Clears the cached settings (and any config warning), the alert engine, the
-        notification manager and the client; each is rebuilt lazily from the new
-        settings on next use.
+        The file is read first. If it is broken, nothing changes: the working settings,
+        client and rules stay, the header shows the problem, and ConfigError is raised.
+        Otherwise the alert engine, the notification manager and the client are rebuilt
+        lazily from the new settings, and rules turned off in this session stay off.
 
         Raises:
             RuntimeError: While the monitor runs. Closing the client would break its
                 in-flight request, and a new engine would drop its event history.
+            ConfigError: The config file is broken; the current settings are kept.
         """
         if self.monitor.is_running:
             raise RuntimeError("stop the monitor first")
-        self._settings = None
+        try:
+            new_settings = load_config(self._config_path)
+        except ConfigError as e:
+            self.config_error = str(e)
+            self.config_error_summary = e.summary
+            raise
+        if self._alert_engine is not None:
+            self._disabled_rules = {r.name for r in self._alert_engine.rules if not r.enabled}
+        self._settings = new_settings
         self.config_error = None
         self.config_error_summary = None
         self.is_connected = False
@@ -200,7 +217,7 @@ class AppState:
             self._notification_manager.close()
             self._notification_manager = None
         self.refresh_client()
-        self.apply_settings_defaults()  # loads now, so a bad file sets the config warning
+        self.apply_settings_defaults()
 
     def apply_settings_defaults(self) -> None:
         """Start the page size, monitor interval and stats days from the settings.

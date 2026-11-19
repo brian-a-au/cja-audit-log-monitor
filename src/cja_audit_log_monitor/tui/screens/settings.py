@@ -6,6 +6,7 @@ from textual.containers import Container, Horizontal, Vertical
 from textual.widget import Widget
 from textual.widgets import Button, LoadingIndicator, Static
 
+from ...config import ConfigError
 from ...formatters import literal, resolve_tcss_markup
 from ...utils import display_path
 from .base import ContentView
@@ -190,6 +191,14 @@ class SettingsScreen(ContentView):
             self._state.reload_settings()
         except RuntimeError as error:
             self.app.notify(str(error), severity="warning")
+            return
+        except ConfigError as error:
+            self.app.set_connection_status(self.app._connection_status)
+            self.app.notify(
+                f"{error.summary} · keeping the current settings",
+                severity="warning",
+                markup=False,
+            )
             return
         self.app.settings_reloaded()
         await self.recompose()
