@@ -18,7 +18,11 @@ from pydantic_settings import (
     PydanticBaseSettingsSource,
     SettingsConfigDict,
 )
-from pydantic_settings.exceptions import SettingsError
+
+try:
+    from pydantic_settings import SettingsError
+except ImportError:  # pydantic-settings 2.0 keeps it in the sources module
+    from pydantic_settings.sources import SettingsError  # type: ignore[no-redef,attr-defined]
 
 from .models import AlertRule, NotificationConfig, WebhookConfig
 
