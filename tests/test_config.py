@@ -400,3 +400,25 @@ def test_no_config_mistake_crashes_or_leaks(bad_config) -> None:
     assert SECRET_MARK not in str(info.value)
     assert SECRET_MARK not in info.value.summary
     assert "\n" not in info.value.summary
+
+
+@pytest.mark.parametrize(
+    ("yaml_text", "where", "key"),
+    [
+        ("alert_rules:\n  - name: r\n    treshold_count: 5\n", "alert_rules[0]", "treshold_count"),
+        ("alert_rules:\n  - name: r\n    per-user: true\n", "alert_rules[0]", "per-user"),
+        ("notifications:\n  slack_webhook: https://x.example.com\n", "notifications",
+         "slack_webhook"),
+        ("notifications:\n  webhooks:\n    - url: https://x.example.com\n      time_out: 5\n",
+         "notifications.webhooks[0]", "time_out"),
+    ],
+    ids=["rule-typo", "rule-dash", "slack-typo", "webhook-typo"],
+)
+def test_nested_typo_warns(tmp_path, caplog, yaml_text, where, key) -> None:
+    path = tmp_path / "config.yaml"
+    path.write_text(yaml_text)
+    path.chmod(0o600)
+    with caplog.at_level(logging.WARNING):
+        load_config(path)
+    expected = f"{path}: {where}: ignoring unknown setting {key!r}"
+    assert expected in caplog.text

@@ -11,7 +11,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 import yaml
-from pydantic import Field, SecretStr, ValidationError, field_validator
+from pydantic import BaseModel, Field, SecretStr, ValidationError, field_validator
 from pydantic.fields import FieldInfo
 from pydantic_settings import (
     BaseSettings,
@@ -20,7 +20,7 @@ from pydantic_settings import (
 )
 from pydantic_settings.exceptions import SettingsError
 
-from .models import AlertRule, NotificationConfig
+from .models import AlertRule, NotificationConfig, WebhookConfig
 
 logger = logging.getLogger(__name__)
 
@@ -261,7 +261,32 @@ def _read_config_file(config_path: Path) -> dict[str, Any]:
     for key in yaml_config:
         if key not in CJASettings.model_fields:
             logger.warning("%s: ignoring unknown setting %r", config_path, key)
+    _warn_nested_unknown_keys(yaml_config, config_path)
     return yaml_config
+
+
+def _warn_unknown_keys(data: Any, model: type[BaseModel], where: str, path: Path) -> None:
+    """Warn about keys of ``data`` that ``model`` does not have. Non-dicts are left to pydantic."""
+    if not isinstance(data, dict):
+        return
+    for key in data:
+        if key not in model.model_fields:
+            logger.warning("%s: %s: ignoring unknown setting %r", path, where, key)
+
+
+def _warn_nested_unknown_keys(config: dict[str, Any], path: Path) -> None:
+    """Warn about typos inside rules, the notifications block and each webhook."""
+    rules = config.get("alert_rules")
+    if isinstance(rules, list):
+        for index, rule in enumerate(rules):
+            _warn_unknown_keys(rule, AlertRule, f"alert_rules[{index}]", path)
+    notifications = config.get("notifications")
+    _warn_unknown_keys(notifications, NotificationConfig, "notifications", path)
+    if isinstance(notifications, dict) and isinstance(notifications.get("webhooks"), list):
+        for index, webhook in enumerate(notifications["webhooks"]):
+            _warn_unknown_keys(
+                webhook, WebhookConfig, f"notifications.webhooks[{index}]", path
+            )
 
 
 def _warn_if_not_private(config_path: Path) -> None:
