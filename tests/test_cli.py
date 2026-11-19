@@ -935,7 +935,7 @@ class TestAnomaliesCommand:
         nm_instance.__exit__ = MagicMock(return_value=False)
         nm_instance.is_configured = MagicMock(return_value=False)
         nm_instance.notify_anomaly = MagicMock(return_value=set())
-        nm_instance.pop_first_failure = MagicMock(return_value=None)
+        nm_instance.pop_failures = MagicMock(return_value=[])
         nm_instance.config = settings.notifications
         nm_instance.channels = MagicMock(
             return_value=["slack"] if settings.notifications.slack_webhook_url else []
@@ -979,7 +979,7 @@ class TestAnomaliesCommand:
         nm_instance.__exit__ = MagicMock(return_value=False)
         nm_instance.is_configured = MagicMock(return_value=True)
         nm_instance.notify_anomaly = MagicMock(return_value={"slack"})
-        nm_instance.pop_first_failure = MagicMock(return_value=None)
+        nm_instance.pop_failures = MagicMock(return_value=[])
         nm_instance.config = settings.notifications
         nm_instance.channels = MagicMock(
             return_value=["slack"] if settings.notifications.slack_webhook_url else []
@@ -1030,7 +1030,7 @@ class TestAnomaliesCommand:
         nm_instance.__exit__ = MagicMock(return_value=False)
         nm_instance.is_configured = MagicMock(return_value=True)
         nm_instance.notify_anomaly = MagicMock(return_value=set())
-        nm_instance.pop_first_failure = MagicMock(return_value=None)
+        nm_instance.pop_failures = MagicMock(return_value=[])
         nm_instance.config = settings.notifications
         nm_instance.channels = MagicMock(
             return_value=["slack"] if settings.notifications.slack_webhook_url else []
@@ -1076,7 +1076,7 @@ class TestAnomaliesCommand:
         nm_instance.__exit__ = MagicMock(return_value=False)
         nm_instance.is_configured = MagicMock(return_value=False)
         nm_instance.notify_anomaly = MagicMock(return_value=set())
-        nm_instance.pop_first_failure = MagicMock(return_value=None)
+        nm_instance.pop_failures = MagicMock(return_value=[])
         nm_instance.config = settings.notifications
         nm_instance.channels = MagicMock(
             return_value=["slack"] if settings.notifications.slack_webhook_url else []
@@ -1092,7 +1092,7 @@ class TestAnomaliesCommand:
         assert result.exit_code == 0
         # No channel is configured, so nothing is sent; failures are still drained.
         assert nm_instance.notify_anomaly.call_count == 0
-        assert nm_instance.pop_first_failure.call_count >= 1
+        assert nm_instance.pop_failures.call_count >= 1
 
     @patch("cja_audit_log_monitor.cli.analyze_for_anomalies")
     @patch("cja_audit_log_monitor.cli.get_client")
@@ -1210,7 +1210,7 @@ class TestAnomaliesCommand:
         nm_instance.__exit__ = MagicMock(return_value=False)
         nm_instance.is_configured = MagicMock(return_value=True)
         nm_instance.notify_anomaly = MagicMock(return_value={"slack"})
-        nm_instance.pop_first_failure = MagicMock(return_value=None)
+        nm_instance.pop_failures = MagicMock(return_value=[])
         nm_instance.config = settings.notifications
         nm_instance.channels = MagicMock(
             return_value=["slack"] if settings.notifications.slack_webhook_url else []
@@ -1264,7 +1264,7 @@ class TestAnomaliesCommand:
         nm_instance.__exit__ = MagicMock(return_value=False)
         nm_instance.is_configured = MagicMock(return_value=False)
         nm_instance.notify_anomaly = MagicMock(return_value=set())
-        nm_instance.pop_first_failure = MagicMock(return_value=None)
+        nm_instance.pop_failures = MagicMock(return_value=[])
         nm_instance.config = settings.notifications
         nm_instance.channels = MagicMock(
             return_value=["slack"] if settings.notifications.slack_webhook_url else []
@@ -1317,7 +1317,7 @@ class TestAnomaliesCommand:
         nm_instance.notify_anomaly = MagicMock(
             side_effect=[RuntimeError("boom"), {"slack"}]
         )
-        nm_instance.pop_first_failure = MagicMock(return_value=None)
+        nm_instance.pop_failures = MagicMock(return_value=[])
         nm_instance.config = settings.notifications
         nm_instance.channels = MagicMock(
             return_value=["slack"] if settings.notifications.slack_webhook_url else []
@@ -1377,7 +1377,7 @@ class TestAnomaliesCommand:
             "Notification delivery failed (slack); subsequent failures "
             "suppressed for this session — check logs."
         )
-        nm_instance.pop_first_failure = MagicMock(side_effect=[warning_text, None])
+        nm_instance.pop_failures = MagicMock(return_value=[warning_text])
         mock_nm_cls.return_value = nm_instance
 
         mock_analyze.return_value = [
@@ -2214,7 +2214,7 @@ def test_anomaly_dispatch_error_log_has_no_exception_text(caplog):
     nm = MagicMock()
     nm.channels.return_value = ["slack"]
     nm.notify_anomaly.side_effect = RuntimeError("https://hooks.slack.com/SECRET")
-    nm.pop_first_failure.return_value = None
+    nm.pop_failures.return_value = []
     anomaly = {"type": "t", "description": "d"}
 
     with patch("cja_audit_log_monitor.cli.analyze_for_anomalies", return_value=[anomaly]):
@@ -2506,7 +2506,7 @@ class TestJsonFormatEverywhere:
         mock_get_client.return_value = (client, _settings())
         nm = mock_nm.return_value.__enter__.return_value
         nm.is_configured.return_value = False
-        nm.pop_first_failure.return_value = None
+        nm.pop_failures.return_value = []
 
         result = runner.invoke(main, ["cli", *args, "-F", "json"])
 
@@ -2528,7 +2528,7 @@ class TestSmallCliBehaviours:
         mock_get_client.return_value = (_fake_client([]), _settings())
         nm = mock_nm.return_value.__enter__.return_value
         nm.is_configured.return_value = False
-        nm.pop_first_failure.return_value = None
+        nm.pop_failures.return_value = []
 
         result = runner.invoke(main, ["cli", "anomalies"])
 
@@ -2543,7 +2543,7 @@ class TestSmallCliBehaviours:
         mock_get_client.return_value = (_fake_client([]), _settings())
         nm = mock_nm.return_value.__enter__.return_value
         nm.is_configured.return_value = False
-        nm.pop_first_failure.return_value = None
+        nm.pop_failures.return_value = []
 
         result = runner.invoke(main, ["cli", "anomalies", "-F", "json", "--lookback", "6"])
 
@@ -2713,7 +2713,7 @@ class TestWatchJsonAndHelpDefaults:
         mock_get_client.return_value = (_fake_client([]), _settings())
         nm = mock_nm.return_value.__enter__.return_value
         nm.is_configured.return_value = False
-        nm.pop_first_failure.return_value = None
+        nm.pop_failures.return_value = []
         mock_sleep.side_effect = [None, KeyboardInterrupt]
 
         result = runner.invoke(main, ["cli", "anomalies", "--watch", "-F", "json"])
@@ -3073,3 +3073,20 @@ class TestAnomalyDeliveryPerChannel:
         self._cycles(self._manager(webhook=True), [self._deletes()] * 3)
         assert len(self._posts(httpx_mock, self.HOOK)) == 1
         assert len(self._posts(httpx_mock, self.SLACK)) == 2  # one failure, one success
+
+
+def test_verbose_does_not_log_httpcore_internals(fake_api, tmp_path) -> None:
+    """-v shows the tool's own debug lines, not httpcore's (which dump raw headers)."""
+    import subprocess
+
+    from .fakeapi import command, raw_entry
+
+    fake_api.entries = [raw_entry(1)]
+    result = subprocess.run(
+        [*command(), "-v", "cli", "list", "-F", "json"],
+        env=fake_api.env(tmp_path / "missing.yaml"),
+        cwd=tmp_path, capture_output=True, text=True, timeout=60,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "receive_response_headers" not in result.stderr
+    assert "send_request_headers" not in result.stderr

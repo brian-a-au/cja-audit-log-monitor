@@ -224,8 +224,7 @@ class AuditLogMonitor:
                             type(e).__name__,
                         )
             if self.notification_manager:
-                warning = self.notification_manager.pop_first_failure()
-                if warning:
+                for warning in self.notification_manager.pop_failures():
                     self._print_warning(str(warning))
 
         self._display_entry(entry)

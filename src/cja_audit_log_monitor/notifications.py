@@ -109,8 +109,8 @@ class NotificationManager:
         if not self._failure_warned.get(channel_key):
             self._failure_warned[channel_key] = True
             self._pending_warnings.append(
-                f"Notification delivery failed ({label}); "
-                f"subsequent failures suppressed for this session — check logs."
+                f"Notification delivery failed ({label}). This warning shows again "
+                f"if the channel fails after it works again."
             )
 
     def _mark_success(self, channel_key: str) -> None:
@@ -272,14 +272,15 @@ class NotificationManager:
             )
             response.raise_for_status()
             logger.info("Webhook notification sent to %s", redact_url(webhook.url))
-            self._mark_success(webhook.url)
+            self._mark_success(self._webhook_key(webhook))
             return True
 
         except (httpx.HTTPError, httpx.InvalidURL) as e:
             # str(e) can embed the full URL, so log only the type, status and host.
             label = redact_url(webhook.url)
             logger.error("Failed to send webhook to %s: %s", label, _describe_error(e))
-            self._mark_failure(webhook.url, label)
+            key = self._webhook_key(webhook)
+            self._mark_failure(key, f"{key.replace(':', ' ')} ({label})")
             return False
 
     def send_slack(
@@ -322,7 +323,7 @@ class NotificationManager:
 
         except (httpx.HTTPError, httpx.InvalidURL) as e:
             logger.error("Failed to send Slack notification: %s", _describe_error(e))
-            self._mark_failure("slack", f"slack, {redact_url(url)}")
+            self._mark_failure("slack", f"slack ({redact_url(url)})")
             return False
 
     def notify_alert(
@@ -423,6 +424,18 @@ class NotificationManager:
                 },
             ]
         }
+
+    def _webhook_key(self, webhook: WebhookConfig) -> str:
+        """``webhook:<n>``, n counting from 1 in the config, so two hooks on one host differ."""
+        for index, configured in enumerate(self.config.webhooks, 1):
+            if configured is webhook:
+                return f"webhook:{index}"
+        return f"webhook:{redact_url(webhook.url)}"
+
+    def pop_failures(self) -> list[str]:
+        """Return and consume every pending failure warning (one per failing channel)."""
+        warnings, self._pending_warnings = self._pending_warnings, []
+        return warnings
 
     def pop_first_failure(self) -> str | None:
         """Return and consume the next pending failure warning, or None.

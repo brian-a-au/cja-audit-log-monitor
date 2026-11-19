@@ -122,7 +122,7 @@ class TestNotificationDispatch:
         state = AppState()
         fake_nm = MagicMock()
         fake_nm.is_configured.return_value = True
-        fake_nm.pop_first_failure.return_value = None
+        fake_nm.pop_failures.return_value = []
         state._notification_manager = fake_nm
 
         fa = FiredAlert(rule_name="r", message="m", entry=sample_audit_entry, panel=MagicMock())
@@ -152,7 +152,7 @@ class TestNotificationDispatch:
         fake_nm = MagicMock()
         fake_nm.is_configured.return_value = True
         fake_nm.notify_alert.side_effect = RuntimeError("boom")
-        fake_nm.pop_first_failure.return_value = None
+        fake_nm.pop_failures.return_value = []
         state._notification_manager = fake_nm
 
         fa = FiredAlert(rule_name="r", message="m", entry=sample_audit_entry, panel=MagicMock())
@@ -1120,11 +1120,28 @@ class TestMonitorScreen:
 
             assert polls == []
 
+    async def test_tui_monitor_shows_every_channel_failure(self, mock_app_state, monkeypatch):
+        nm = MagicMock()
+        nm.pop_failures.side_effect = [[], ["webhook 1 failed", "webhook 2 failed"], [], []]
+        nm.is_configured.return_value = False
+        mock_app_state._notification_manager = nm
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40), notifications=True) as pilot:
+            screen = await _start_monitor_without_loop(app, pilot, monkeypatch)
+            await _drive_poll(screen, pilot)  # baseline
+            await _drive_poll(screen, pilot)
+            messages = lambda: [n.message for n in app._notifications]  # noqa: E731
+            assert await _wait_for(
+                lambda: "webhook 1 failed" in messages() and "webhook 2 failed" in messages(),
+                pilot,
+            )
+            screen._stop_monitoring()
+
     async def test_monitor_shows_a_delivery_failure_warning(self, mock_app_state, monkeypatch):
         """A queued delivery failure is drained after a poll and shown as a toast."""
         expected = "Notification delivery failed (slack, hooks.slack.com/...)"
         nm = MagicMock()
-        nm.pop_first_failure.side_effect = [None, expected, None, None]
+        nm.pop_failures.side_effect = [[], [expected], [], []]
         nm.is_configured.return_value = False
         mock_app_state._notification_manager = nm
         app = _make_app(mock_app_state)

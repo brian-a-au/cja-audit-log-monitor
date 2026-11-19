@@ -334,9 +334,7 @@ class MonitorScreen(ContentView):
                     return
                 fired = self._state.check_alerts(new_entries)
             # A delivery-failure warning is drained after every poll, as the CLI does.
-            warning = self._state.notification_manager.pop_first_failure()
-            if warning:
-                warnings.append(warning)
+            warnings.extend(self._state.notification_manager.pop_failures())
         except Exception as e:
             # A bug in local alert code is not an API failure: the poll itself worked.
             logger.exception("Monitor alert check failed")

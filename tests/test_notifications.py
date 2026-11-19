@@ -614,3 +614,32 @@ class TestDeliveryDetails:
         manager.close()
         assert http.is_closed
         assert manager._client is None
+
+
+class TestFailureWarnings:
+    """One warning per failing channel, each with its own label (G20, G43)."""
+
+    def test_two_webhooks_on_one_host_give_two_labelled_warnings(self, httpx_mock):
+        hooks = [
+            WebhookConfig(url="https://a.example.com/one?token=x"),
+            WebhookConfig(url="https://a.example.com/two?token=y"),
+        ]
+        manager = NotificationManager(NotificationConfig(webhooks=hooks))
+        for hook in hooks:
+            httpx_mock.add_response(url=hook.url, status_code=500)
+        manager.notify_alert("r", "m")
+        warnings = manager.pop_failures()
+        assert len(warnings) == 2
+        assert warnings[0] != warnings[1]
+        assert "webhook 1 (" in warnings[0] and "webhook 2 (" in warnings[1]
+        assert manager.pop_failures() == []
+
+    def test_failure_warning_text_says_when_it_returns(self, httpx_mock):
+        url = "https://hooks.slack.com/services/T/B/x"
+        manager = NotificationManager(NotificationConfig(slack_webhook_url=url))
+        httpx_mock.add_response(url=url, status_code=500)
+        manager.send_slack("r", "m")
+        (warning,) = manager.pop_failures()
+        assert warning.startswith("Notification delivery failed (slack (")
+        assert "shows again if the channel fails after it works again" in warning
+        assert "suppressed for this session" not in warning

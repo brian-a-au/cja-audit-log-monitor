@@ -162,6 +162,9 @@ def check_output_path(output: Path | None, force: bool) -> None:
 def setup_logging(verbose: bool) -> None:
     """Configure logging based on verbosity."""
     level = logging.DEBUG if verbose else logging.WARNING
+    # httpcore's debug lines dump raw headers (a redirect target can hold a webhook
+    # secret) and fill the screen; -v is for this tool's own lines.
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
     logging.basicConfig(
         level=level,
         format="%(message)s",
@@ -997,7 +1000,7 @@ def _run_anomalies_cycle(
         try:
             dedup.mark_sent(anomaly, nm.notify_anomaly(anomaly, channels=todo))
         except Exception as e:
-            # Network failures are surfaced via pop_first_failure; this catches
+            # Network failures are surfaced via pop_failures; this catches
             # unexpected programming errors so one bad anomaly doesn't kill the cycle.
             # Log only the type: the message and traceback locals could hold a webhook URL.
             logging.getLogger(__name__).error(
@@ -1005,10 +1008,7 @@ def _run_anomalies_cycle(
             )
     dedup.forget_missing(raw_anomalies)
 
-    while True:
-        warning = nm.pop_first_failure()
-        if warning is None:
-            break
+    for warning in nm.pop_failures():
         err_console.print(f"[yellow]⚠ {escape(str(warning))}[/yellow]")
 
 
