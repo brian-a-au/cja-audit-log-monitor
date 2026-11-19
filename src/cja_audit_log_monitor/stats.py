@@ -2,6 +2,7 @@
 
 from collections import Counter
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from .models import AuditLogEntry, AuditLogQuery
 from .utils import group_by_user, to_local
@@ -187,12 +188,13 @@ def generate_report(entries: list[AuditLogEntry]) -> dict:
     Returns:
         Dictionary containing all report data.
     """
+    hourly = get_hourly_distribution(entries)
     return {
-        "summary": calculate_stats(entries),
-        "user_activity": get_user_activity(entries)[:20],
+        "summary": stats_for_json(calculate_stats(entries)),
+        "user_activity": users_for_json(get_user_activity(entries)[:20]),
         "action_distribution": get_action_distribution(entries),
         "component_distribution": get_component_distribution(entries),
-        "hourly_distribution": get_hourly_distribution(entries),
+        "hourly_distribution": {f"{hour:02d}": count for hour, count in hourly.items()},
         "daily_distribution": get_daily_distribution(entries),
         "trend_7_day": get_trend(entries, days=7),
     }
@@ -214,3 +216,13 @@ def build_date_range_query(days: int) -> AuditLogQuery:
         start_date=start_date,
         end_date=end_date,
     )
+
+
+def users_for_json(users: list[tuple[str, int]]) -> list[dict[str, Any]]:
+    """``(user, count)`` pairs as the objects every JSON output uses."""
+    return [{"user": user, "count": count} for user, count in users]
+
+
+def stats_for_json(stats: dict[str, Any]) -> dict[str, Any]:
+    """``calculate_stats`` output with ``top_users`` as objects, for JSON output."""
+    return {**stats, "top_users": users_for_json(stats["top_users"])}

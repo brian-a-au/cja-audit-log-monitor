@@ -108,10 +108,12 @@ def test_group_by_user_never_merges_two_accounts() -> None:
     from cja_audit_log_monitor.models import AuditLogEntry
     from cja_audit_log_monitor.utils import group_by_user
 
-    a = [AuditLogEntry(id=f"a{i}", user_id="ABCDEFGH-one", user_name="Integration")
-         for i in range(5)]
-    b = [AuditLogEntry(id=f"b{i}", user_id="ABCDEFGH-two", user_name="Integration")
-         for i in range(3)]
+    a = [
+        AuditLogEntry(id=f"a{i}", user_id="ABCDEFGH-one", user_name="Integration") for i in range(5)
+    ]
+    b = [
+        AuditLogEntry(id=f"b{i}", user_id="ABCDEFGH-two", user_name="Integration") for i in range(3)
+    ]
     groups = group_by_user(a + b)
     assert sorted(len(g) for g in groups.values()) == [3, 5]
     assert len(set(groups)) == 2

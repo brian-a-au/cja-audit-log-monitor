@@ -47,7 +47,7 @@ from .formatters import (
 from .models import API_EARLIEST, ActionType, AuditLogEntry, AuditLogQuery, ComponentType
 from .monitor import AuditLogMonitor, is_retryable
 from .notifications import AnomalyDedupFilter, NotificationManager
-from .stats import build_date_range_query, calculate_stats, generate_report
+from .stats import build_date_range_query, calculate_stats, generate_report, stats_for_json
 from .utils import user_identities
 
 P = ParamSpec("P")
@@ -887,7 +887,9 @@ def stats(ctx: click.Context, days: int | None, top: int, output_format: str) ->
 
     if not entries:
         if output_format == "json":
-            emit_json({"days": days, "statistics": calculate_stats([]), "anomalies": []})
+            emit_json(
+                {"days": days, "statistics": stats_for_json(calculate_stats([])), "anomalies": []}
+            )
         else:
             console.print("[dim]No audit logs found for the specified period.[/dim]")
         return
@@ -898,7 +900,7 @@ def stats(ctx: click.Context, days: int | None, top: int, output_format: str) ->
     if output_format == "json":
         data = {
             "days": days,
-            "statistics": stats_data,
+            "statistics": stats_for_json(stats_data),
             "anomalies": anomalies,
         }
         emit_json(data)
