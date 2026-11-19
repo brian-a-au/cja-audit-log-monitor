@@ -4,6 +4,7 @@ import random
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from pydantic import ValidationError
 from rich.panel import Panel
 
 from cja_audit_log_monitor.alerts import (
@@ -627,3 +628,63 @@ class TestEngineCopiesRules:
         engine = AlertEngine([original])
         engine.disable_rule("mine")
         assert original.enabled is True
+
+
+class TestRuleDefinitions:
+    """Rule definitions mean what they say (G13, G17, G43)."""
+
+    def test_duplicate_rule_names_are_a_config_error(self, tmp_path) -> None:
+        from cja_audit_log_monitor.config import ConfigError, load_config
+
+        path = tmp_path / "config.yaml"
+        path.write_text(
+            "alert_rules:\n"
+            "  - {name: deletes, actions: [DELETE], threshold_count: 2}\n"
+            "  - {name: deletes, actions: [DELETE], threshold_count: 2}\n"
+        )
+        path.chmod(0o600)
+        with pytest.raises(ConfigError, match="deletes"):
+            load_config(path)
+
+    def test_users_match_ignores_case_and_spaces(self) -> None:
+        rule = AlertRule(name="named", users=[" Someone@Example.com "])
+        engine = AlertEngine(rules=[rule])
+        entry = AuditLogEntry(
+            id="1", action="DELETE", user_email="someone@example.com",
+            timestamp=datetime.now(UTC),
+        )
+        assert [a.rule_name for a in engine.check_entry(entry)] == ["named"]
+
+    def test_window_has_an_upper_limit(self) -> None:
+        with pytest.raises(ValidationError):
+            AlertRule(name="r", threshold_window_minutes=999_999_999_999)
+        assert AlertRule(name="r", threshold_window_minutes=525_600)
+
+    @pytest.mark.parametrize("field", ["actions", "components", "users"])
+    def test_empty_list_is_an_error(self, field) -> None:
+        with pytest.raises(ValidationError, match="leave it out"):
+            AlertRule(name="r", **{field: []})
+
+    def test_empty_alert_rules_means_no_rules(self, tmp_path) -> None:
+        from cja_audit_log_monitor.alerts import engine_rules
+        from cja_audit_log_monitor.config import load_config
+
+        path = tmp_path / "config.yaml"
+        path.write_text("alert_rules: []\n")
+        path.chmod(0o600)
+        assert AlertEngine(engine_rules(load_config(path))).rules == []
+        empty = tmp_path / "empty.yaml"
+        empty.write_text("monitor_interval: 30\n")
+        empty.chmod(0o600)
+        assert len(AlertEngine(engine_rules(load_config(empty))).rules) == 4
+
+    def test_lower_case_delete_counts_for_the_bulk_delete_anomaly(self) -> None:
+        entries = [
+            AuditLogEntry(
+                id=str(i), action="delete", user_email="u@example.com",
+                timestamp=datetime.now(UTC),
+            )
+            for i in range(20)
+        ]
+        kinds = [a["type"] for a in analyze_for_anomalies(entries)]
+        assert "bulk_delete_single_user" in kinds

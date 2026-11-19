@@ -144,6 +144,17 @@ class CJASettings(BaseSettings):
             file_secret_settings,
         )
 
+    @field_validator("alert_rules")
+    @classmethod
+    def unique_rule_names(cls, rules: list[AlertRule]) -> list[AlertRule]:
+        """Two rules with one name would share one event count."""
+        seen: set[str] = set()
+        for rule in rules:
+            if rule.name in seen:
+                raise ValueError(f"alert rule name {rule.name!r} is used twice")
+            seen.add(rule.name)
+        return rules
+
     @field_validator("org_id")
     @classmethod
     def validate_org_id(cls, v: str) -> str:

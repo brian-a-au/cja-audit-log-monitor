@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-from ..alerts import AlertEngine, FiredAlert
+from ..alerts import AlertEngine, FiredAlert, engine_rules
 from ..auth import TokenManager
 from ..client import AuditLogsClient, ClientClosedError
 from ..config import CJASettings, ConfigError, get_config_path, load_config
@@ -149,7 +149,7 @@ class AppState:
     def alert_engine(self) -> AlertEngine:
         """Get alert engine, creating if necessary."""
         if self._alert_engine is None:
-            engine = AlertEngine(self.settings.alert_rules or None)
+            engine = AlertEngine(engine_rules(self.settings))
             for rule in engine.rules:  # toggles from before a reload stay as they were
                 if rule.name in self._disabled_rules:
                     rule.enabled = False
@@ -171,7 +171,7 @@ class AppState:
         call picks up the new one. Nothing is mutated in place, so nothing can crash.
         """
         self._disabled_rules = set()
-        self._alert_engine = AlertEngine(self.settings.alert_rules or None)
+        self._alert_engine = AlertEngine(engine_rules(self.settings))
 
     @property
     def notification_manager(self) -> NotificationManager:

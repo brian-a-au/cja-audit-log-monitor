@@ -245,7 +245,7 @@ class AlertRule(BaseModel):
     actions: list[str] | None = None
     components: list[str] | None = None
     threshold_count: int = Field(1, ge=1)
-    threshold_window_minutes: int = Field(60, ge=1)
+    threshold_window_minutes: int = Field(60, ge=1, le=525_600)  # at most one year
     users: list[str] | None = None
     per_user: bool = False
 
@@ -258,6 +258,21 @@ class AlertRule(BaseModel):
     @classmethod
     def _normalize_components(cls, value: Any) -> Any:
         return _normalize_rule_names(value, ComponentType, "component")
+
+    @field_validator("users", mode="before")
+    @classmethod
+    def _strip_users(cls, value: Any) -> Any:
+        if isinstance(value, (list, tuple)):
+            return [item.strip() if isinstance(item, str) else item for item in value]
+        return value
+
+    @field_validator("actions", "components", "users")
+    @classmethod
+    def _not_empty(cls, value: list[str] | None) -> list[str] | None:
+        """An empty list would match everything; leaving the key out says that plainly."""
+        if value is not None and not value:
+            raise ValueError("must not be empty; leave it out to match everything")
+        return value
 
 
 class WebhookConfig(BaseModel):

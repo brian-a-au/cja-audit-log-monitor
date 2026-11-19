@@ -22,7 +22,7 @@ from rich.markup import escape
 from rich.text import Text
 
 from . import __version__
-from .alerts import AlertEngine, analyze_for_anomalies
+from .alerts import AlertEngine, analyze_for_anomalies, engine_rules
 from .auth import AuthenticationError, TokenManager
 from .client import MAX_PAGE_SIZE, APIError, AuditLogsClient, RateLimitError
 from .config import (
@@ -811,7 +811,7 @@ def monitor(
 
         alert_engine = None
         if alerts:
-            alert_engine = AlertEngine(settings.alert_rules or None)
+            alert_engine = AlertEngine(engine_rules(settings))
             rule_count = len(alert_engine.rules)
             err_console.print(f"[dim]Alert detection enabled with {rule_count} rules[/dim]")
 
@@ -1224,7 +1224,7 @@ def tail(
 
         alert_engine = None
         if alerts:
-            alert_engine = AlertEngine(settings.alert_rules or None)
+            alert_engine = AlertEngine(engine_rules(settings))
 
         with NotificationManager(settings.notifications) as nm:
             actions_filter = parse_actions(action) if action else None
@@ -1292,7 +1292,7 @@ def alerts_list(ctx: click.Context, output_format: str) -> None:
     config_path = ctx.obj.get("config_path")
 
     settings = load_config(config_path)
-    engine = AlertEngine(settings.alert_rules or None)
+    engine = AlertEngine(engine_rules(settings))
     rules_status = engine.get_rule_status()
 
     if output_format == "json":
@@ -1341,7 +1341,7 @@ def alerts_test(ctx: click.Context, days: int) -> None:
     config_path = ctx.obj.get("config_path")
 
     client, settings = get_client(config_path)
-    engine = AlertEngine(settings.alert_rules or None)
+    engine = AlertEngine(engine_rules(settings))
 
     err_console.print(f"[dim]Testing alert rules against last {days} day(s) of logs...[/dim]\n")
 

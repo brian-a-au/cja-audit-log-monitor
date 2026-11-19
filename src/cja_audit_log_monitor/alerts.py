@@ -86,6 +86,19 @@ DEFAULT_ALERT_RULES = [
 ]
 
 
+def engine_rules(settings: Any) -> list[AlertRule] | None:
+    """The rules for an AlertEngine: the configured ones, or None for the built-in rules.
+
+    ``alert_rules: []`` in the config means no rules. Leaving the key out means the
+    built-in rules.
+    """
+    rules = getattr(settings, "alert_rules", None)
+    fields_set = getattr(settings, "model_fields_set", None)
+    if isinstance(fields_set, set) and "alert_rules" in fields_set and isinstance(rules, list):
+        return list(rules)
+    return rules or None
+
+
 def order_oldest_first(entries: list[AuditLogEntry]) -> list[AuditLogEntry]:
     """Sort entries by event time, oldest first, so rule windows slide forward.
 
@@ -201,8 +214,9 @@ class AlertEngine:
 
         # Check user match
         if rule.users:
-            # A rule may name a user by IMS id, email or display name.
-            if not user_identities(entry) & set(rule.users):
+            # A rule may name a user by IMS id, email or display name, in any case.
+            names = {name.casefold() for name in user_identities(entry)}
+            if not names & {user.casefold() for user in rule.users}:
                 return False
 
         return True
@@ -359,7 +373,9 @@ def analyze_for_anomalies(
                 })
 
     # Check for concentrated delete activity, one report per user
-    delete_entries = [e for e in entries if e.action == ActionType.DELETE.value]
+    delete_entries = [
+        e for e in entries if (e.action or "").upper() == ActionType.DELETE.value
+    ]
     for user, deletes in group_by_user(delete_entries).items():
         if len(deletes) >= BULK_DELETE_MIN_COUNT:
             anomalies.append({
