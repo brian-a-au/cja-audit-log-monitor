@@ -2551,6 +2551,67 @@ class TestSmallCliBehaviours:
         assert "203.0.113." in result.stdout  # the IP folds rather than widening the table
         assert "2024-01-15 10:30:00" in result.stdout
 
+    @patch("cja_audit_log_monitor.cli.get_client")
+    def test_list_details_keeps_user_component_and_ip_readable_at_80(
+        self, mock_get_client: MagicMock, runner: CliRunner, sample_audit_entry
+    ) -> None:
+        entry = sample_audit_entry.model_copy(
+            update={
+                "user_email": "jordan.lee@example.com",
+                "component_name": "Revenue per Visit (7d)",
+                "description": "Deleted calculated metric Revenue per Visit",
+                "ip_address": "203.0.113.200",
+            }
+        )
+        mock_get_client.return_value = (_fake_client([entry]), _settings())
+
+        result = runner.invoke(main, ["cli", "list", "-D"], env={"COLUMNS": "80"})
+
+        assert result.exit_code == 0, result.output
+        lines = result.stdout.splitlines()
+        assert max(len(line) for line in lines) <= 80
+        assert "jordan.l" in result.stdout
+        assert any("IP 203.0.113.200" in line for line in lines)
+        assert "Revenue" in result.stdout
+
+    @patch("cja_audit_log_monitor.cli.get_client")
+    def test_search_accepts_short_details_flag(
+        self, mock_get_client: MagicMock, runner: CliRunner, sample_audit_entry
+    ) -> None:
+        mock_get_client.return_value = (_fake_client([sample_audit_entry]), _settings())
+
+        result = runner.invoke(main, ["cli", "search", "-D"], env={"COLUMNS": "120"})
+
+        assert result.exit_code == 0, result.output
+        assert "Details" in result.stdout
+
+    @patch("cja_audit_log_monitor.cli.get_client")
+    def test_timeline_json_has_same_hour_keys_when_empty(
+        self, mock_get_client: MagicMock, runner: CliRunner
+    ) -> None:
+        mock_get_client.return_value = (_fake_client([]), _settings())
+
+        result = runner.invoke(main, ["cli", "timeline", "-F", "json"])
+
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.stdout)
+        assert data["daily"] == {}
+        assert data["hourly"] == {f"{h:02d}": 0 for h in range(24)}
+
+    @patch("cja_audit_log_monitor.cli.get_client")
+    def test_show_not_found_reports_entries_actually_searched(
+        self, mock_get_client: MagicMock, runner: CliRunner, sample_audit_entries
+    ) -> None:
+        client = _fake_client([])
+        client.get_logs_paginated.return_value = iter(sample_audit_entries[:3])
+        mock_get_client.return_value = (client, _settings())
+
+        result = runner.invoke(main, ["cli", "show", "missing-id"])
+
+        assert result.exit_code == 1
+        assert "Searched 3 entries" in result.stderr
+        assert "10,000" not in result.stderr
+
     def test_alerts_list_fits_80_columns_with_whole_names(self, runner: CliRunner) -> None:
         result = runner.invoke(main, ["cli", "alerts", "list"], env={"COLUMNS": "80"})
 

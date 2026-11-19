@@ -367,7 +367,7 @@ def cli_list(
 @click.option("--component-id", help="Filter by specific component ID")
 @click.option("--description", "--desc", help="Search in description")
 @click.option("--limit", "-l", type=POSITIVE_INT, default=100, help="Maximum entries to return")
-@click.option("--details", is_flag=True, help="Show additional details")
+@click.option("--details", "-D", is_flag=True, help="Show additional details")
 @output_format_option
 @click.pass_context
 @handle_cli_errors
@@ -1490,7 +1490,7 @@ def timeline(
 
     if not entries:
         if output_format == "json":
-            emit_json({"days": days, "daily": {}, "hourly": {}})
+            emit_json({"days": days, "daily": {}, "hourly": {f"{h:02d}": 0 for h in range(24)}})
         else:
             console.print("[dim]No audit logs found.[/dim]")
         return
@@ -1637,7 +1637,9 @@ def show(ctx: click.Context, entry_id: str, max_entries: int) -> None:
 
     with client:
         found_entry = None
+        searched = 0
         for entry in islice(client.get_logs_paginated(query), max_entries):
+            searched += 1
             if entry.id == entry_id:
                 found_entry = entry
                 break
@@ -1645,7 +1647,7 @@ def show(ctx: click.Context, entry_id: str, max_entries: int) -> None:
     if not found_entry:
         err_console.print(f"[yellow]Entry not found: {escape(entry_id)}[/yellow]")
         err_console.print(
-            f"[dim]Searched the newest {max_entries:,} entries; "
+            f"[dim]Searched {searched:,} entries; "
             "raise --max-entries to look further back.[/dim]"
         )
         sys.exit(1)

@@ -170,7 +170,7 @@ def format_logs_table(
     # give way (with an ellipsis) on narrow terminals.
     table.add_column("Time (UTC)", style="dim", no_wrap=True, min_width=19)
     table.add_column(
-        "User", ratio=2, min_width=8 if show_details else 10, no_wrap=True, overflow="ellipsis"
+        "User", ratio=2, min_width=10, no_wrap=True, overflow="ellipsis"
     )
     table.add_column("Action", no_wrap=True, min_width=13)
     table.add_column(
@@ -180,18 +180,15 @@ def format_logs_table(
         no_wrap=True,
         overflow="ellipsis",
     )
-    table.add_column(
-        "Name",
-        ratio=3,
-        min_width=6 if show_details else 8,
-        no_wrap=True,
-        overflow="ellipsis",
-    )
-
     if show_details:
-        # Free text folds onto more lines instead of widening the table; the IP rides
-        # on the last line of the same cell so it keeps its place at 80 columns.
-        table.add_column("Details", ratio=3, min_width=12, overflow="fold")
+        # Details replaces the Name column: its first line is the component name, then the
+        # free text (folds onto more lines), then the IP on its own unbroken line. This
+        # leaves the user column room at 80 columns.
+        table.add_column("Details", ratio=3, min_width=17, overflow="fold")
+    else:
+        table.add_column(
+            "Name", ratio=3, min_width=8, no_wrap=True, overflow="ellipsis"
+        )
 
     for entry in entries:
         action_str = entry.action or "-"
@@ -199,19 +196,23 @@ def format_logs_table(
         action_text = Text(f"{icon} {action_str}")
         action_text.stylize(get_action_color(action_str))
 
+        component_name = entry.component_name or entry.component_id or "-"
         row = [
             Text(format_timestamp(entry.timestamp)),
             Text(get_user_identifier(entry, default="-")),
             action_text,
             Text(entry.component_type or "-"),
-            Text(entry.component_name or entry.component_id or "-"),
         ]
 
         if show_details:
-            details = Text(entry.description or "-")
+            details = Text(component_name, style="bold")
+            if entry.description:
+                details.append(f"\n{entry.description}")
             if entry.ip_address:
                 details.append(f"\nIP {entry.ip_address}", style="dim")
             row.append(details)
+        else:
+            row.append(Text(component_name))
 
         table.add_row(*row)
 
