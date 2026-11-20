@@ -4,6 +4,10 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Changed
+
+- `scripts/ci.sh` now starts all its stages at the same time, each with its own log under `.ci/logs/`. `scripts/ci.sh --quick` runs only ruff and the tests with coverage on Python 3.11, which is enough before a push now that GitHub runs every stage.
+
 ## [0.1.3] - 2026-11-20
 
 ### Fixed

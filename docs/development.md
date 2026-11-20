@@ -48,31 +48,33 @@ uv run ruff format src tests scripts
 
 Ruff checks lines up to 100 characters and targets Python 3.11. It uses the rule sets `E`, `F`, `I`, `N`, `W` and `UP`.
 
-## Full CI run
+## CI on your machine
 
 ```bash
-# All supported versions (3.11 to 3.14)
+# Quick check before you push: ruff and the tests with coverage on Python 3.11 (about 5 minutes)
+scripts/ci.sh --quick
+
+# Every CI stage, all at the same time (about 10 minutes)
 scripts/ci.sh
 
-# Only some versions
+# Every stage, with only some Python versions
 scripts/ci.sh 3.11 3.14
 ```
 
-The script runs the same steps as `.github/workflows/ci.yml`:
+The full run starts these stages at the same time, as `.github/workflows/ci.yml` does:
 - lint and tests on each Python version, each in its own environment under `.ci/`
-- the floors step, which installs the lowest versions of the direct dependencies that `pyproject.toml` allows and runs the tests on Python 3.11
-- the newest step, which installs the newest versions of the dependencies and runs the tests on Python 3.14
-- a build of the sdist and wheel
-- a test install of the wheel, which then runs `cja-audit-log-monitor --help`
+- the floors stage, which installs the lowest versions of the direct dependencies that `pyproject.toml` allows and runs the tests on Python 3.11
+- the newest stage, which installs the newest versions of the dependencies and runs the tests on Python 3.14
+- a build of the sdist and wheel, then a test install of the wheel, which runs `cja-audit-log-monitor --help`
 
-Each version step runs `ruff check`, `ruff format --check` and the tests. `uv.lock` is tracked in the repository, so `uv sync` installs the same versions on every machine. Your normal `.venv` is not changed. uv downloads any Python version you do not have.
+Each version stage runs `ruff check`, `ruff format --check` and the tests. Each stage writes its output to `.ci/logs/<stage>.log` and has its own temp folder and coverage file, so the stages do not share files. The script prints one line per stage, the end of the log of any stage that failed, and `All checks passed.` when every stage passed. `uv.lock` is tracked in the repository, so `uv sync` installs the same versions on every machine. Your normal `.venv` is not changed. uv downloads any Python version you do not have.
 
-GitHub runs the same jobs on every pull request and every push to `main`, and you can start them by hand from the Actions tab.
+GitHub runs every stage on every pull request and every push to `main`, and you can start them by hand from the Actions tab. That makes GitHub the real gate, and `--quick` is enough before you push.
 
 ## Before you open a pull request
 
 - Write a test that fails without your change, and check that it passes with it.
-- Run `scripts/ci.sh`, or at least the tests and both ruff commands.
+- Run `scripts/ci.sh --quick`. It must print `All checks passed.`
 - If you change how the TUI looks, regenerate the screenshots (see below) and look at them.
 - Never put credentials, org IDs, real names or emails in code, tests, screenshots or commit messages. Test data uses example.com.
 
