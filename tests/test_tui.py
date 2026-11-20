@@ -1671,7 +1671,8 @@ class TestMonitorPolling:
             assert app.is_running
             assert screen._monitor_worker.state == WorkerState.RUNNING
             assert mock_app_state.monitor.is_running
-            assert "ui bug" in app.notify.call_args.args[0]
+            # The logged traceback also becomes a toast, so do not rely on the order.
+            assert any("ui bug" in c.args[0] for c in app.notify.call_args_list)
             # The next poll works.
             assert screen.refresh_data() is True
             assert await _wait_for(

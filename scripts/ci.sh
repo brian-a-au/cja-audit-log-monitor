@@ -21,7 +21,7 @@ for v in "${VERSIONS[@]}"; do
     if uv sync --quiet --all-extras --python "$v" \
         && uv run --python "$v" ruff check src tests scripts \
         && uv run --python "$v" ruff format --check src tests scripts \
-        && uv run --python "$v" pytest -q; then
+        && uv run --python "$v" pytest -q --cov; then
         echo "==> Python $v: passed"
     else
         echo "==> Python $v: FAILED"
