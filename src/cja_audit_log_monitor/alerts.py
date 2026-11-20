@@ -113,6 +113,8 @@ DEFAULT_ALERT_RULES = [
 
 # How far ahead of this machine's clock an event time may be before it counts as "now".
 FUTURE_SKEW = timedelta(minutes=5)
+# How often, in event time, every rule's history is swept of events past its window.
+SWEEP_EVERY = timedelta(minutes=1)
 
 
 def engine_rules(settings: Any) -> list[AlertRule] | None:
@@ -151,6 +153,33 @@ class AlertEngine:
         self._event_history: dict[tuple[str, str], list[tuple[datetime, AuditLogEntry]]] = (
             defaultdict(list)
         )
+        self._newest: datetime | None = None  # the newest event time checked so far
+        self._last_sweep: datetime | None = None
+
+    def _sweep(self, newest: datetime) -> None:
+        """Drop every event past its rule's window, and the histories left empty.
+
+        Without this a per-user rule keeps a history for every user ever seen, since a
+        history is otherwise cleaned only when that same user acts again. The window is
+        measured back from the newest event time checked, not the wall clock, so a replay
+        of old events works the same. An event that arrives more than one window later
+        than the newest one checked no longer pairs with events swept before it came.
+        """
+        windows: dict[str, timedelta] = {}
+        for rule in self.rules:
+            window = timedelta(minutes=rule.threshold_window_minutes)
+            windows[rule.name] = max(window, windows.get(rule.name, window))
+        for key in list(self._event_history):
+            window = windows.get(key[0])
+            kept = (
+                [(ts, e) for ts, e in self._event_history[key] if ts > newest - window]
+                if window is not None
+                else []
+            )
+            if kept:
+                self._event_history[key] = kept
+            else:
+                del self._event_history[key]
 
     def _clean_old_events(self, key: tuple[str, str], window: timedelta, now: datetime) -> None:
         """Remove events older than the window, measured back from ``now``.
@@ -213,6 +242,11 @@ class AlertEngine:
             # A clock far ahead would keep the event in every window for good; count it
             # as happening now, so it ages out like any other event.
             timestamp = now
+        if self._newest is None or timestamp > self._newest:
+            self._newest = timestamp
+        if self._last_sweep is None or self._newest - self._last_sweep >= SWEEP_EVERY:
+            self._sweep(self._newest)
+            self._last_sweep = self._newest
 
         for rule in self.rules:
             if not rule.enabled:
