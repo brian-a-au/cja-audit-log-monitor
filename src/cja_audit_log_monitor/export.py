@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, TextIO
 
 from .models import AuditLogEntry
+from .utils import display_path
 
 
 @contextmanager
@@ -100,9 +101,9 @@ def check_export_path(raw: str) -> tuple[Path | None, str | None, bool]:
         if path.is_dir():
             return None, "that path is a folder, not a file", False
         if not path.parent.is_dir():
-            return None, f"folder does not exist: {path.parent}", False
+            return None, f"folder does not exist: {display_path(path.parent)}", False
         if not os.access(path.parent, os.W_OK | os.X_OK):
-            return None, f"cannot write to folder {path.parent}", False
+            return None, f"cannot write to folder {display_path(path.parent)}", False
         exists = os.path.lexists(path)
     except OSError as e:
         return None, f"cannot use that path ({e.strerror or type(e).__name__})", False

@@ -523,6 +523,11 @@ HelpScreen {
     margin: 1 0;
 }
 
+/* The stat cards below have their own top margin: one blank row, as on the dashboard */
+#stats-controls {
+    margin: 1 0 0 0;
+}
+
 .toolbar Button {
     margin: 0 1 0 0;
 }

@@ -146,7 +146,7 @@ class StatsView(ContentView):
             days = max(1, int(box.value))
             if days > MAX_DAYS:
                 self.app.notify(
-                    f"days must be at most {MAX_DAYS:,}; using {MAX_DAYS:,}", severity="warning"
+                    f"days must be at most {MAX_DAYS:,} · using {MAX_DAYS:,}", severity="warning"
                 )
             self._state.stats_days = min(days, MAX_DAYS)
         except ValueError:

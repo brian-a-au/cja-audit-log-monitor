@@ -2,7 +2,7 @@
 
 from textual.widgets import Static
 
-from ...formatters import literal, resolve_tcss_markup
+from ...formatters import cut_cells, literal, resolve_tcss_markup
 
 
 class AlertSummary(Static):
@@ -39,7 +39,7 @@ class AlertSummary(Static):
         # "⚠ " takes 2 cells; cut each line to the width the widget has.
         room = max(20, (self.content_region.width or 62) - 2)
         for summary in reversed(self._alerts):
-            short = summary if len(summary) <= room else summary[: room - 1] + "…"
+            short = cut_cells(summary, room)  # cells, not characters: CJK takes two
             lines.append(resolve_tcss_markup(f"[$danger]⚠[/$danger] {literal(short)}"))
         self.update("\n".join(lines))
 

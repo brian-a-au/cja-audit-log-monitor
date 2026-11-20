@@ -12,6 +12,11 @@ from ...utils import display_path
 from .base import ContentView
 
 
+def _count(value: object) -> str:
+    """A count with thousands separators, or ``-`` when there is none."""
+    return f"{value:,}" if isinstance(value, int) else "-"
+
+
 class SettingsView(ContentView):
     """View for viewing and managing settings."""
 
@@ -53,7 +58,7 @@ class SettingsView(ContentView):
 
         # Authentication section
         org_display = settings.org_id or "(not set)"
-        client_display = f"{settings.client_id[:12]}..." if settings.client_id else "(not set)"
+        client_display = f"{settings.client_id[:12]}…" if settings.client_id else "(not set)"
         auth_section = Vertical(
             Static("AUTHENTICATION", classes="section-label"),
             Horizontal(
@@ -216,14 +221,12 @@ class SettingsView(ContentView):
                     f"[$success]●[/$success] connected\n"
                     f"  organization: {literal(str(result.get('org_id', 'Unknown')))}\n"
                     f"  api url: {literal(str(result.get('api_url', 'Unknown')))}\n"
-                    f"  total logs available: {result.get('total_logs_available', 'N/A'):,}"
+                    f"  total logs available: {_count(result.get('total_logs_available'))}"
                 )
             )
         else:
             error = result.get("error", "Unknown error")
             self.app.set_connection_status("disconnected", str(error))
             status.update(
-                resolve_tcss_markup(
-                    f"[$danger]●[/$danger] disconnected\n  error: {literal(str(error))}"
-                )
+                resolve_tcss_markup(f"[$danger]●[/$danger] not connected · {literal(str(error))}")
             )
