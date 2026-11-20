@@ -3884,3 +3884,201 @@ class TestOneJsonShape:
         assert list(data["hourly_distribution"])[:2] == ["00", "01"]
         assert all(set(u) == {"user", "count"} for u in data["summary"]["top_users"])
         assert all(set(u) == {"user", "count"} for u in data["user_activity"])
+
+
+def _client_with(entries: list) -> MagicMock:
+    """A mock client used as a context manager that returns ``entries``."""
+    client = MagicMock()
+    client.get_all_logs.return_value = entries
+    client.__enter__ = MagicMock(return_value=client)
+    client.__exit__ = MagicMock(return_value=False)
+    return client
+
+
+def _night_deletes(count: int, user: str = "night@example.com") -> list[AuditLogEntry]:
+    """``count`` deletes by one user at about 2am UTC, a minute apart."""
+    return [
+        AuditLogEntry(
+            id=f"del-{i}",
+            timestamp=datetime(2024, 1, 15, 2, i, 0, tzinfo=UTC),
+            user_id=user,
+            user_email=user,
+            action="DELETE",
+            component_type="PROJECT",
+            component_id=f"p-{i}",
+            component_name=f"Project {i}",
+        )
+        for i in range(count)
+    ]
+
+
+class TestAlertsTestCommand:
+    """`cli alerts test` runs the real rules and anomaly checks on fetched logs."""
+
+    @staticmethod
+    def _run(runner: CliRunner, entries: list):
+        settings = MagicMock(alert_rules=None, default_days=7)
+        with patch(
+            "cja_audit_log_monitor.cli.get_client",
+            return_value=(_client_with(entries), settings),
+        ):
+            return runner.invoke(main, ["cli", "alerts", "test", "--days", "2"])
+
+    def test_no_logs(self, runner: CliRunner) -> None:
+        result = self._run(runner, [])
+        assert result.exit_code == 0
+        assert "No audit logs found." in result.output
+
+    def test_bulk_deletes_fire_an_alert(self, runner: CliRunner) -> None:
+        result = self._run(runner, _night_deletes(6))
+        assert result.exit_code == 0, result.output
+        assert "Found 1 alerts" in result.output
+        assert "bulk_delete" in result.output
+
+    def test_quiet_logs_trigger_nothing(self, runner: CliRunner, sample_audit_entries) -> None:
+        creates = [e for e in sample_audit_entries if e.action == "CREATE"]
+        result = self._run(runner, creates)
+        assert result.exit_code == 0, result.output
+        assert "No alerts triggered." in result.output
+
+
+class TestCommandEdges:
+    """Output branches that the main command tests do not reach."""
+
+    @pytest.mark.parametrize(
+        ("args", "expected"),
+        [
+            (["list", "--output-format", "json"], {"entries": [], "count": 0}),
+            (["query", "--output-format", "json"], {"entries": [], "count": 0}),
+            (
+                ["user", "--user-id", "a@example.com", "--output-format", "json"],
+                {"user": "a@example.com", "entries": [], "count": 0},
+            ),
+        ],
+    )
+    def test_empty_results_as_json(self, runner: CliRunner, args, expected) -> None:
+        with patch(
+            "cja_audit_log_monitor.cli.get_client", return_value=(_client_with([]), _settings())
+        ):
+            result = runner.invoke(main, ["cli", *args])
+        assert result.exit_code == 0, result.output
+        assert json.loads(result.output) == expected
+
+    def test_query_last_month_lists_entries(self, runner: CliRunner, sample_audit_entries) -> None:
+        client = _client_with(sample_audit_entries)
+        with patch("cja_audit_log_monitor.cli.get_client", return_value=(client, _settings())):
+            result = runner.invoke(main, ["cli", "query", "--last-month"])
+        assert result.exit_code == 0, result.output
+        assert "Found 10 entries (last 30 days)" in " ".join(result.output.split())
+        query = client.get_all_logs.call_args.args[0]
+        assert query.end_date - query.start_date == timedelta(days=30)
+
+    def test_query_json_lists_entries(self, runner: CliRunner, sample_audit_entries) -> None:
+        client = _client_with(sample_audit_entries)
+        with patch("cja_audit_log_monitor.cli.get_client", return_value=(client, _settings())):
+            result = runner.invoke(main, ["cli", "query", "--output-format", "json"])
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        assert data["count"] == 10
+        assert data["entries"][0]["id"] == "entry-0"
+
+    def test_unknown_component_is_a_usage_error(self, runner: CliRunner) -> None:
+        result = runner.invoke(main, ["cli", "search", "--component", "nope"])
+        assert result.exit_code == 2
+        assert "Invalid component: nope" in result.output
+
+    def test_find_action_with_no_matches(self, runner: CliRunner) -> None:
+        with patch(
+            "cja_audit_log_monitor.cli.get_client", return_value=(_client_with([]), _settings())
+        ):
+            result = runner.invoke(main, ["cli", "find-action", "--action", "DELETE"])
+        assert result.exit_code == 0
+        assert "No DELETE actions found." in result.output
+
+    def test_find_action_lists_matches(self, runner: CliRunner) -> None:
+        with patch(
+            "cja_audit_log_monitor.cli.get_client",
+            return_value=(_client_with(_night_deletes(2)), _settings()),
+        ):
+            result = runner.invoke(main, ["cli", "find-action", "--action", "DELETE"])
+        assert result.exit_code == 0, result.output
+        assert "Found 2 DELETE actions" in result.output
+
+    def test_stats_shows_users_actions_and_anomalies(self, runner: CliRunner) -> None:
+        with patch(
+            "cja_audit_log_monitor.cli.get_client",
+            return_value=(_client_with(_night_deletes(6)), _settings()),
+        ):
+            result = runner.invoke(main, ["cli", "stats", "--days", "2"])
+        assert result.exit_code == 0, result.output
+        assert "Most Active Users" in result.output
+        assert "Potential Anomalies Detected" in result.output
+
+    def test_verify_reports_a_failed_connection(self, runner: CliRunner) -> None:
+        client = _client_with([])
+        client.verify_connection.return_value = {
+            "connected": False,
+            "authenticated": True,
+            "error": "boom [x]",
+        }
+        with patch("cja_audit_log_monitor.cli.get_client", return_value=(client, _settings())):
+            result = runner.invoke(main, ["cli", "verify"])
+        assert result.exit_code == 1
+        assert "Connection failed" in result.output
+        assert "Error: boom [x]" in result.output
+
+    def test_verify_text_reports_an_api_error(self, runner: CliRunner) -> None:
+        from cja_audit_log_monitor.client import APIError
+
+        client = _client_with([])
+        client.verify_connection.side_effect = APIError("server said no")
+        with patch("cja_audit_log_monitor.cli.get_client", return_value=(client, _settings())):
+            result = runner.invoke(main, ["cli", "verify"])
+        assert result.exit_code == 1
+        assert "server said no" in result.output
+
+    def test_api_network_error_is_labelled(self, runner: CliRunner) -> None:
+        from cja_audit_log_monitor.client import APIError
+
+        client = _client_with([])
+        client.get_all_logs.side_effect = APIError("could not reach cja.adobe.io", network=True)
+        with patch("cja_audit_log_monitor.cli.get_client", return_value=(client, _settings())):
+            result = runner.invoke(main, ["cli", "list"])
+        assert result.exit_code == 1
+        assert "Network error: could not reach cja.adobe.io" in result.output
+
+    def test_init_keeps_an_existing_file_when_declined(self, runner: CliRunner, tmp_path) -> None:
+        path = tmp_path / "config.yaml"
+        path.write_text("org_id: keep\n")
+        result = runner.invoke(main, ["-c", str(path), "cli", "init"], input="n\n")
+        assert result.exit_code == 0
+        assert path.read_text() == "org_id: keep\n"
+
+    def test_tui_command_runs_the_tui_with_the_config_path(self, runner: CliRunner, tmp_path):
+        path = tmp_path / "config.yaml"
+        with patch("cja_audit_log_monitor.cli.run_tui") as run_tui:
+            result = runner.invoke(main, ["-c", str(path), "tui"])
+        assert result.exit_code == 0
+        run_tui.assert_called_once_with(path)
+
+    def test_run_tui_uses_its_own_loop_and_exits_with_the_app_code(self) -> None:
+        from cja_audit_log_monitor import cli
+
+        app = MagicMock(return_code=3)
+        with (
+            patch("cja_audit_log_monitor.tui.CJAAuditApp", return_value=app) as make_app,
+            patch.object(cli, "exit_without_waiting_for_workers") as exit_now,
+        ):
+            cli.run_tui(None)
+        make_app.assert_called_once_with(None)
+        loop = app.run.call_args.kwargs["loop"]
+        assert loop.is_closed()
+        exit_now.assert_called_once_with(3)
+
+
+class TestParseDateEdges:
+    def test_a_date_shaped_but_impossible_value_is_rejected(self) -> None:
+        import click
+
+        with pytest.raises(click.BadParameter, match="is not a date"):
+            parse_date("2024-02-30")
