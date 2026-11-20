@@ -6,6 +6,7 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Fixed
 
+- A `.env` file that was not UTF-8 text made the CLI print `Unexpected error: UnicodeDecodeError`, and an unreadable one gave a bare file error. Both are now a `Configuration error` that names the problem with `.env`.
 - `cli export --help` said the format comes from the file suffix and also showed `[default: json]`. It now shows only the first, which is what the command does.
 - A monitor in a busy org showed events twice and alerted on them twice. Each poll re-reads the 5 minutes before the last poll, and the monitor remembered only the last 5,000 events to tell old from new, so a window with more than 5,000 events brought old ones back as new. Remembered events are now forgotten by age, once they are older than the next poll's window.
 - The alert engine kept a history for every user a per-user rule had ever seen, so a long run with many users grew without limit. Events past their rule's window are now dropped about once a minute.

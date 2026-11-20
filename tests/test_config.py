@@ -574,3 +574,41 @@ class TestConfigEdges:
                 create_default_config(folder / "config.yaml")
         finally:
             folder.chmod(0o700)
+
+
+class TestUnusableDotEnv:
+    """A .env that cannot be read as text is a configuration error, not an unexpected one."""
+
+    def test_a_dotenv_that_is_not_utf8_is_a_config_error(self, tmp_path) -> None:
+        from cja_audit_log_monitor.config import ConfigError, load_config
+
+        (tmp_path / ".env").write_bytes(b"ORG_ID=x\xff\xfe@AdobeOrg\n")
+        with pytest.raises(ConfigError, match=r"\.env is not UTF-8 text"):
+            load_config(tmp_path / "missing.yaml", use_file=False)
+
+    def test_an_unreadable_dotenv_is_a_config_error(self, tmp_path) -> None:
+        import os
+
+        from cja_audit_log_monitor.config import ConfigError, load_config
+
+        env = tmp_path / ".env"
+        env.write_text("ORG_ID=x@AdobeOrg\n")
+        env.chmod(0)
+        if os.access(env, os.R_OK):
+            pytest.skip("running as a user who can read any file")
+        try:
+            with pytest.raises(ConfigError, match=r"\.env cannot be read"):
+                load_config(tmp_path / "missing.yaml", use_file=False)
+        finally:
+            env.chmod(0o600)
+
+    def test_the_cli_says_configuration_error(self, tmp_path) -> None:
+        from click.testing import CliRunner
+
+        from cja_audit_log_monitor.cli import main
+
+        (tmp_path / ".env").write_bytes(b"ORG_ID=\xff\n")
+        result = CliRunner().invoke(main, ["cli", "config"])
+        assert result.exit_code == 1
+        assert "Configuration error: .env is not UTF-8 text" in result.output
+        assert "Unexpected error" not in result.output
