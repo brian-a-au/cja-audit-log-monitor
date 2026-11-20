@@ -21,7 +21,7 @@ uv run pytest tests/test_client.py
 # A single test
 uv run pytest tests/test_client.py::TestAuditLogsClient::test_get_logs
 
-# With coverage (fails below 92%)
+# With coverage (fails below 95%)
 uv run pytest --cov
 ```
 

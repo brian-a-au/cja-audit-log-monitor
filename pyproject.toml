@@ -78,7 +78,7 @@ source = ["cja_audit_log_monitor"]
 [tool.coverage.report]
 show_missing = true
 precision = 2
-fail_under = 92.00
+fail_under = 95.00
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
