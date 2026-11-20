@@ -75,12 +75,13 @@ GitHub runs every stage on every pull request and every push to `main`, and you 
 
 - Write a test that fails without your change, and check that it passes with it.
 - Run `scripts/ci.sh --quick`. It must print `All checks passed.`
+- Add a changelog entry as a file in `changes/`, not in `CHANGELOG.md`. See `changes/README.md`. Each pull request has its own file, so open pull requests do not conflict over the changelog.
 - If you change how the TUI looks, regenerate the screenshots (see below) and look at them.
 - Never put credentials, org IDs, real names or emails in code, tests, screenshots or commit messages. Test data uses example.com.
 
 ## Releases
 
-1. Set the new version in `pyproject.toml` and add a dated section to `CHANGELOG.md`.
+1. Set the new version in `pyproject.toml`, and run `python scripts/changelog.py release <version>`. It writes a dated section to `CHANGELOG.md` from the Unreleased entries and the files in `changes/`, then deletes those files.
 2. Merge that change to `main`.
 3. Push a tag that matches the version, e.g. `git tag v0.2.0 && git push origin v0.2.0`.
 
