@@ -4,29 +4,31 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-11-20
+
 ### Fixed
 
-- In the monitor's recent alerts list, a summary with CJK or emoji names wrapped onto a second row, because lines were cut by characters, not by terminal cells.
-- A long error in the header wrapped onto two or three rows and took rows from the view. It is now cut to one row, and shown in full again when the window is wider.
-- The export toast and the export path messages showed the full path of your home folder. They now show it as `~`.
-- The config view could crash formatting the log count if the connection check gave none. It now shows `-`.
-- The statistics view had two blank rows above its cards; it now has one, like the dashboard.
-- TUI messages now share one style: lowercase, with `·` between a headline and its detail. For example `monitor error · <detail>`, `test failed · <detail>`, `rule <name> on`, and `not connected · <detail>` in the config view. A check that has not run yet shows `-`, not a dash.
-- A `.env` file that was not UTF-8 text made the CLI print `Unexpected error: UnicodeDecodeError`, and an unreadable one gave a bare file error. Both are now a `Configuration error` that names the problem with `.env`.
-- `cli export --help` said the format comes from the file suffix and also showed `[default: json]`. It now shows only the first, which is what the command does.
 - A monitor in a busy org showed events twice and alerted on them twice. Each poll re-reads the 5 minutes before the last poll, and the monitor remembered only the last 5,000 events to tell old from new, so a window with more than 5,000 events brought old ones back as new. Remembered events are now forgotten by age, once they are older than the next poll's window.
+- A webhook or Slack endpoint that answered with a body that never ended blocked the monitor for good, because each new byte reset the timeout. Only the status of the reply is read now, so a huge or endless body cannot hold up a poll.
 - The alert engine kept a history for every user a per-user rule had ever seen, so a long run with many users grew without limit. Events past their rule's window are now dropped about once a minute.
 - With Rich 15, text that held a zero-width joiner could come out narrower or wider than its column, so table columns could shift. Rich 15 counts a joiner and the character after it as one. Cutting and padding text to a width now checks the result with Rich's own measure.
-- A webhook or Slack endpoint that answered with a body that never ended blocked the monitor for good, because each new byte reset the timeout. Only the status of the reply is read now, so a huge or endless body cannot hold up a poll.
 - A date at the edge of the calendar with a time zone, such as `0001-01-01T00:00+05:00`, crashed the CLI. It is now a usage error that says the date is out of range.
+- A `.env` file that was not UTF-8 text made the CLI print `Unexpected error: UnicodeDecodeError`, and an unreadable one gave a bare file error. Both are now a `Configuration error` that names the problem with `.env`.
 - The export path check crashed on a lone surrogate character and passed a path with a null character, which then failed when the file was written. Both are now refused with a message.
 - A webhook or Slack URL with a control character in its host could put that character into a log line or a toast. Redacted URLs are now cleaned like audit data.
 - In the TUI, entry details labelled every time with the zone in effect now, so a July entry viewed in November showed a PDT time marked PST. Each time now names the zone in effect at that moment.
 - The time column, the hourly and daily chart labels, and the off-hours anomaly text named only the current zone. When the data spans a daylight saving change they now name both, for example `PST/PDT`.
 - The CLI `timeline` headings and the `query --today` and `--yesterday` messages now say that the days and hours are UTC.
+- In the monitor's recent alerts list, a summary with CJK or emoji names wrapped onto a second row, because lines were cut by characters, not by terminal cells.
+- A long error in the header wrapped onto two or three rows and took rows from the view. It is now cut to one row, and shown in full again when the window is wider.
+- The export toast and the export path messages showed the full path of your home folder. They now show it as `~`.
+- The config view could crash formatting the log count if the connection check gave none. It now shows `-`.
+- The statistics view had two blank rows above its cards; it now has one, like the dashboard.
+- `cli export --help` said the format comes from the file suffix and also showed `[default: json]`. It now shows only the first, which is what the command does.
 
 ### Changed
 
+- TUI messages now share one style: lowercase, with `·` between a headline and its detail. For example `monitor error · <detail>`, `test failed · <detail>`, `rule <name> on`, and `not connected · <detail>` in the config view. A missing value shows `-`.
 - Every reachable line and branch is now tested, and CI fails below 100% coverage. Lines that cannot run are marked `# pragma: no cover` with the reason.
 - A test now checks that the commands, flags and defaults in `docs/cli.md`, and every example command in the README and the docs, match the CLI.
 - Property-based tests (Hypothesis) now cover the date parser, text cleaning, CSV and TSV formula escaping, URL redaction, cell fitting and the export path check.
@@ -107,6 +109,7 @@ Configuration and security
 - Control characters in audit data, e.g. terminal escape sequences in a component name, are replaced before any output, so they never reach your terminal.
 - The tool refreshes its access token before it expires and retries when the API limits the request rate.
 
-[Unreleased]: https://github.com/brian-a-au/cja-audit-log-monitor/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/brian-a-au/cja-audit-log-monitor/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/brian-a-au/cja-audit-log-monitor/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/brian-a-au/cja-audit-log-monitor/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/brian-a-au/cja-audit-log-monitor/releases/tag/v0.1.0

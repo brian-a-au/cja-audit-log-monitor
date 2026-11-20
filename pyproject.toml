@@ -1,6 +1,6 @@
 [project]
 name = "cja-audit-log-monitor"
-version = "0.1.1"
+version = "0.1.2"
 description = "Terminal UI and CLI for monitoring and analyzing Adobe Customer Journey Analytics (CJA) audit logs"
 readme = "README.md"
 requires-python = ">=3.11"
