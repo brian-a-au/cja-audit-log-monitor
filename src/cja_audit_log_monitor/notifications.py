@@ -252,6 +252,26 @@ class NotificationManager:
             "timestamp": datetime.now(UTC).isoformat(),
         }
 
+    def _deliver(
+        self,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        payload: dict[str, Any],
+        timeout: float | None = None,
+    ) -> None:
+        """Send ``payload`` and raise ``httpx.HTTPStatusError`` unless the status is 2xx.
+
+        Only the status matters, so the response body is never read: a huge body, or one
+        that never ends, cannot hold up the poll that raised the alert. Redirects are not
+        followed, so a redirect cannot send the alert somewhere else.
+        """
+        kwargs: dict[str, Any] = {"headers": headers, "json": payload}
+        if timeout is not None:
+            kwargs["timeout"] = timeout
+        with self.client.stream(method, url, **kwargs) as response:
+            response.raise_for_status()
+
     def send_webhook(
         self,
         webhook: WebhookConfig,
@@ -275,14 +295,7 @@ class NotificationManager:
                 headers.update(webhook.headers)
 
             _url_redactor.add(webhook.url)
-            response = self.client.request(
-                method=webhook.method,
-                url=webhook.url,
-                headers=headers,
-                json=payload,
-                timeout=webhook.timeout,
-            )
-            response.raise_for_status()
+            self._deliver(webhook.method, webhook.url, headers, payload, webhook.timeout)
             logger.info("Webhook notification sent to %s", redact_url(webhook.url))
             self._mark_success(self._webhook_key(webhook))
             return True
@@ -323,12 +336,7 @@ class NotificationManager:
             return False
         _url_redactor.add(url)
         try:
-            response = self.client.post(
-                url,
-                json=payload,
-                headers={"Content-Type": "application/json"},
-            )
-            response.raise_for_status()
+            self._deliver("POST", url, {"Content-Type": "application/json"}, payload)
             logger.info("Slack notification sent")
             self._mark_success("slack")
             return True

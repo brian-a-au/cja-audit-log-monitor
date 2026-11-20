@@ -118,7 +118,7 @@ notifications:
 | `webhooks[].enabled` | Whether this webhook is used. The default is `true`. |
 | `webhooks[].method` | The HTTP method. The default is `POST`. |
 | `webhooks[].headers` | Extra headers to send, e.g. `Authorization`. |
-| `webhooks[].timeout` | How many seconds to wait for a reply, from 1 to 300. The default is `30`. |
+| `webhooks[].timeout` | How many seconds to wait for a reply, from 1 to 300. The default is `30`. Only the status of the reply counts: a 2xx status is a success and the body is not read. |
 | `webhooks[].include_entry_details` | Whether to include the audit entry in the message. The default is `true`. |
 
 When a rule fires, the TUI [monitor view](screens/monitor.md) and the CLI commands `monitor` and `tail` send it to every channel you set up.
