@@ -44,6 +44,14 @@ def _one_line(error: Exception) -> str:
     return " ".join(hide_home(str(error)).split())
 
 
+def _say_cancelled(app: App) -> None:
+    """From the worker: toast that a cancelled export wrote nothing."""
+    try:
+        app.call_from_thread(app.notify, "export cancelled")
+    except RuntimeError:  # the app has quit; there is nobody to tell
+        pass
+
+
 class ExportDialog(ModalScreen):
     """Modal dialog for exporting audit log data."""
 
@@ -201,7 +209,11 @@ class ExportDialog(ModalScreen):
         overwrite: bool,
         key: tuple[str, str],
     ) -> None:
-        """Worker: fetch (for "all matching"), write the file, then report on the UI thread."""
+        """Worker: fetch (for "all matching"), write the file, then report on the UI thread.
+
+        Closing the dialog during the fetch cancels the export: nothing is written, and
+        one toast says so. A write that has started still finishes and is reported.
+        """
         worker = get_current_worker()
         # Read the app now: once the dialog is closed it is detached and ``self.app`` fails.
         app = self.app
@@ -212,14 +224,15 @@ class ExportDialog(ModalScreen):
                     self._state.filters.to_query(), max_entries=EXPORT_MAX
                 )
             except Exception as e:
-                app.call_from_thread(self._fail, f"could not fetch entries · {_one_line(e)}")
+                app.call_from_thread(self._fail, app, f"could not fetch entries · {_one_line(e)}")
                 return
         else:
             entries = page_entries
         if worker.is_cancelled:
+            _say_cancelled(app)
             return
         if not entries:
-            app.call_from_thread(self._fail, "no entries to export")
+            app.call_from_thread(self._fail, app, "no entries to export")
             return
         try:
             count = export_entries(
@@ -227,10 +240,10 @@ class ExportDialog(ModalScreen):
             )
         except FileExistsError:
             # The file appeared after the check above; ask before replacing it.
-            app.call_from_thread(self._ask_overwrite, key)
+            app.call_from_thread(self._ask_overwrite, app, key)
             return
         except Exception as e:
-            app.call_from_thread(self._fail, f"export failed · {_one_line(e)}")
+            app.call_from_thread(self._fail, app, f"export failed · {_one_line(e)}")
             return
         # The file is written: report it even if the dialog was closed meanwhile.
         app.call_from_thread(self._done, app, count, total, output_path)
@@ -239,15 +252,17 @@ class ExportDialog(ModalScreen):
         """True while this dialog is still the open screen (the user has not closed it)."""
         return self.is_attached and self.app.screen is self
 
-    def _ask_overwrite(self, key: tuple[str, str]) -> None:
+    def _ask_overwrite(self, app: App, key: tuple[str, str]) -> None:
         if not self._is_live():
+            app.notify("export cancelled")  # closed before it could ask; nothing written
             return
         self._overwrite_pending = key
         self.query_one("#export-button", Button).disabled = False
         self._set_status("file exists · press export again to overwrite", "$warning")
 
-    def _fail(self, message: str) -> None:
+    def _fail(self, app: App, message: str) -> None:
         if not self._is_live():
+            app.notify("export cancelled")  # the dialog was closed; nothing was written
             return
         self.query_one("#export-button", Button).disabled = False
         self._set_status(message, "$danger")
