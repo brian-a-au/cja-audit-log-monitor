@@ -766,3 +766,118 @@ def test_network_failure_names_the_host(client, httpx_mock, monkeypatch) -> None
         client.get_logs()
     assert str(info.value) == "could not reach cja.adobe.io (ConnectError)"
     assert info.value.network is True
+
+
+class TestClientEdges:
+    """Error and paging branches that the main client tests do not reach."""
+
+    URL = "https://cja.adobe.io/auditlogs/api/v1/auditlogs"
+    ANY = re.compile(re.escape(URL) + r"(\?.*)?$")
+
+    @staticmethod
+    def _page(entries: list[dict], last: bool = True, total: int | None = None) -> dict:
+        return {
+            "content": entries,
+            "totalElements": len(entries) if total is None else total,
+            "last": last,
+            "numberOfElements": len(entries),
+        }
+
+    @staticmethod
+    def _raw(i: int, with_id: bool = True) -> dict:
+        raw = {
+            "dateCreated": f"2024-01-15T10:{i:02d}:00Z",
+            "userId": "user-1",
+            "action": "CREATE",
+            "componentType": "PROJECT",
+            "componentId": f"p-{i}",
+        }
+        if with_id:
+            raw["id"] = f"e-{i}"
+        return raw
+
+    def test_an_http_date_without_a_zone_is_read_as_utc(self) -> None:
+        naive = (datetime.now(UTC) + timedelta(seconds=10)).replace(tzinfo=None)
+        assert 0 < _retry_delay(format_datetime(naive), 0) <= 10
+
+    @pytest.mark.httpx_mock(assert_all_responses_were_requested=False)
+    def test_a_closed_client_refuses_new_requests(self, client: AuditLogsClient) -> None:
+        from cja_audit_log_monitor.client import ClientClosedError
+
+        client.close()
+        with pytest.raises(ClientClosedError):
+            _ = client.client
+
+    def test_a_second_401_is_an_authentication_error(
+        self, client: AuditLogsClient, httpx_mock: HTTPXMock
+    ) -> None:
+        httpx_mock.add_response(url=self.URL, status_code=401, json={}, is_reusable=True)
+        with client, pytest.raises(APIError, match=r"Authentication failed \(401\)"):
+            client.get_logs()
+
+    def test_a_long_error_body_is_cut(self, client: AuditLogsClient, httpx_mock: HTTPXMock):
+        httpx_mock.add_response(url=self.URL, status_code=400, text="x" * 1000)
+        with client, pytest.raises(APIError) as info:
+            client.get_logs()
+        detail = str(info.value).split(" - ", 1)[1]
+        assert len(detail) == 300
+        assert detail.endswith("…")
+
+    def test_a_runtime_error_that_is_not_about_closing_is_raised(
+        self, client: AuditLogsClient, httpx_mock: HTTPXMock
+    ) -> None:
+        httpx_mock.add_exception(RuntimeError("unrelated"), url=self.URL)
+        with client, pytest.raises(RuntimeError, match="unrelated"):
+            client.get_logs()
+
+    def test_a_network_error_after_close_is_a_closed_error(
+        self, client: AuditLogsClient, httpx_mock: HTTPXMock
+    ) -> None:
+        from cja_audit_log_monitor.client import ClientClosedError
+
+        def fail_after_close(request):
+            client._closed = True  # what close(wait=False) from another thread does
+            raise httpx.ReadError("socket closed")
+
+        httpx_mock.add_callback(fail_after_close, url=self.URL)
+        with pytest.raises(ClientClosedError):
+            client.get_logs()
+
+    def test_entries_without_an_id_are_all_kept(
+        self, client: AuditLogsClient, httpx_mock: HTTPXMock
+    ) -> None:
+        body = self._page([self._raw(1, with_id=False), self._raw(2, with_id=False)])
+        httpx_mock.add_response(url=self.ANY, json=body)
+        with client:
+            assert len(client.get_all_logs()) == 2
+            entries, total = client.get_logs_sample()
+        assert (len(entries), total) == (2, 2)
+
+    def test_get_all_logs_stops_at_max_entries(
+        self, client: AuditLogsClient, httpx_mock: HTTPXMock
+    ) -> None:
+        httpx_mock.add_response(
+            url=self.ANY, json=self._page([self._raw(i) for i in range(5)], last=False, total=50)
+        )
+        with client:
+            assert [e.id for e in client.get_all_logs(max_entries=3)] == ["e-0", "e-1", "e-2"]
+
+    def test_component_logs_filter_by_type(
+        self, client: AuditLogsClient, httpx_mock: HTTPXMock
+    ) -> None:
+        httpx_mock.add_response(url=self.ANY, json=self._page([self._raw(1)]))
+        with client:
+            entries = client.get_component_logs("p-1", "PROJECT", max_entries=10)
+        assert [e.id for e in entries] == ["e-1"]
+        params = httpx_mock.get_requests()[-1].url.params
+        assert params["componentId"] == "p-1"
+        assert params["component"] == "PROJECT"
+
+    def test_component_logs_ignore_an_unknown_type(
+        self, client: AuditLogsClient, httpx_mock: HTTPXMock, caplog
+    ) -> None:
+        httpx_mock.add_response(url=self.ANY, json=self._page([]))
+        with client:
+            assert client.get_component_logs("p-1", "NOPE") == []
+        assert "component" not in httpx_mock.get_requests()[-1].url.params
+        assert "Unknown component type: NOPE" in caplog.text
