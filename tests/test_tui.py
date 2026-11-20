@@ -5294,3 +5294,167 @@ class TestExportDialogMessages:
                 )
                 assert "\n" not in self._status(dialog)
                 assert not dialog.query_one("#export-button", Button).disabled
+
+
+# Every key the app or a view binds, in an order that leaves each opened screen again.
+_SMOKE_KEYS = [
+    "r",
+    "enter",
+    "escape",
+    "n",
+    "p",
+    "slash",
+    "escape",
+    "question_mark",
+    "escape",
+    "e",
+    "escape",
+    "space",
+    "space",
+]
+
+
+async def _settle(pilot) -> None:
+    """Let messages and short workers run. Never waits for the monitor loop."""
+    for _ in range(3):
+        await pilot.pause(0.02)
+
+
+def _assert_alive(app, where: str) -> None:
+    assert app.is_running, f"the app stopped after {where}"
+    assert app._exception is None, f"{where}: {app._exception!r}"
+
+
+async def _poke_everything(app, pilot) -> None:
+    """Visit each view, press every bound key and click every visible button."""
+    for view_key in "dlmsac":
+        await pilot.press(view_key)
+        await _settle(pilot)
+        view = app._screens[app._current_screen]
+        for key in _SMOKE_KEYS:
+            await pilot.press(key)
+            await _settle(pilot)
+            _assert_alive(app, f"view {view_key!r}, key {key!r}")
+        for button in list(view.query(Button)):
+            if button.disabled or not button.display or not button.region:
+                continue
+            await pilot.click(f"#{button.id}")
+            await _settle(pilot)
+            while app.screen is not app.screen_stack[0]:  # close any dialog it opened
+                await pilot.press("escape")
+                await _settle(pilot)
+            _assert_alive(app, f"view {view_key!r}, button {button.id!r}")
+    # The export dialog's own controls.
+    await pilot.press("e")
+    await _settle(pilot)
+    for control in ("#format-csv", "#format-tsv", "#scope-all", "#export-button"):
+        if app.screen.query(control):
+            await pilot.click(control)
+            await _settle(pilot)
+            _assert_alive(app, f"export dialog {control}")
+    await pilot.press("escape")
+    await _settle(pilot)
+    _assert_alive(app, "closing the export dialog")
+
+
+def _fail_every_call(state) -> None:
+    from cja_audit_log_monitor.client import APIError
+
+    error = APIError("could not reach cja.adobe.io (ConnectError)", network=True)
+    client = state.client
+    for name in ("get_logs", "get_all_logs", "get_logs_sample", "verify_connection"):
+        getattr(client, name).side_effect = error
+    state.alert_engine.check_batch.side_effect = None
+
+
+@pytest.mark.real_mount
+@pytest.mark.parametrize(
+    ("size", "api"),
+    [((140, 40), "working"), ((140, 40), "failing"), ((80, 24), "working")],
+    ids=["wide", "wide-failing-api", "small"],
+)
+async def test_every_key_and_button_leaves_the_app_running(mock_app_state, size, api):
+    """A crash in any control fails here, e.g. the filter reset on Textual 8."""
+    if api == "failing":
+        _fail_every_call(mock_app_state)
+    app = _make_app(mock_app_state)
+    async with app.run_test(size=size, notifications=True) as pilot:
+        await _settle(pilot)
+        await _poke_everything(app, pilot)
+        if mock_app_state.monitor.is_running:
+            await pilot.press("m", "space")
+            await _settle(pilot)
+        _assert_alive(app, "the end")
+
+
+class TestMonitorTableCursor:
+    """The live table keeps the reader's place while rows come and go."""
+
+    async def _table(self, app, pilot):
+        from cja_audit_log_monitor.tui.widgets import LogTable
+
+        await pilot.press("m")
+        await pilot.pause()
+        return app.query_one("#monitor-log", LogTable)
+
+    async def test_cursor_stays_on_its_entry_when_old_rows_are_dropped(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            table = await self._table(app, pilot)
+            table.append_entries(_monitor_entries(0, 10), max_rows=10)
+            table.move_cursor(row=5)  # reading an older row: not following the stream
+            await pilot.pause()
+            assert table.get_selected_entry().id == "m-5"
+            table.append_entries(_monitor_entries(10, 3), max_rows=10)
+            await pilot.pause()
+            assert table.row_count == 10
+            assert table.ordered_rows[0].key.value == "m-3"
+            assert table.get_selected_entry().id == "m-5"
+
+    async def test_cursor_on_a_dropped_row_moves_to_the_top(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            table = await self._table(app, pilot)
+            table.append_entries(_monitor_entries(0, 10), max_rows=10)
+            table.move_cursor(row=1)
+            table.append_entries(_monitor_entries(10, 5), max_rows=10)
+            await pilot.pause()
+            assert table.cursor_row == 0
+            assert table.get_selected_entry().id == "m-5"
+
+    async def test_repeated_entries_change_nothing(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            table = await self._table(app, pilot)
+            table.append_entries(_monitor_entries(0, 5), max_rows=10)
+            table.move_cursor(row=2)
+            table.append_entries(_monitor_entries(0, 5), max_rows=10)
+            await pilot.pause()
+            assert table.row_count == 5
+            assert table.cursor_row == 2
+
+
+class TestQuietPaths:
+    """Load results that are not errors but still need a clear message."""
+
+    async def test_test_rules_with_no_logs_says_so(self, mock_app_state):
+        mock_app_state.client.get_all_logs.return_value = []
+        app = _make_app(mock_app_state)
+        async with app.run_test() as pilot:
+            await pilot.press("a")
+            await pilot.pause()
+            await pilot.click("#test-rules")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            text = _plain(app.query_one("#test-results", Static))
+            assert "no audit logs found to test against" in text
+
+    async def test_dashboard_stats_failure_after_a_good_connection(self, mock_app_state):
+        from cja_audit_log_monitor.client import APIError
+
+        mock_app_state.client.get_logs_sample.side_effect = APIError("API request failed: 500")
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, "d")
+            assert "500" in _empty_text(view)
+            assert app.is_running

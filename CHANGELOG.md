@@ -4,6 +4,10 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Changed
+
+- Textual is now capped below version 9. A new major version can rename APIs, as Textual 8 did, so the cap is raised only after a check.
+
 ## [0.1.1] - 2026-11-19
 
 ### Fixed

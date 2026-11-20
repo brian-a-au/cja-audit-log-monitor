@@ -317,3 +317,49 @@ class TestTokenEdges:
             TokenManager(sample_settings).get_token()
         assert "TOPSECRET" not in str(info.value)
         assert len(str(info.value)) < 400
+
+
+class TestImsMessages:
+    """The hint shown for each IMS failure a misconfigured setup can hit."""
+
+    IMS = "https://ims-na1.adobelogin.com/ims/token/v3"
+
+    @pytest.mark.parametrize(
+        ("code", "hint"),
+        [
+            ("invalid_scope", "Copy SCOPES exactly"),
+            ("unauthorized_client", "Ensure OAuth Server-to-Server is enabled"),
+            ("something_new", "OAuth error (400): something_new - why"),
+        ],
+    )
+    def test_oauth_error_codes(self, sample_settings, httpx_mock, code, hint) -> None:
+        httpx_mock.add_response(
+            url=self.IMS, status_code=400, json={"error": code, "error_description": "why"}
+        )
+        with pytest.raises(AuthenticationError, match=re.escape(hint)) as info:
+            TokenManager(sample_settings).get_token()
+        assert info.value.transient is False
+
+    @pytest.mark.parametrize(
+        ("status", "hint"),
+        [
+            (401, "401 Unauthorized: Check that credentials are current"),
+            (403, "403 Forbidden: Ensure both CJA API and Experience Platform API"),
+            (418, "OAuth authentication failed: 418 - client_secret=*** teapot"),
+        ],
+    )
+    def test_a_non_json_error_body(self, sample_settings, httpx_mock, status, hint) -> None:
+        httpx_mock.add_response(
+            url=self.IMS, status_code=status, text="client_secret=abc123 teapot"
+        )
+        with pytest.raises(AuthenticationError, match=re.escape(hint)) as info:
+            TokenManager(sample_settings).get_token()
+        assert "abc123" not in str(info.value)
+
+    @pytest.mark.parametrize(
+        "body", [{}, {"access_token": "a", "expires_in": "soon"}, ["not", "an", "object"]]
+    )
+    def test_a_token_response_without_a_usable_token(self, sample_settings, httpx_mock, body):
+        httpx_mock.add_response(url=self.IMS, json=body)
+        with pytest.raises(AuthenticationError, match="IMS response had no access_token"):
+            TokenManager(sample_settings).get_token()

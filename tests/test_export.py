@@ -635,3 +635,12 @@ class TestExportDetails:
         export_entries([self.ENTRY], target, output_format="json")
         assert target.exists()
         assert [p.name for p in tmp_path.iterdir()] == [target.name]
+
+
+def test_a_too_long_file_name_is_a_problem_not_a_crash(tmp_path) -> None:
+    from cja_audit_log_monitor.export import check_export_path
+
+    path, problem, exists = check_export_path(str(tmp_path / ("x" * 300 + ".json")))
+    assert path is None
+    assert exists is False
+    assert problem == "the file name is too long"
