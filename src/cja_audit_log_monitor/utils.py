@@ -1,6 +1,7 @@
 """Shared utilities for CJA Audit Log Monitor."""
 
 from collections import OrderedDict, defaultdict
+from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -99,6 +100,19 @@ def to_local(dt: datetime) -> datetime:
 def local_tz_name() -> str:
     """Short name of the local time zone right now, e.g. ``PST``."""
     return datetime.now(UTC).astimezone().tzname() or "local"
+
+
+def zone_label(timestamps: Iterable[datetime | None]) -> str:
+    """The local zone names in effect at ``timestamps``, oldest first, joined by ``/``.
+
+    Each time is shown in the offset that was in effect at that moment, so data that spans
+    a daylight saving change is labelled with both names, e.g. ``PST/PDT``. With no
+    timestamps this is the zone name right now.
+    """
+    names: dict[str, None] = {}
+    for ts in sorted(t for t in timestamps if t is not None):
+        names.setdefault(to_local(ts).tzname() or "local", None)
+    return "/".join(names) or local_tz_name()
 
 
 def get_user_key(entry: AuditLogEntry) -> str:

@@ -1578,12 +1578,12 @@ def query(
     if date_preset == "today":
         start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         end = now
-        label = "today"
+        label = "today (UTC)"
     elif date_preset == "yesterday":
         day_before = now - timedelta(days=1)
         start = day_before.replace(hour=0, minute=0, second=0, microsecond=0)
         end = day_before.replace(hour=23, minute=59, second=59, microsecond=999999)
-        label = "yesterday"
+        label = "yesterday (UTC)"
     elif date_preset == "last_week":
         start = now - timedelta(days=7)
         end = now
@@ -1696,7 +1696,7 @@ def timeline(
         return
 
     # Display daily activity
-    console.print("[bold]Daily Activity[/bold]")
+    console.print("[bold]Daily Activity (UTC)[/bold]")
     if daily:
         max_count = max(daily.values()) if daily else 1
         for date, count in sorted(daily.items()):
@@ -1706,7 +1706,7 @@ def timeline(
     console.print()
 
     # Display hourly distribution
-    console.print("[bold]Hourly Distribution[/bold]")
+    console.print("[bold]Hourly Distribution (UTC)[/bold]")
     max_hourly = max(hourly.values()) if hourly else 1
     for hour in range(24):
         count = hourly.get(hour, 0)

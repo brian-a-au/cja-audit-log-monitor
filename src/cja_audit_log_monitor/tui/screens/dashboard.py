@@ -11,7 +11,7 @@ from textual.widgets import Button, LoadingIndicator, Static
 from ...alerts import analyze_for_anomalies
 from ...formatters import fit_cells, literal, resolve_tcss_markup
 from ...stats import build_date_range_query, calculate_stats, get_hourly_distribution
-from ...utils import local_tz_name
+from ...utils import local_tz_name, zone_label
 from ..state import AppState
 from ..widgets import ActionBarChart, FittedStatic, HourlyChart
 from .base import (
@@ -36,6 +36,7 @@ class _DashboardLoad:
     hourly: dict[int, int] = field(default_factory=dict)
     total: int | None = None
     error: Exception | None = None
+    zone: str | None = None  # the local zone names of the sampled entries
 
 
 class DashboardView(ContentView):
@@ -128,6 +129,7 @@ class DashboardView(ContentView):
                 anomalies=analyze_for_anomalies(entries, local=True),
                 hourly=get_hourly_distribution(entries, local=True),
                 total=total,
+                zone=zone_label(entry.timestamp for entry in entries),
             )
         except Exception as error:
             # The connection worked, so the header says so even though this failed.
@@ -145,7 +147,7 @@ class DashboardView(ContentView):
         elif load.stats is None:
             self.set_empty_state(no_activity_message(self._days))
         else:
-            self._update_stats(load.stats, load.anomalies, load.hourly, load.total)
+            self._update_stats(load.stats, load.anomalies, load.hourly, load.total, load.zone)
 
     def _show_disconnected(self, error: str) -> None:
         """Report a failed connection in the header and the view."""
@@ -153,7 +155,12 @@ class DashboardView(ContentView):
         self.set_empty_state(not_connected_message(error))
 
     def _update_stats(
-        self, stats: dict, anomalies: list, hourly: dict[int, int], total: int | None = None
+        self,
+        stats: dict,
+        anomalies: list,
+        hourly: dict[int, int],
+        total: int | None = None,
+        zone: str | None = None,
     ) -> None:
         """Update statistics display."""
         self.set_empty_state(None)
@@ -179,9 +186,9 @@ class DashboardView(ContentView):
             stats.get("action_counts", {}), width=24
         )
         self.query_one("#hourly-chart", HourlyChart).update_data(hourly)
-        # Refresh the zone name, which can change (daylight saving) in a long session.
+        # The zones of the data: two names when it spans a daylight saving change.
         self.query_one("#dashboard-hourly-label", Static).update(
-            f"HOURLY ACTIVITY · {local_tz_name()}"
+            f"HOURLY ACTIVITY · {zone or local_tz_name()}"
         )
 
         self._top_users = list(top_users)

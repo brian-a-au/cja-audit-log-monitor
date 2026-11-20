@@ -87,7 +87,7 @@ You can also open the [alerts view](screens/alerts.md) in the TUI and click `tes
 ## Tips
 
 - **Toggles last until you quit.** In the [alerts view](screens/alerts.md) you can turn rules on and off without editing the config file, e.g. during a planned change. The tool keeps these changes only while the app runs. A rule you turned off stays off after **reload settings**. When you quit, the rules come back from the config file. The `reset rules` button rebuilds the rules from the config file right away. If the file has no rules, it rebuilds the built-in rules.
-- **Off-hours activity depends on the time zone.** The CLI judges the hours between midnight and 5am in UTC. The TUI dashboard judges them in your local time zone, the same zone its charts use. Each anomaly's description names the zone, for example "Unusual activity at 02:00 PST".
+- **Off-hours activity depends on the time zone.** The CLI judges the hours between midnight and 5am in UTC. The TUI dashboard judges them in your local time zone, the same zone its charts use. Each anomaly's description names the zone, for example "Unusual activity at 02:00 PST". When the hour holds times from both sides of a daylight saving change, it names both, for example "Unusual activity at 01:00 EDT/EST".
 - **Use `per_user` for volume rules.** Without it, a rule counts events from everyone together, so a few people doing normal work can add up to an alert.
 
 ## Delivery channels

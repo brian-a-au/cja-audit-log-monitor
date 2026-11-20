@@ -1,5 +1,6 @@
 """Custom DataTable widget for audit log entries."""
 
+from collections.abc import Iterable
 from datetime import UTC, datetime
 
 from rich.text import Text
@@ -8,7 +9,7 @@ from textual.widgets.data_table import RowKey
 
 from ...formatters import cut_cells, format_timestamp, get_action_color, get_action_icon
 from ...models import AuditLogEntry
-from ...utils import entry_key, get_user_identifier, local_tz_name
+from ...utils import entry_key, get_user_identifier, local_tz_name, zone_label
 
 # Sort key for an entry with no timestamp: it goes before every timed entry.
 _NO_TIME = datetime.min.replace(tzinfo=UTC)
@@ -38,6 +39,7 @@ class LogTable(DataTable):
         super().__init__(**kwargs)
         self._entries: dict[RowKey, AuditLogEntry] = {}
         self._shown: list[str] = []  # keys of the columns currently in the table
+        self._zone: str | None = None  # zone names of the shown times; None before any
         self.cursor_type = "row"
         self.zebra_stripes = False  # quieter rows; severity does the work
 
@@ -45,7 +47,7 @@ class LogTable(DataTable):
         return [*self.COLUMN_WIDTHS, "name"]
 
     def _add_columns(self, widths: dict[str, int]) -> None:
-        labels = {"timestamp": f"time ({local_tz_name()})"}
+        labels = {"timestamp": f"time ({self._zone or local_tz_name()})"}
         for key, width in widths.items():
             self.add_column(labels.get(key, key), width=width, key=key)
         self._shown = list(widths)
@@ -179,9 +181,7 @@ class LogTable(DataTable):
         selected = self.get_selected_entry() if self.row_count else None
         keep = entry_key(selected) if selected is not None else None
         self.clear()
-        # Refresh the zone name, which can change (daylight saving) in a long session.
-        if "timestamp" in self.columns:
-            self.columns["timestamp"].label = Text(f"time ({local_tz_name()})")
+        self._label_zone(entries)
 
         used: dict[str, int] = {}
         cursor_row = 0
@@ -194,6 +194,12 @@ class LogTable(DataTable):
             self.move_cursor(row=cursor_row)
         # Rows may have brought in the vertical scrollbar, narrowing the table.
         self.call_after_refresh(self._fit_columns)
+
+    def _label_zone(self, entries: Iterable[AuditLogEntry]) -> None:
+        """Name the zones of the shown times, e.g. ``time (PST/PDT)`` across a change."""
+        self._zone = zone_label(entry.timestamp for entry in entries)
+        if "timestamp" in self.columns:
+            self.columns["timestamp"].label = Text(f"time ({self._zone})")
 
     def get_selected_entry(self) -> AuditLogEntry | None:
         """Get the currently selected entry."""
@@ -221,6 +227,7 @@ class LogTable(DataTable):
             added = True
         if not added:
             return
+        self._label_zone(self._entries.values())
         removed = 0
         while self.row_count > max_rows:
             oldest = next(iter(self._entries))
