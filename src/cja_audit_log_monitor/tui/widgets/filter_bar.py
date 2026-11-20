@@ -96,8 +96,9 @@ class FilterBar(Static):
         action_select = self.query_one("#filter-action", Select)
         component_select = self.query_one("#filter-component", Select)
 
-        action = action_select.value if action_select.value != Select.BLANK else None
-        component = component_select.value if component_select.value != Select.BLANK else None
+        # is_blank() and clear(), not Select.BLANK: Textual 8 renamed the empty value to NULL.
+        action = None if action_select.is_blank() else str(action_select.value)
+        component = None if component_select.is_blank() else str(component_select.value)
 
         self.post_message(self.FilterChanged(user, action, component, search))
 
@@ -105,6 +106,6 @@ class FilterBar(Static):
         """Reset all filter inputs."""
         self.query_one("#filter-search", Input).value = ""
         self.query_one("#filter-user", Input).value = ""
-        self.query_one("#filter-action", Select).value = Select.BLANK
-        self.query_one("#filter-component", Select).value = Select.BLANK
+        self.query_one("#filter-action", Select).clear()
+        self.query_one("#filter-component", Select).clear()
         self.post_message(self.FilterReset())

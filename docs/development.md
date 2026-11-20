@@ -20,7 +20,12 @@ uv run pytest tests/test_client.py
 
 # A single test
 uv run pytest tests/test_client.py::TestAuditLogsClient::test_get_logs
+
+# With coverage (fails below 95%)
+uv run pytest --cov
 ```
+
+CI measures branch coverage on each Python version and fails below the `fail_under` value in `pyproject.toml`. If you raise coverage, raise that value and the README badge to match.
 
 Tests use `pytest-httpx` to mock HTTP calls. When testing the client, mock both the IMS token endpoint and the CJA API endpoint. CLI tests use Click's `CliRunner` and must prefix subgroup commands with `["cli", ...]`.
 

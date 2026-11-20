@@ -4,6 +4,16 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Fixed
+
+- In the log browser, the filter **reset** button crashed the app with Textual 8.
+- Opening entry details from the footer on an empty log table raised an error. It now shows "no entry selected".
+- Pressing Ctrl+C in `cli monitor` could hang. The monitor now prints "Monitor stopped." after the poll ends, not from inside the signal handler.
+
+### Changed
+
+- Tests now measure branch coverage, and CI fails below 95%.
+
 ## [0.1.0] - 2026-11-19
 
 This is the first public release. It is an unofficial, community tool and is not affiliated with Adobe.

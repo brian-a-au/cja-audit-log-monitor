@@ -530,3 +530,47 @@ def test_first_message_names_only_the_needed_credentials(sample_settings) -> Non
     assert "ORG_ID" in text and "CLIENT_ID" in text and "SECRET" in text
     assert "SCOPES" not in text
     assert ".env.example" not in text
+
+
+class TestConfigEdges:
+    def test_a_bad_dotenv_value_is_blamed_on_the_dotenv(self, tmp_path) -> None:
+        """The file's good value loses to the .env's bad one, so the error names the .env."""
+        (tmp_path / ".env").write_text("MONITOR_INTERVAL=0\n")
+        path = tmp_path / "c.yaml"
+        path.write_text("monitor_interval: 10\n")
+        with pytest.raises(ConfigError) as info:
+            load_config(path)
+        assert str(info.value).startswith("environment or .env: monitor_interval:")
+
+    def test_more_errors_are_counted(self, tmp_path) -> None:
+        path = tmp_path / "c.yaml"
+        path.write_text("monitor_interval: 0\ndefault_days: 0\n")
+        with pytest.raises(ConfigError, match=r"\(\+1 more\)$"):
+            load_config(path)
+
+    def test_default_path_without_the_env_var(self, monkeypatch) -> None:
+        from cja_audit_log_monitor.config import DEFAULT_CONFIG_FILE, get_config_path
+
+        monkeypatch.delenv("CJA_CONFIG_PATH", raising=False)
+        assert get_config_path() == DEFAULT_CONFIG_FILE
+
+    def test_init_without_a_path_uses_the_env_var(self, tmp_path, monkeypatch) -> None:
+        target = tmp_path / "from-env" / "config.yaml"
+        monkeypatch.setenv("CJA_CONFIG_PATH", str(target))
+        assert create_default_config() == target
+        assert target.is_file()
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX file modes")
+    def test_init_in_a_read_only_folder_is_a_config_error(self, tmp_path) -> None:
+        import os
+
+        if os.geteuid() == 0:
+            pytest.skip("root can write anywhere")
+        folder = tmp_path / "locked"
+        folder.mkdir()
+        folder.chmod(0o500)
+        try:
+            with pytest.raises(ConfigError, match="cannot write"):
+                create_default_config(folder / "config.yaml")
+        finally:
+            folder.chmod(0o700)

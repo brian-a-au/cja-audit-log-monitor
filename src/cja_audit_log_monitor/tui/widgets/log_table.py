@@ -197,7 +197,8 @@ class LogTable(DataTable):
 
     def get_selected_entry(self) -> AuditLogEntry | None:
         """Get the currently selected entry."""
-        if self.cursor_row is None:
+        # An empty table still has a cursor at row 0, but no cell there.
+        if self.cursor_row is None or not self.is_valid_coordinate(self.cursor_coordinate):
             return None
         row_key = self.coordinate_to_cell_key(self.cursor_coordinate).row_key
         return self._entries.get(row_key)
