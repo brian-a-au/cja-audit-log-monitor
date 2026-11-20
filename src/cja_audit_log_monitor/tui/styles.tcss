@@ -306,6 +306,18 @@ AlertSummary {
     border: none;
 }
 
+#monitor-container.-stream-empty #monitor-log {
+    height: auto;
+}
+
+#stream-hint-area {
+    height: 1fr;
+}
+
+#stream-hint {
+    margin: 1 0;
+}
+
 /* ---- Entry detail SIDE PANEL (was a modal) ---- */
 #entry-detail-panel {
     dock: right;

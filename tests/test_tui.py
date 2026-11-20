@@ -720,12 +720,22 @@ class TestViewLayouts:
             card = app._screens["alerts"].query_one("#card-0")
             assert 0 < card.region.height <= 4
 
-    async def test_monitor_stream_fills_space(self, mock_app_state):
+    async def test_monitor_stream_fills_space(self, mock_app_state, monkeypatch):
         app = _make_app(mock_app_state)
         async with app.run_test(size=(140, 40)) as pilot:
             await pilot.press("m")
             await pilot.pause()
-            assert app._screens["monitor"].query_one("#monitor-log").region.height >= 15
+            screen = app._screens["monitor"]
+            # Stopped: the column headers, then the hint in the rows' place.
+            table = screen.query_one("#monitor-log").region
+            hint = screen.query_one("#stream-hint-area").region
+            assert table.height + hint.height >= 15
+            alerts_y = screen.query_one("#alert-summary").region.y
+            screen = await _start_monitor_without_loop(app, pilot, monkeypatch)
+            assert screen.query_one("#monitor-log").region.height >= 15
+            # Starting does not move the alerts.
+            assert screen.query_one("#alert-summary").region.y == alerts_y
+            screen._stop_monitoring()
 
 
 # ---------------------------------------------------------------------------
@@ -1254,6 +1264,60 @@ async def _drive_poll(screen, pilot) -> None:
 
 def _status_indicator(screen) -> str:
     return str(screen.query_one("#status-indicator", Static).render())
+
+
+class TestMonitorStreamHint:
+    """A stopped monitor with an empty stream says how to start it."""
+
+    @staticmethod
+    def _hint(screen):
+        return screen.query_one("#stream-hint-area")
+
+    async def test_the_hint_shows_before_the_monitor_starts(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.press("m")
+            await pilot.pause()
+            screen = app._screens["monitor"]
+            hint = self._hint(screen)
+            assert hint.display
+            line = screen.query_one("#stream-hint", Static)
+            assert line.region.height > 0
+            assert "monitor stopped · press space to start" in _plain(line)
+            # The hint sits under the table's column headers, not below an empty table.
+            table = screen.query_one("#monitor-log")
+            assert hint.region.y <= table.region.bottom + 1
+
+    async def test_starting_hides_the_hint(self, mock_app_state, monkeypatch):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            screen = await _start_monitor_without_loop(app, pilot, monkeypatch)
+            assert not self._hint(screen).display
+            screen._stop_monitoring()
+
+    async def test_stopping_with_an_empty_stream_shows_the_hint_again(
+        self, mock_app_state, monkeypatch
+    ):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            screen = await _start_monitor_without_loop(app, pilot, monkeypatch)
+            screen._stop_monitoring()
+            await pilot.pause()
+            assert self._hint(screen).display
+
+    async def test_stopping_after_a_poll_with_rows_keeps_the_rows(
+        self, mock_app_state, monkeypatch
+    ):
+        mock_app_state.client.get_logs.side_effect = _page_zero_batches([_monitor_entries(0, 2)])
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            screen = await _start_monitor_without_loop(app, pilot, monkeypatch)
+            await _drive_poll(screen, pilot)
+            assert screen.query_one("#monitor-log").row_count == 2
+            assert not self._hint(screen).display
+            screen._stop_monitoring()
+            await pilot.pause()
+            assert not self._hint(screen).display
 
 
 class TestMonitorStream:
