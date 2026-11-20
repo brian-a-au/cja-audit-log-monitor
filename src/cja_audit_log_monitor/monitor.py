@@ -35,8 +35,11 @@ FATAL_STATUS = frozenset({400, 401, 403, 404})
 
 # Each poll re-reads this much before the last poll, so late-arriving events are not missed.
 POLL_OVERLAP = timedelta(minutes=5)
-# How many recent entry keys to remember for de-duplicating the overlap.
-SEEN_IDS_MAX = 5000
+# The most entry keys remembered for de-duplicating the overlap. Keys are forgotten once
+# their entry is older than the next poll's window, so this cap is only a safety limit: it
+# must stay far above the number of events one window holds (6 minutes at the default
+# interval). A cap of 5,000 gave duplicates once a window held more than 5,000 events.
+SEEN_IDS_MAX = 200_000
 
 
 def is_retryable(error: Exception) -> bool:
@@ -51,6 +54,24 @@ def is_retryable(error: Exception) -> bool:
     if isinstance(error, APIError):
         return error.status_code not in FATAL_STATUS
     return True
+
+
+def seen_time(entry: AuditLogEntry, polled_at: datetime) -> datetime:
+    """The time to remember ``entry``'s key by (see ``RecentIds.forget_before``).
+
+    That is the entry's own time while it is inside the window the next poll reads.
+    An entry with no time, or one the API returned from before the window, is
+    remembered by the poll time instead, so its key is not forgotten while the API
+    still returns it.
+    """
+    ts = entry.timestamp
+    return ts if ts is not None and ts >= polled_at - POLL_OVERLAP else polled_at
+
+
+def _outside(entry: AuditLogEntry, query: AuditLogQuery) -> bool:
+    """True when the API returned ``entry`` from before the query's start, or with no time."""
+    ts = entry.timestamp
+    return ts is None or (query.start_date is not None and ts < query.start_date)
 
 
 def build_poll_query(since: datetime | None, now: datetime, page_size: int) -> AuditLogQuery:
@@ -75,7 +96,8 @@ def fetch_unseen(
     Paging ends on an empty page, the last page (by ``last`` or the API's page count), or after
     ``max_pages`` pages. A page of entries already seen does not end it: pages are newest first,
     so a late-indexed entry can sit behind them. ``seen`` is not changed; the caller adds the
-    keys once the whole poll has worked. When ``stop`` is set, paging ends before the next page.
+    keys once the whole poll has worked; only the time of a key read again from outside the
+    window is refreshed (see ``seen_time``). When ``stop`` is set, paging ends before the next page.
 
     Returns:
         The unseen entries, oldest first, and how many matching events were not read
@@ -95,7 +117,11 @@ def fetch_unseen(
         read += len(response.content)
         for entry in response.content:
             key = entry_key(entry)
-            if key not in seen and key not in fresh:
+            if key in seen:
+                if query.end_date is not None and _outside(entry, query):
+                    # Keep the key while the API still returns the entry (see seen_time).
+                    seen.refresh(key, query.end_date)
+            elif key not in fresh:
                 fresh[key] = entry
         if not response.content or response.last or is_final_page(page, response):
             break
@@ -199,8 +225,10 @@ class AuditLogMonitor:
 
         # Only remember entries once the whole poll succeeded, so a failed page is retried.
         for entry in new_entries:
-            self._seen.add(entry_key(entry))
+            self._seen.add(entry_key(entry), seen_time(entry, now))
         self._last_poll_time = now
+        # The next poll starts at now - POLL_OVERLAP, so older entries cannot come back.
+        self._seen.forget_before(now - POLL_OVERLAP)
 
         if self._entry_filter:
             new_entries = [e for e in new_entries if self._entry_filter(e)]

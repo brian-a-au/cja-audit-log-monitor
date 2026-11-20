@@ -17,11 +17,13 @@ from ...config import MAX_MONITOR_INTERVAL
 from ...formatters import cut_cells, literal, resolve_tcss_markup
 from ...models import AuditLogEntry
 from ...monitor import (
+    POLL_OVERLAP,
     POLL_PAGE_SIZE,
     SEEN_IDS_MAX,
     build_poll_query,
     fetch_unseen,
     is_retryable,
+    seen_time,
     skipped_message,
 )
 from ...utils import RecentIds, entry_key, to_local
@@ -372,8 +374,10 @@ class MonitorView(ContentView):
             return  # the session this poll belongs to has ended
         # Remember entries only once the whole poll worked, so a failed page is re-read.
         for entry in new_entries:
-            self._seen.add(entry_key(entry))
+            self._seen.add(entry_key(entry), seen_time(entry, polled_at))
         self._last_poll_time = polled_at
+        # The next poll starts at polled_at - POLL_OVERLAP, so older entries cannot come back.
+        self._seen.forget_before(polled_at - POLL_OVERLAP)
 
         monitor = self._state.monitor
         monitor.last_check = polled_at

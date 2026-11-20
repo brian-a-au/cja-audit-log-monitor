@@ -10,20 +10,40 @@ from .models import AuditLogEntry, printable
 
 
 class RecentIds:
-    """A bounded set of keys that forgets the oldest one when full."""
+    """Remembered keys, each with the time of its entry.
+
+    ``forget_before`` drops keys by entry time, which is what keeps memory small. ``maxlen``
+    is only a safety cap: past it the least recently added key is dropped, so it must be
+    far larger than the number of keys one time window can hold.
+    """
 
     def __init__(self, maxlen: int) -> None:
         self._maxlen = maxlen
-        self._keys: OrderedDict[str, None] = OrderedDict()
+        self._keys: OrderedDict[str, datetime | None] = OrderedDict()
 
-    def add(self, key: str) -> bool:
-        """Remember ``key``. Return True if it was new; a repeat refreshes its recency."""
+    def add(self, key: str, when: datetime | None = None) -> bool:
+        """Remember ``key`` and its entry time. Return True if it was new.
+
+        A repeat refreshes its recency. A key with no time is dropped only by the cap.
+        """
         is_new = key not in self._keys
-        self._keys[key] = None
+        self._keys[key] = when
         self._keys.move_to_end(key)
         while len(self._keys) > self._maxlen:
             self._keys.popitem(last=False)
         return is_new
+
+    def refresh(self, key: str, when: datetime) -> None:
+        """Move a remembered key's time up to ``when``; a key not remembered is left out."""
+        if key in self._keys:
+            old = self._keys[key]
+            self._keys[key] = when if old is None else max(old, when)
+
+    def forget_before(self, cutoff: datetime) -> None:
+        """Drop every key whose entry time is before ``cutoff``."""
+        old = [key for key, when in self._keys.items() if when is not None and when < cutoff]
+        for key in old:
+            del self._keys[key]
 
     def __contains__(self, key: object) -> bool:
         return key in self._keys
