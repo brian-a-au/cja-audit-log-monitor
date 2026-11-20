@@ -6,6 +6,12 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Fixed
 
+- In the monitor's recent alerts list, a summary with CJK or emoji names wrapped onto a second row, because lines were cut by characters, not by terminal cells.
+- A long error in the header wrapped onto two or three rows and took rows from the view. It is now cut to one row, and shown in full again when the window is wider.
+- The export toast and the export path messages showed the full path of your home folder. They now show it as `~`.
+- The config view could crash formatting the log count if the connection check gave none. It now shows `-`.
+- The statistics view had two blank rows above its cards; it now has one, like the dashboard.
+- TUI messages now share one style: lowercase, with `·` between a headline and its detail. For example `monitor error · <detail>`, `test failed · <detail>`, `rule <name> on`, and `not connected · <detail>` in the config view. A check that has not run yet shows `-`, not a dash.
 - A `.env` file that was not UTF-8 text made the CLI print `Unexpected error: UnicodeDecodeError`, and an unreadable one gave a bare file error. Both are now a `Configuration error` that names the problem with `.env`.
 - `cli export --help` said the format comes from the file suffix and also showed `[default: json]`. It now shows only the first, which is what the command does.
 - A monitor in a busy org showed events twice and alerted on them twice. Each poll re-reads the 5 minutes before the last poll, and the monitor remembered only the last 5,000 events to tell old from new, so a window with more than 5,000 events brought old ones back as new. Remembered events are now forgotten by age, once they are older than the next poll's window.

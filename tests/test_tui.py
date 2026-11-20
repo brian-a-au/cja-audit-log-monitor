@@ -5290,7 +5290,7 @@ class TestExportDialogMessages:
                 dialog.query_one("#output-path").value = str(tmp_path / "out.json")
                 await pilot.click("#export-button")
                 assert await _wait_for(
-                    lambda: self._status(dialog).startswith("export failed: disk full"), pilot
+                    lambda: self._status(dialog).startswith("export failed · disk full"), pilot
                 )
                 assert "\n" not in self._status(dialog)
                 assert not dialog.query_one("#export-button", Button).disabled

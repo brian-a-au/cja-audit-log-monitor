@@ -3,6 +3,7 @@
 from pathlib import Path
 from typing import Literal
 
+from rich.cells import cell_len
 from textual import events
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -12,7 +13,7 @@ from textual.message import Message
 from textual.screen import ModalScreen
 from textual.widgets import ContentSwitcher, Footer, Static
 
-from ..formatters import literal, resolve_tcss_markup
+from ..formatters import cut_cells, literal, resolve_tcss_markup
 from . import log_toasts
 from .screens.base import ContentView, classify_error
 from .state import AppState
@@ -198,13 +199,21 @@ class CJAAuditApp(App):
 
     _STATUS_DOT = {"connecting": "$warning", "connected": "$success", "disconnected": "$error"}
 
-    def _status_row_text(self, status: ConnectionStatus = "connecting", detail: str = "") -> str:
-        """Build the top status row content."""
+    def _status_row_text(
+        self, status: ConnectionStatus = "connecting", detail: str = "", width: int | None = None
+    ) -> str:
+        """Build the top status row content, with the detail cut to fit ``width`` cells."""
+        if width is None:
+            width = self.size.width
         org = self.state.settings.org_id  # loads config; may set config_error
         color = self._STATUS_DOT[status]
         if not detail and not self.state.config_error_summary:
             detail = f"org {org}" if org else ""
         text = f"cja-audit-log-monitor · [{color}]●[/{color}] {status}"
+        if detail and width:
+            # One row: cut the detail (often an error) to the room left after the status.
+            used = cell_len(f"cja-audit-log-monitor · ● {status} · ") + 2  # 2 for padding
+            detail = cut_cells(detail, max(10, width - used))
         if detail:
             text += f" · [$text-muted]{literal(detail)}[/$text-muted]"
         if self.state.config_error_summary:
@@ -213,6 +222,7 @@ class CJAAuditApp(App):
         return text
 
     _connection_status: ConnectionStatus = "connecting"
+    _status_detail: str = ""
 
     def set_connection_status(self, status: ConnectionStatus, detail: str = "") -> None:
         """Show the API connection state in the header row.
@@ -224,11 +234,20 @@ class CJAAuditApp(App):
         """
         self._connection_status = status
         first_line = detail.strip().splitlines()[0] if detail.strip() else ""
+        self._status_detail = first_line
         try:
             row = self.query_one("#status-row", Static)
         except NoMatches:
             return  # the screen is gone (app shutting down): nothing left to update
         row.update(self._status_row_text(status, first_line))
+
+    def _refit_status_row(self, width: int) -> None:
+        """Cut the header's detail again for a new width."""
+        try:
+            row = self.query_one("#status-row", Static)
+        except NoMatches:
+            return
+        row.update(self._status_row_text(self._connection_status, self._status_detail, width))
 
     def note_api_error(self, error: Exception) -> None:
         """Mark the header disconnected when a view's API call failed to connect."""
@@ -275,6 +294,7 @@ class CJAAuditApp(App):
         ``event.size``. Nav items are looked up on the base screen, because
         ``App.query`` only sees the active screen (a modal may be open).
         """
+        self._refit_status_row(event.size.width)
         narrow = event.size.width < self._NARROW_BELOW
         if narrow == self._nav_narrow:
             return

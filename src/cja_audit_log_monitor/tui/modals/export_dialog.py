@@ -12,6 +12,7 @@ from textual.worker import get_current_worker
 from ...export import check_export_path, export_entries
 from ...formatters import TCSS_TOKEN_HEX
 from ...models import AuditLogEntry
+from ...utils import display_path
 from ..state import AppState
 
 # Most entries "all matching" will fetch (10 requests at the API's page size of 1,000).
@@ -208,7 +209,7 @@ class ExportDialog(ModalScreen):
                     self._state.filters.to_query(), max_entries=EXPORT_MAX
                 )
             except Exception as e:
-                app.call_from_thread(self._fail, f"could not fetch entries: {_one_line(e)}")
+                app.call_from_thread(self._fail, f"could not fetch entries · {_one_line(e)}")
                 return
         else:
             entries = page_entries
@@ -226,7 +227,7 @@ class ExportDialog(ModalScreen):
             app.call_from_thread(self._ask_overwrite, key)
             return
         except Exception as e:
-            app.call_from_thread(self._fail, f"export failed: {_one_line(e)}")
+            app.call_from_thread(self._fail, f"export failed · {_one_line(e)}")
             return
         # The file is written: report it even if the dialog was closed meanwhile.
         app.call_from_thread(self._done, app, count, total, output_path)
@@ -250,7 +251,7 @@ class ExportDialog(ModalScreen):
 
     def _done(self, app: App, count: int, total: int | None, output_path: Path) -> None:
         """Report a finished export (also after the dialog closed) and close it shortly after."""
-        where = output_path.resolve()
+        where = display_path(output_path.resolve())  # ~ for the home folder
         if total is not None and total > count and count >= EXPORT_MAX:
             summary = f"exported {count:,} of {total:,} (limit reached) to {where}"
         elif total is not None and total > count:

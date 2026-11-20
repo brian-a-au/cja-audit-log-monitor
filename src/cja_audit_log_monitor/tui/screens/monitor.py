@@ -105,7 +105,7 @@ class MonitorView(ContentView):
 
         status = Horizontal(
             Static(resolve_tcss_markup("[$danger]● stopped[/$danger]"), id="status-indicator"),
-            Static("last check — · new 0 · alerts 0", id="stats-info"),
+            Static("last check - · new 0 · alerts 0", id="stats-info"),
             id="monitor-status",
             classes="monitor-status monitor-stopped",
         )
@@ -131,7 +131,7 @@ class MonitorView(ContentView):
             False when no poll started; the user has been told why.
         """
         if not self._state.monitor.is_running:
-            self.app.notify("the monitor is stopped; press space to start it")
+            self.app.notify("the monitor is stopped · press space to start it")
             return False
         if self._poll_lock.locked() or (
             self._refresh_worker is not None and self._refresh_worker.is_running
@@ -190,8 +190,8 @@ class MonitorView(ContentView):
         """Start the monitoring loop."""
         if not self._apply_interval():
             self._show_warning(
-                f"Interval must be {_MIN_INTERVAL} to {_MAX_INTERVAL:,} seconds; "
-                f"using {self._state.monitor.interval}."
+                f"interval must be {_MIN_INTERVAL} to {_MAX_INTERVAL:,} seconds · "
+                f"using {self._state.monitor.interval}"
             )
         monitor = self._state.monitor
         monitor.is_running = True
@@ -348,7 +348,7 @@ class MonitorView(ContentView):
         except Exception as e:
             # A bug in local alert code is not an API failure: the poll itself worked.
             logger.exception("Monitor alert check failed")
-            warnings.append(f"Alert check failed: {e}")
+            warnings.append(f"alert check failed · {e}")
 
         if stop.is_set():
             return
@@ -431,7 +431,7 @@ class MonitorView(ContentView):
     def _update_stats_display(self) -> None:
         """Update the stats display."""
         monitor = self._state.monitor
-        last_check = f"{to_local(monitor.last_check):%H:%M:%S}" if monitor.last_check else "—"
+        last_check = f"{to_local(monitor.last_check):%H:%M:%S}" if monitor.last_check else "-"
         self.query_one("#stats-info", Static).update(
             f"last check {last_check} · "
             f"new {monitor.entries_since_start} · "
@@ -440,7 +440,7 @@ class MonitorView(ContentView):
 
     def _show_error(self, error: str) -> None:
         """Show error message."""
-        self.app.notify(f"Monitor error: {error}", severity="error", markup=False)
+        self.app.notify(f"monitor error · {error}", severity="error", markup=False)
 
     def _show_warning(self, warning: str) -> None:
         """Show warning message."""

@@ -138,9 +138,9 @@ class AlertsView(ContentView):
         if index >= len(rules):
             return
         rules[index].enabled = event.value
-        verb = "Enabled" if event.value else "Disabled"
+        state = "on" if event.value else "off"
         self.app.notify(
-            f"{verb} rule: {self._rule_names[checkbox_id]}", severity="information", markup=False
+            f"rule {self._rule_names[checkbox_id]} {state}", severity="information", markup=False
         )
 
         # Update card styling
@@ -198,4 +198,4 @@ class AlertsView(ContentView):
         self._show_results(
             resolve_tcss_markup(f"[$danger]test failed:[/$danger] {literal(message)}")
         )
-        self.app.notify(f"Error: {message}", severity="error", markup=False)
+        self.app.notify(f"test failed · {message}", severity="error", markup=False)
