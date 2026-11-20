@@ -5085,3 +5085,128 @@ async def test_stats_hourly_chart_uses_the_height_on_wide_screens(mock_app_state
         await pilot.pause()
         chart = view.query_one("#stats-hourly-chart")
         assert (chart.region.height >= 15) is taller
+
+
+class TestLogBrowserFiltering:
+    """The filter bar and paging, driven through the real widgets."""
+
+    @staticmethod
+    def _last_query(state):
+        return state.client.get_logs.call_args.args[0]
+
+    async def test_typing_a_search_and_user_then_enter_filters(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await _show_and_load(app, pilot, "l")
+            mock_app_state.filters.page = 2  # a filter change must go back to page 1
+            await pilot.click("#filter-user")
+            await pilot.press(*"alice")
+            await pilot.click("#filter-search")
+            await pilot.press(*"report", "enter")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            query = self._last_query(mock_app_state)
+            assert query.description == "report"
+            assert query.user_id == "alice"
+            assert query.page == 0
+            assert query.actions is None
+
+    async def test_choosing_an_action_and_component_applies_at_once(self, mock_app_state):
+        from textual.widgets import Select
+
+        from cja_audit_log_monitor.models import ActionType, ComponentType
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, "l")
+            view.query_one("#filter-action", Select).value = "DELETE"
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            assert self._last_query(mock_app_state).actions == [ActionType.DELETE]
+            view.query_one("#filter-component", Select).value = "PROJECT"
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            query = self._last_query(mock_app_state)
+            assert query.actions == [ActionType.DELETE]
+            assert query.components == [ComponentType.PROJECT]
+
+    async def test_an_unknown_choice_is_treated_as_no_filter(self, mock_app_state):
+        from cja_audit_log_monitor.tui.widgets.filter_bar import FilterBar
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, "l")
+            view.on_filter_bar_filter_changed(FilterBar.FilterChanged("", "NOPE", "NOPE", ""))
+            await app.workers.wait_for_complete()
+            assert mock_app_state.filters.actions == []
+            assert mock_app_state.filters.components == []
+
+    async def test_reset_clears_every_field_and_the_query(self, mock_app_state):
+        from textual.widgets import Input, Select
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, "l")
+            view.query_one("#filter-action", Select).value = "DELETE"
+            await pilot.click("#filter-search")
+            await pilot.press(*"x", "enter")
+            await app.workers.wait_for_complete()
+            await pilot.click("#filter-reset")
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            assert view.query_one("#filter-search", Input).value == ""
+            assert view.query_one("#filter-action", Select).value == Select.BLANK
+            query = self._last_query(mock_app_state)
+            assert (query.description, query.actions, query.page) == (None, None, 0)
+
+    async def test_paging_buttons_move_between_pages(self, mock_app_state, sample_audit_entries):
+        mock_app_state.client.get_logs.return_value = AuditLogResponse(
+            content=sample_audit_entries, total_elements=120, last=False
+        )
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, "l")
+            assert view.query_one("#prev-page", Button).disabled
+            await pilot.click("#next-page")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert self._last_query(mock_app_state).page == 1
+            assert not view.query_one("#prev-page", Button).disabled
+            await pilot.click("#prev-page")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert self._last_query(mock_app_state).page == 0
+            calls = mock_app_state.client.get_logs.call_count
+            await pilot.press("p")  # already on the first page: no reload
+            await app.workers.wait_for_complete()
+            assert mock_app_state.client.get_logs.call_count == calls
+
+    async def test_empty_log_without_filters_says_so(self, mock_app_state):
+        mock_app_state.client.get_logs.return_value = AuditLogResponse(content=[], total_elements=0)
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, "l")
+            assert "no audit log entries" in _plain(view.query_one("#table-message", Static))
+
+    async def test_enter_on_an_empty_table_warns(self, mock_app_state):
+        mock_app_state.client.get_logs.return_value = AuditLogResponse(content=[], total_elements=0)
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40), notifications=True) as pilot:
+            view = await _show_and_load(app, pilot, "l")
+            # What clicking "details" in the footer runs. It used to raise CellDoesNotExist.
+            view.action_view_details()
+            await pilot.pause()
+            assert app.is_running
+            assert any("no entry selected" in n.message for n in app._notifications)
+
+    async def test_escape_in_a_filter_box_keeps_the_text_and_leaves(self, mock_app_state):
+        from textual.widgets import Input
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, "l")
+            await pilot.click("#filter-search")
+            await pilot.press(*"abc", "escape")
+            await pilot.pause()
+            assert view.query_one("#filter-search", Input).value == "abc"
+            assert app.focused is view.default_focus()
