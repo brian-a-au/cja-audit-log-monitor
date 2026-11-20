@@ -249,6 +249,7 @@ class MonitorView(ContentView):
         "running": "[$success]● running[/$success]",
         "error": "[$warning]● error[/$warning] [$text-muted]· retrying each interval[/$text-muted]",
         "stopped": "[$danger]● stopped[/$danger]",
+        "denied": "[$danger]● access denied[/$danger] [$text-muted]· monitor stopped[/$text-muted]",
     }
 
     def _set_status(self, status: str, detail: str = "") -> None:
@@ -257,13 +258,19 @@ class MonitorView(ContentView):
         for name in self._STATUS_MARKUP:
             status_container.set_class(status == name, f"monitor-{name}")
         markup = self._STATUS_MARKUP[status]
-        if status == "error" and detail:
+        if status in ("error", "denied") and detail:
             first_line = " ".join(detail.split())
             short = cut_cells(first_line, max(20, self.size.width - 40))
-            markup = (
-                f"[$warning]● error[/$warning] [$text-muted]· {literal(short)} "
-                f"· retrying each interval[/$text-muted]"
-            )
+            if status == "error":
+                markup = (
+                    f"[$warning]● error[/$warning] [$text-muted]· {literal(short)} "
+                    f"· retrying each interval[/$text-muted]"
+                )
+            else:
+                markup = (
+                    f"[$danger]● access denied · {literal(short)}[/$danger] "
+                    f"[$text-muted]· monitor stopped[/$text-muted]"
+                )
         self.query_one("#status-indicator", Static).update(resolve_tcss_markup(markup))
 
     def on_unmount(self) -> None:
@@ -414,14 +421,16 @@ class MonitorView(ContentView):
         new_error = monitor.last_error != str(error)  # a toast for each new error text
         monitor.last_error = str(error)
         if from_api:
+            # Only a lost connection marks the header. A 403 means the connection works
+            # but this account may not read the logs, so the header stays connected, as
+            # in the dashboard and stats views, and the status row says so instead.
             self.app.note_api_error(error)
-            if classify_error(error) == "access":
-                # The connection works but this account may not read the logs.
-                self.app.set_connection_status("disconnected", f"no access: {error}")
         if from_api and not is_retryable(error):
             # Retrying cannot fix this (bad credentials, 400, 401, 403, 404): stop, as
             # the CLI monitor does, instead of failing every interval.
             self._stop_monitoring()
+            if classify_error(error) == "access":
+                self._set_status("denied", str(error))
             self._show_error(f"{error} · monitor stopped")
             return
         self._set_status("error", str(error))

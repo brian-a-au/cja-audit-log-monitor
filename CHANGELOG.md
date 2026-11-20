@@ -6,6 +6,7 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Fixed
 
+- In the TUI, a 403 during monitoring marked the header "disconnected", though the connection worked. The header now stays connected, as in the dashboard and stats views, and the monitor status row shows `access denied` with the error. A 403 still stops the monitor.
 - In the TUI, the config file warnings and the export dialog's error messages showed the full path of your home folder. They now show it as `~`. The CLI warnings do the same.
 
 ## [0.1.2] - 2026-11-20
