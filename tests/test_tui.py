@@ -4414,6 +4414,52 @@ async def test_tui_shows_unknown_key_warning(tmp_path) -> None:
         )
 
 
+def _fake_home(tmp_path, monkeypatch):
+    """Point Path.home at a folder under tmp_path and return it."""
+    from pathlib import Path
+
+    home = tmp_path / "home" / "someone"
+    home.mkdir(parents=True)
+    monkeypatch.setattr(Path, "home", lambda: home)
+    return home
+
+
+async def test_config_warning_toasts_show_the_home_folder_as_tilde(tmp_path, monkeypatch) -> None:
+    home = _fake_home(tmp_path, monkeypatch)
+    folder = home / ".cja-audit-log-monitor"
+    folder.mkdir()
+    path = folder / "config.yaml"
+    path.write_text(
+        "monitor_intervall: 30\n"
+        "alert_rules:\n  - name: r\n    treshold_count: 5\n"
+        "notifications:\n  slack_webhook: https://x.example.com\n"
+    )
+    path.chmod(0o644)
+    app = _make_app(AppState(path))
+    async with app.run_test(size=(140, 40), notifications=True) as pilot:
+
+        def messages() -> list[str]:
+            return [n.message for n in app._notifications]
+
+        assert await _wait_for(lambda: len(messages()) >= 4, pilot)
+        assert not any(str(home) in m for m in messages())
+        where = "~/.cja-audit-log-monitor/config.yaml"
+        assert any(f"run: chmod 600 {where}" in m for m in messages())
+        assert any(m.startswith(f"{where}: ignoring unknown setting") for m in messages())
+        assert any(m.startswith(f"{where}: alert_rules[0]: ignoring") for m in messages())
+
+
+async def test_missing_config_toast_shows_the_home_folder_as_tilde(tmp_path, monkeypatch) -> None:
+    home = _fake_home(tmp_path, monkeypatch)
+    app = _make_app(AppState(home / "missing.yaml"))
+    async with app.run_test(size=(140, 40), notifications=True) as pilot:
+        assert await _wait_for(
+            lambda: any("not found" in n.message for n in app._notifications), pilot
+        )
+        found = [n.message for n in app._notifications if "not found" in n.message]
+        assert found == ["config file ~/missing.yaml not found; using environment only"]
+
+
 async def test_tui_shows_a_warning_logged_on_a_worker_thread(mock_app_state) -> None:
     import asyncio
     import logging
@@ -5294,6 +5340,49 @@ class TestExportDialogMessages:
                 )
                 assert "\n" not in self._status(dialog)
                 assert not dialog.query_one("#export-button", Button).disabled
+
+    async def test_a_write_failure_shows_the_home_folder_as_tilde(
+        self, mock_app_state, sample_audit_entries, tmp_path, monkeypatch
+    ):
+        home = _fake_home(tmp_path, monkeypatch)
+        target = home / "out.json"
+        mock_app_state.page_loaded = True
+        mock_app_state.entries = sample_audit_entries
+        app = _make_app(mock_app_state)
+        error = PermissionError(13, "Permission denied", str(target))
+        with patch(
+            "cja_audit_log_monitor.tui.modals.export_dialog.export_entries", side_effect=error
+        ):
+            async with app.run_test(size=(120, 40)) as pilot:
+                dialog = await self._open(app, pilot)
+                dialog.query_one("#output-path").value = str(target)
+                await pilot.click("#export-button")
+                assert await _wait_for(
+                    lambda: self._status(dialog).startswith("export failed"), pilot
+                )
+                assert str(home) not in self._status(dialog)
+                assert "~/out.json" in self._status(dialog)
+
+    async def test_a_fetch_failure_shows_the_home_folder_as_tilde(
+        self, mock_app_state, tmp_path, monkeypatch
+    ):
+        home = _fake_home(tmp_path, monkeypatch)
+        bundle = home / "certs" / "ca.pem"
+        mock_app_state.page_loaded = True
+        mock_app_state.client.get_logs_sample.side_effect = OSError(
+            f"Could not find a suitable TLS CA certificate bundle, invalid path: {bundle}"
+        )
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(120, 40)) as pilot:
+            dialog = await self._open(app, pilot)
+            dialog.query_one("#scope-all").value = True
+            dialog.query_one("#output-path").value = str(tmp_path / "out.json")
+            await pilot.click("#export-button")
+            assert await _wait_for(
+                lambda: self._status(dialog).startswith("could not fetch entries"), pilot
+            )
+            assert str(home) not in self._status(dialog)
+            assert "~/certs/ca.pem" in self._status(dialog)
 
 
 # Every key the app or a view binds, in an order that leaves each opened screen again.

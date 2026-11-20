@@ -1,5 +1,6 @@
 """Shared utilities for CJA Audit Log Monitor."""
 
+import re
 from collections import OrderedDict, defaultdict
 from collections.abc import Iterable
 from datetime import UTC, datetime
@@ -93,6 +94,22 @@ def display_path(path: Path | str) -> str:
     except ValueError:
         return str(path)
     return "~" if str(relative) == "." else f"~/{relative}"
+
+
+def hide_home(text: str) -> str:
+    """Return ``text`` with every path in the home folder shown with ``~``.
+
+    For messages that hold a path the code did not build, such as an OS error's
+    "Permission denied: '/Users/name/out.json'".
+    """
+    try:
+        home = str(Path.home())
+    except (RuntimeError, KeyError):
+        return text
+    if len(home) <= 1:  # "/" as home would turn every path into "~"
+        return text
+    # Only the home folder itself, not a longer name that starts the same way.
+    return re.sub(re.escape(home) + r"(?![\w.-])", "~", text)
 
 
 def get_user_identifier(entry: AuditLogEntry, default: str = "unknown") -> str:
