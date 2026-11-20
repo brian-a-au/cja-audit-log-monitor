@@ -729,3 +729,48 @@ def test_redact_url_keeps_ipv6_brackets():
     from cja_audit_log_monitor.utils import redact_url
 
     assert redact_url("http://[::1]:8080/x?token=s") == "http://[::1]:8080/…"
+
+
+class TestDeadline:
+    """The overall send deadline's trace hook, without a server."""
+
+    class _Stream:
+        def __init__(self, sock) -> None:
+            self.sock = sock
+
+        def get_extra_info(self, name: str):
+            return self.sock if name == "socket" else None
+
+    def test_other_events_and_streams_without_a_socket_are_ignored(self) -> None:
+        from cja_audit_log_monitor.notifications import _Deadline
+
+        deadline = _Deadline(5)
+        deadline.trace("http11.send_request_headers.started", {})
+        deadline.trace("connection.connect_tcp.complete", {})
+        deadline.trace("connection.connect_tcp.complete", {"return_value": self._Stream(None)})
+        assert deadline._sockets == []
+
+    def test_a_socket_that_connects_after_the_deadline_is_shut_at_once(self) -> None:
+        import socket
+
+        from cja_audit_log_monitor.notifications import _Deadline
+
+        ours, theirs = socket.socketpair()
+        try:
+            deadline = _Deadline(5)
+            deadline._expire()
+            deadline.trace("connection.connect_tcp.complete", {"return_value": self._Stream(ours)})
+            assert ours.recv(1) == b""  # shut down: the read returns at once
+        finally:
+            ours.close()
+            theirs.close()
+
+    def test_a_closed_socket_is_not_an_error(self) -> None:
+        import socket
+
+        from cja_audit_log_monitor.notifications import _Deadline
+
+        ours, theirs = socket.socketpair()
+        ours.close()
+        theirs.close()
+        _Deadline._shut(ours)

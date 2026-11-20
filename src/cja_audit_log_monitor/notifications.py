@@ -2,6 +2,8 @@
 
 import hashlib
 import logging
+import socket
+import threading
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
@@ -13,6 +15,9 @@ from .utils import get_user_identifier, redact_url
 
 logger = logging.getLogger(__name__)
 
+
+# The longest a Slack send may take, start to end. A webhook uses its own timeout.
+SLACK_DEADLINE = 30.0
 
 # Slack's limits: a header holds 150 characters and a section 3,000.
 SLACK_HEADER_MAX = 150
@@ -69,6 +74,59 @@ def _describe_error(error: Exception) -> str:
     return f"{name} (HTTP {status})" if status else name
 
 
+class _Deadline:
+    """Shut a send's socket down once its overall deadline passes.
+
+    httpx timeouts apply to each read, so a server that sends its reply one byte at a
+    time never trips them. httpx's ``trace`` hook hands over each new connection's
+    stream; when the timer fires, shutting that socket down wakes the blocked read,
+    which then fails.
+    """
+
+    def __init__(self, seconds: float) -> None:
+        self.seconds = seconds
+        self.expired = False
+        self._lock = threading.Lock()
+        self._sockets: list[socket.socket] = []
+        self._timer = threading.Timer(seconds, self._expire)
+        self._timer.daemon = True
+
+    def __enter__(self) -> "_Deadline":
+        self._timer.start()
+        return self
+
+    def __exit__(self, *args: Any) -> None:
+        self._timer.cancel()
+
+    def trace(self, event: str, info: dict[str, Any]) -> None:
+        """httpx trace hook: keep the socket of each connection this send opens."""
+        if event not in ("connection.connect_tcp.complete", "connection.start_tls.complete"):
+            return
+        stream = info.get("return_value")
+        sock = stream.get_extra_info("socket") if stream is not None else None
+        if sock is None:
+            return
+        with self._lock:
+            self._sockets.append(sock)
+            expired = self.expired
+        if expired:  # the deadline passed while connecting
+            self._shut(sock)
+
+    def _expire(self) -> None:
+        with self._lock:
+            self.expired = True
+            sockets = list(self._sockets)
+        for sock in sockets:
+            self._shut(sock)
+
+    @staticmethod
+    def _shut(sock: socket.socket) -> None:
+        try:
+            sock.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass  # already closed
+
+
 class NotificationManager:
     """Manages delivery of alert notifications."""
 
@@ -92,7 +150,11 @@ class NotificationManager:
                 _url_redactor.add(webhook.url)
             if self.config.slack_webhook_url:
                 _url_redactor.add(self.config.slack_webhook_url)
-            self._client = httpx.Client(timeout=30.0)
+            # No kept-alive connections: each send opens its own, so the deadline's
+            # trace hook always sees the socket it may have to shut down.
+            self._client = httpx.Client(
+                timeout=SLACK_DEADLINE, limits=httpx.Limits(max_keepalive_connections=0)
+            )
         return self._client
 
     def close(self, wait: bool = True) -> None:
@@ -265,12 +327,22 @@ class NotificationManager:
         Only the status matters, so the response body is never read: a huge body, or one
         that never ends, cannot hold up the poll that raised the alert. Redirects are not
         followed, so a redirect cannot send the alert somewhere else.
+
+        The whole send must end within ``timeout`` (``SLACK_DEADLINE`` when None). Past
+        that it raises ``httpx.TimeoutException``, even if the server keeps sending.
         """
         kwargs: dict[str, Any] = {"headers": headers, "json": payload}
         if timeout is not None:
             kwargs["timeout"] = timeout
-        with self.client.stream(method, url, **kwargs) as response:
-            response.raise_for_status()
+        deadline = _Deadline(SLACK_DEADLINE if timeout is None else timeout)
+        kwargs["extensions"] = {"trace": deadline.trace}
+        try:
+            with deadline, self.client.stream(method, url, **kwargs) as response:
+                response.raise_for_status()
+        except httpx.HTTPError:
+            if deadline.expired:
+                raise httpx.TimeoutException(f"no reply within {deadline.seconds:g}s") from None
+            raise
 
     def send_webhook(
         self,
