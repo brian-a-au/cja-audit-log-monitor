@@ -5385,3 +5385,76 @@ async def test_every_key_and_button_leaves_the_app_running(mock_app_state, size,
             await pilot.press("m", "space")
             await _settle(pilot)
         _assert_alive(app, "the end")
+
+
+class TestMonitorTableCursor:
+    """The live table keeps the reader's place while rows come and go."""
+
+    async def _table(self, app, pilot):
+        from cja_audit_log_monitor.tui.widgets import LogTable
+
+        await pilot.press("m")
+        await pilot.pause()
+        return app.query_one("#monitor-log", LogTable)
+
+    async def test_cursor_stays_on_its_entry_when_old_rows_are_dropped(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            table = await self._table(app, pilot)
+            table.append_entries(_monitor_entries(0, 10), max_rows=10)
+            table.move_cursor(row=5)  # reading an older row: not following the stream
+            await pilot.pause()
+            assert table.get_selected_entry().id == "m-5"
+            table.append_entries(_monitor_entries(10, 3), max_rows=10)
+            await pilot.pause()
+            assert table.row_count == 10
+            assert table.ordered_rows[0].key.value == "m-3"
+            assert table.get_selected_entry().id == "m-5"
+
+    async def test_cursor_on_a_dropped_row_moves_to_the_top(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            table = await self._table(app, pilot)
+            table.append_entries(_monitor_entries(0, 10), max_rows=10)
+            table.move_cursor(row=1)
+            table.append_entries(_monitor_entries(10, 5), max_rows=10)
+            await pilot.pause()
+            assert table.cursor_row == 0
+            assert table.get_selected_entry().id == "m-5"
+
+    async def test_repeated_entries_change_nothing(self, mock_app_state):
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            table = await self._table(app, pilot)
+            table.append_entries(_monitor_entries(0, 5), max_rows=10)
+            table.move_cursor(row=2)
+            table.append_entries(_monitor_entries(0, 5), max_rows=10)
+            await pilot.pause()
+            assert table.row_count == 5
+            assert table.cursor_row == 2
+
+
+class TestQuietPaths:
+    """Load results that are not errors but still need a clear message."""
+
+    async def test_test_rules_with_no_logs_says_so(self, mock_app_state):
+        mock_app_state.client.get_all_logs.return_value = []
+        app = _make_app(mock_app_state)
+        async with app.run_test() as pilot:
+            await pilot.press("a")
+            await pilot.pause()
+            await pilot.click("#test-rules")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            text = _plain(app.query_one("#test-results", Static))
+            assert "no audit logs found to test against" in text
+
+    async def test_dashboard_stats_failure_after_a_good_connection(self, mock_app_state):
+        from cja_audit_log_monitor.client import APIError
+
+        mock_app_state.client.get_logs_sample.side_effect = APIError("API request failed: 500")
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, "d")
+            assert "500" in _empty_text(view)
+            assert app.is_running

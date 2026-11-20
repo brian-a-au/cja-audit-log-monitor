@@ -161,3 +161,32 @@ def test_stats_use_utc() -> None:
     )
     stats = calculate_stats([entry])
     assert stats["date_range"]["start"] == "2026-11-19 06:30:00"
+
+
+def test_report_trend_counts_the_last_7_days_by_day_and_action() -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from cja_audit_log_monitor.stats import generate_report
+
+    now = datetime.now(UTC)
+
+    def entry(i: int, days_ago: float, action: str) -> AuditLogEntry:
+        return AuditLogEntry(
+            id=f"t-{i}",
+            timestamp=now - timedelta(days=days_ago),
+            user_id="u",
+            action=action,
+            component_type="PROJECT",
+        )
+
+    entries = [
+        entry(1, 0.1, "CREATE"),
+        entry(2, 0.1, "CREATE"),
+        entry(3, 0.1, "DELETE"),
+        entry(4, 2, "EDIT"),
+        entry(5, 10, "DELETE"),  # older than 7 days: not in the trend
+    ]
+    trend = generate_report(entries)["trend_7_day"]
+    today = (now - timedelta(days=0.1)).strftime("%Y-%m-%d")
+    assert trend[today] == {"CREATE": 2, "DELETE": 1}
+    assert sum(sum(day.values()) for day in trend.values()) == 4
