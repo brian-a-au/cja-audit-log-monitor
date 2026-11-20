@@ -125,12 +125,12 @@ class StatsView(ContentView):
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button presses."""
-        if event.button.id == "update-button":
+        if event.button.id == "update-button":  # pragma: no branch - the only Button here
             self._apply_days()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         """Enter in the days box applies it, like the update button."""
-        if event.input.id == "days-input":
+        if event.input.id == "days-input":  # pragma: no branch - the only Input here
             event.stop()
             self._apply_days()
 

@@ -280,7 +280,7 @@ class AuditLogsClient:
                 host = self.client.base_url.host or self.settings.api_base_url
                 raise APIError(f"could not reach {host} ({type(e).__name__})", network=True) from e
 
-        raise APIError("Max retries exceeded")
+        raise APIError("Max retries exceeded")  # pragma: no cover - last try returns or raises
 
     def get_logs(self, query: AuditLogQuery | None = None) -> AuditLogResponse:
         """Get audit logs with optional filtering.

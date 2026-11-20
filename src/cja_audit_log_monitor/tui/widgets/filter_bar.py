@@ -74,11 +74,11 @@ class FilterBar(Static):
             if callable(default_focus):
                 self.screen.set_focus(default_focus())
                 return
-        self.screen.set_focus(None)
+        self.screen.set_focus(None)  # pragma: no cover - a ContentView is always above
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle filter button presses."""
-        if event.button.id == "filter-reset":
+        if event.button.id == "filter-reset":  # pragma: no branch - the only Button here
             self._reset_filters()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:

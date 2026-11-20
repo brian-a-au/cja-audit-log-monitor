@@ -156,7 +156,7 @@ class ContentView(Vertical):
 
     def compose_content(self) -> Iterator[Widget]:
         """Yield the view's widgets."""
-        raise NotImplementedError
+        raise NotImplementedError  # pragma: no cover - every view overrides it
 
     def default_focus(self) -> Widget | None:
         """Widget to focus when the view is shown, so the view's own keys work.

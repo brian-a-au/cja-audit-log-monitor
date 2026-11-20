@@ -82,7 +82,7 @@ class LogTable(DataTable):
         ``user`` and ``component`` shrink toward their minimum before ``name`` does.
         Never scrolls sideways: the widths always add up to the available width.
         """
-        if not self._shown:
+        if not self._shown:  # pragma: no cover - on_mount adds the columns before any call
             return  # not mounted yet
         available = self.scrollable_content_region.width
         if available <= 0:
@@ -198,7 +198,7 @@ class LogTable(DataTable):
     def _label_zone(self, entries: Iterable[AuditLogEntry]) -> None:
         """Name the zones of the shown times, e.g. ``time (PST/PDT)`` across a change."""
         self._zone = zone_label(entry.timestamp for entry in entries)
-        if "timestamp" in self.columns:
+        if "timestamp" in self.columns:  # pragma: no branch - the time column is never hidden
             self.columns["timestamp"].label = Text(f"time ({self._zone})")
 
     def get_selected_entry(self) -> AuditLogEntry | None:

@@ -239,7 +239,7 @@ class LogBrowserView(ContentView):
             panel = self.query_one("#entry-detail-panel", EntryDetailPanel)
         except NoMatches:
             return
-        if panel.is_visible():
+        if panel.is_visible():  # pragma: no branch - check_action allows it only then
             panel.hide()
             if panel.has_focus:
                 self.screen.set_focus(self.default_focus())

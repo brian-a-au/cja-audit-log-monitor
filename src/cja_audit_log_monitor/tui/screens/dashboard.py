@@ -218,7 +218,7 @@ class DashboardView(ContentView):
         if self._top_users is None:
             return
         widget = self.query_one("#top-users", Static)
-        if not self._top_users:
+        if not self._top_users:  # pragma: no cover - stats exist only when there are entries
             widget.update(no_activity_message(self._days))
             return
         # Fit "name count" on one line: count takes 6 cells (space + 5 digits), plus one
@@ -231,5 +231,5 @@ class DashboardView(ContentView):
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button presses."""
-        if event.button.id == "refresh-button":
+        if event.button.id == "refresh-button":  # pragma: no branch - the only Button here
             self.refresh_data()

@@ -186,7 +186,7 @@ class SettingsView(ContentView):
         """Handle button presses."""
         if event.button.id == "verify-button":
             self.refresh_data()
-        elif event.button.id == "reload-button":
+        elif event.button.id == "reload-button":  # pragma: no branch - only two buttons
             await self._reload_settings()
 
     async def _reload_settings(self) -> None:

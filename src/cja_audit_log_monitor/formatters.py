@@ -61,7 +61,7 @@ def cut_cells(text: str, width: int) -> str:
     short = set_cell_size(text, width - 1).rstrip()
     # Rich 15 can measure a cut inside a run of zero-width joiners as wider than asked.
     while short and cell_len(short + "\u2026") > width:
-        short = short[:-1]
+        short = short[:-1]  # pragma: no cover - Rich 15 only; the newest-deps job runs it
     return short + "\u2026"
 
 
@@ -71,10 +71,10 @@ def fit_cells(text: str, width: int) -> str:
     out = short + " " * (width - cell_len(short))
     # Rich 15 counts a zero-width joiner and the character after it as one, so a space
     # that follows a joiner adds no width. Pad until Rich measures the full width.
-    for _ in range(width):
+    for _ in range(width):  # pragma: no branch - the padding always reaches the width
         if cell_len(out) >= width:
             break
-        out += " "
+        out += " "  # pragma: no cover - Rich 15 only; the newest-deps job runs it
     return out
 
 

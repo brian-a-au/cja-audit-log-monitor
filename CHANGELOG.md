@@ -27,6 +27,7 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Changed
 
+- Every reachable line and branch is now tested, and CI fails below 100% coverage. Lines that cannot run are marked `# pragma: no cover` with the reason.
 - A test now checks that the commands, flags and defaults in `docs/cli.md`, and every example command in the README and the docs, match the CLI.
 - Property-based tests (Hypothesis) now cover the date parser, text cleaning, CSV and TSV formula escaping, URL redaction, cell fitting and the export path check.
 - Textual is now capped below version 9. A new major version can rename APIs, as Textual 8 did, so the cap is raised only after a check.

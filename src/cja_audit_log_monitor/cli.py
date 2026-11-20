@@ -919,7 +919,7 @@ def stats(ctx: click.Context, days: int | None, top: int, output_format: str) ->
         console.print()
 
         # Show user activity table
-        if stats_data["top_users"]:
+        if stats_data["top_users"]:  # pragma: no branch - every entry gives a user row
             user_table = format_user_stats_table(stats_data["top_users"])
             console.print(user_table)
             console.print()
@@ -1857,5 +1857,5 @@ def tui(ctx: click.Context) -> None:
     run_tui(ctx.obj.get("config_path"))
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover - only when run as a script
     main()

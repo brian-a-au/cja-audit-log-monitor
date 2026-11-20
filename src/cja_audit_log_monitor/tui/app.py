@@ -146,7 +146,7 @@ class CJAAuditApp(App):
 
     def on_unmount(self) -> None:
         """Stop sending log records to this app."""
-        if self._log_toasts is not None:
+        if self._log_toasts is not None:  # pragma: no branch - on_load always sets it
             log_toasts.uninstall(self._log_toasts)
             self._log_toasts = None
 
@@ -284,7 +284,7 @@ class CJAAuditApp(App):
 
         # Show dashboard by default
         await self._show_screen("dashboard")
-        if self._log_toasts is not None:
+        if self._log_toasts is not None:  # pragma: no branch - on_load always sets it
             self._log_toasts.flush_pending()
 
     def on_resize(self, event: events.Resize) -> None:
@@ -318,7 +318,7 @@ class CJAAuditApp(App):
             item.update(self._nav_text(item.id, is_active, self.size.width))
 
         view = self._screens.get(screen_name)
-        if view is None:
+        if view is None:  # pragma: no cover - every caller passes a name from on_mount
             return
         # Mount each view once, on first visit; later visits just switch to it,
         # so state such as the current log page or a running monitor survives.
@@ -394,7 +394,7 @@ class CJAAuditApp(App):
             await self._show_screen("logs")
         try:
             self._screens["logs"].query_one("#filter-search").focus()
-        except NoMatches:
+        except NoMatches:  # pragma: no cover - the filter bar is composed with the view
             pass
 
     def action_show_help(self) -> None:

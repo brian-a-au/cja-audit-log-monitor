@@ -4,7 +4,7 @@
 [![Release](https://github.com/brian-a-au/cja-audit-log-monitor/actions/workflows/release.yml/badge.svg)](https://github.com/brian-a-au/cja-audit-log-monitor/actions/workflows/release.yml)
 [![PyPI](https://img.shields.io/pypi/v/cja-audit-log-monitor.svg)](https://pypi.org/project/cja-audit-log-monitor/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
-[![Coverage](https://img.shields.io/badge/coverage-96%25-brightgreen.svg)](https://github.com/brian-a-au/cja-audit-log-monitor/tree/main/tests)
+[![Coverage](https://img.shields.io/badge/coverage-100%25-brightgreen.svg)](https://github.com/brian-a-au/cja-audit-log-monitor/tree/main/tests)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
 [![Textual 7.3+](https://img.shields.io/badge/Textual-7.3%2B-5a4fcf.svg)](https://textual.textualize.io/)
