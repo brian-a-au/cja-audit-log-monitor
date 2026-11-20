@@ -6,6 +6,7 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Fixed
 
+- In the TUI, the monitor's live stream showed only its column headers before monitoring started. It now shows `monitor stopped · press space to start` until the monitor starts, and again after a stop that left the stream empty.
 - In the TUI, closing the export dialog while it fetched all matching entries cancelled the export without a word. A toast now says `export cancelled`. A write that has already started still finishes and is reported as before.
 - A webhook or Slack endpoint that sent its reply headers one byte at a time could still stall a poll, because the timeout applies to each read. Each send now has an overall deadline: the webhook's `timeout`, or 30 seconds for Slack. Past it, the send fails like any other failed delivery.
 - In the TUI, a 403 during monitoring marked the header "disconnected", though the connection worked. The header now stays connected, as in the dashboard and stats views, and the monitor status row shows `access denied` with the error. A 403 still stops the monitor.

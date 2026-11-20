@@ -110,19 +110,39 @@ class MonitorView(ContentView):
             classes="monitor-status monitor-stopped",
         )
 
+        # Shown while the monitor is stopped and the stream is empty (it starts stopped).
+        # The area takes the rows' place, so the alerts below do not move.
+        stream_hint = Static(
+            resolve_tcss_markup(
+                "[$text-muted]monitor stopped · press space to start[/$text-muted]"
+            ),
+            id="stream-hint",
+            classes="empty-state",
+        )
+        stream_hint.display = True
+        hint_area = Container(stream_hint, id="stream-hint-area")
+
         yield Container(
             controls,
             status,
             Static("LIVE LOG STREAM", classes="section-label"),
             LogTable(id="monitor-log"),
+            hint_area,
             Static("ALERTS", classes="section-label"),
             AlertSummary(id="alert-summary"),
             id="monitor-container",
+            classes="-stream-empty",
         )
 
     def default_focus(self) -> Widget | None:
         """Focus the view so `space` toggles monitoring right away."""
         return self
+
+    def _show_stream_hint(self, show: bool) -> None:
+        """Show the "press space to start" line under the stream's column headers."""
+        self.query_one("#stream-hint-area").display = show
+        # The table shrinks to its header row, so the hint sits right under it.
+        self.query_one("#monitor-container").set_class(show, "-stream-empty")
 
     def refresh_data(self) -> bool:
         """Poll now if monitoring is running.
@@ -215,6 +235,7 @@ class MonitorView(ContentView):
 
         # Clear log table
         self.query_one("#monitor-log", LogTable).clear()
+        self._show_stream_hint(False)
 
         # Start monitoring worker
         self._stop_event = threading.Event()
@@ -244,6 +265,7 @@ class MonitorView(ContentView):
         self.query_one("#interval-input", Input).disabled = False
 
         self._set_status("stopped")
+        self._show_stream_hint(self.query_one("#monitor-log", LogTable).row_count == 0)
 
     _STATUS_MARKUP = {
         "running": "[$success]● running[/$success]",
