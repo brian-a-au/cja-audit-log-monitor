@@ -5155,7 +5155,7 @@ class TestLogBrowserFiltering:
             await pilot.pause()
             await app.workers.wait_for_complete()
             assert view.query_one("#filter-search", Input).value == ""
-            assert view.query_one("#filter-action", Select).value == Select.BLANK
+            assert view.query_one("#filter-action", Select).is_blank()
             query = self._last_query(mock_app_state)
             assert (query.description, query.actions, query.page) == (None, None, 0)
 
