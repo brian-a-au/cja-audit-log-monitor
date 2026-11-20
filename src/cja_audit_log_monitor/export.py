@@ -82,10 +82,18 @@ def check_export_path(raw: str) -> tuple[Path | None, str | None, bool]:
         return None, "enter a file path", False
     if raw.endswith(("/", os.sep)):
         return None, "that path is a folder, not a file", False
+    if "\x00" in raw:
+        return None, "the path has a null character in it", False
     try:
         path = Path(raw).expanduser()
     except RuntimeError:  # "~name" for a user that does not exist, or no home folder
         return None, f"cannot find the home folder in {raw.split('/')[0]!r}", False
+    except UnicodeEncodeError:  # Python 3.11 and 3.12 fail here on "~\ud800"
+        return None, "the path has characters this system cannot use in a file name", False
+    try:
+        os.fsencode(path)
+    except UnicodeEncodeError:
+        return None, "the path has characters this system cannot use in a file name", False
     if len(os.fsencode(path.name)) > _MAX_NAME_BYTES:
         return None, "the file name is too long", False
     try:

@@ -7,7 +7,7 @@
 uv sync --all-extras
 ```
 
-This installs `pytest`, `pytest-asyncio`, `pytest-httpx`, and `ruff` alongside the runtime dependencies.
+This installs `pytest`, `pytest-asyncio`, `pytest-httpx`, `hypothesis`, and `ruff` alongside the runtime dependencies.
 
 ## Tests
 
@@ -23,7 +23,12 @@ uv run pytest tests/test_client.py::TestAuditLogsClient::test_get_logs
 
 # With coverage (fails below 95%)
 uv run pytest --cov
+
+# A longer search in the property tests (5,000 examples each)
+uv run pytest tests/test_properties.py --hypothesis-profile=deep
 ```
+
+`tests/test_properties.py` uses Hypothesis to feed hostile text (control characters, lone surrogates, CJK, emoji and combining marks) to the date parser, the text cleaners, the CSV and TSV writers, the URL redactor and the export path check.
 
 CI measures branch coverage on each Python version and fails below the `fail_under` value in `pyproject.toml`. If you raise coverage, raise that value and the README badge to match.
 

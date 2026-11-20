@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from .models import AuditLogEntry
+from .models import AuditLogEntry, printable
 
 
 class RecentIds:
@@ -57,7 +57,8 @@ def redact_url(url: str) -> str:
     if ":" in host:  # IPv6 literal: keep the brackets the URL needs
         host = f"[{host}]"
     netloc = f"{host}:{port}" if port else host
-    return f"{parts.scheme}://{netloc}/\u2026"
+    # The label ends up in log lines and toasts, so no control character gets through.
+    return printable(f"{parts.scheme}://{netloc}/\u2026")
 
 
 def display_path(path: Path | str) -> str:

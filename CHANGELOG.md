@@ -4,8 +4,15 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Fixed
+
+- A date at the edge of the calendar with a time zone, such as `0001-01-01T00:00+05:00`, crashed the CLI. It is now a usage error that says the date is out of range.
+- The export path check crashed on a lone surrogate character and passed a path with a null character, which then failed when the file was written. Both are now refused with a message.
+- A webhook or Slack URL with a control character in its host could put that character into a log line or a toast. Redacted URLs are now cleaned like audit data.
+
 ### Changed
 
+- Property-based tests (Hypothesis) now cover the date parser, text cleaning, CSV and TSV formula escaping, URL redaction, cell fitting and the export path check.
 - Textual is now capped below version 9. A new major version can rename APIs, as Textual 8 did, so the cap is raised only after a check.
 
 ## [0.1.1] - 2026-11-19
