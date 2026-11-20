@@ -2678,8 +2678,18 @@ class TestExportRobustness:
 
             monkeypatch.setattr(ExportDialog, name, make(getattr(ExportDialog, name), name))
 
+        from cja_audit_log_monitor.tui.modals import export_dialog
+
+        real_say_cancelled = export_dialog._say_cancelled
+
+        def spy_say_cancelled(app):
+            reached.append("cancelled")
+            return real_say_cancelled(app)
+
+        monkeypatch.setattr(export_dialog, "_say_cancelled", spy_say_cancelled)
+
         app = _make_app(mock_app_state)
-        async with app.run_test(size=(120, 40)) as pilot:
+        async with app.run_test(size=(120, 40), notifications=True) as pilot:
             dialog = await self._open(app, pilot)
             dialog.query_one("#scope-all").value = True
             dialog.query_one("#output-path").value = str(tmp_path / "x.json")
@@ -2690,15 +2700,17 @@ class TestExportRobustness:
             await pilot.pause()
             assert await _wait_for(lambda: not dialog.is_attached, pilot)
             release.set()
-            if failure == "fetch":
-                # Closing the dialog drops its worker from the manager, so wait for the
-                # callback itself. The other cases stop at the worker's cancelled check.
-                assert await _wait_for(lambda: bool(reached), pilot)
+            # Closing the dialog drops its worker from the manager, so wait for the
+            # worker's own report.
+            assert await _wait_for(lambda: bool(reached), pilot)
+            assert await _wait_for(lambda: bool(app._notifications), pilot)
             await app.workers.wait_for_complete()
             await pilot.pause()
             assert app.is_running
-        if failure == "fetch":
-            assert reached == ["_fail"]
+        # A failed fetch reaches the closed dialog's _fail; the others stop at the
+        # worker's cancelled check. Each says "export cancelled" once.
+        assert reached == (["_fail"] if failure == "fetch" else ["cancelled"])
+        assert [n.message for n in app._notifications].count("export cancelled") == 1
         assert raised == []
         assert status_calls == []
         assert app._exception is None

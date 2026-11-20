@@ -309,7 +309,7 @@ async def test_quitting_while_alert_rules_load(mock_app_state, monkeypatch) -> N
 async def test_closing_the_dialog_during_the_fetch_cancels_the_export(
     mock_app_state, sample_audit_entries, tmp_path, monkeypatch, outcome
 ) -> None:
-    """Whether the fetch then works or fails, nothing is written and no error is shown."""
+    """Whether the fetch then works or fails, nothing is written and one toast says so."""
     from cja_audit_log_monitor.tui.modals import ExportDialog
 
     gate = _Gate()
@@ -337,8 +337,53 @@ async def test_closing_the_dialog_during_the_fetch_cancels_the_export(
         await pilot.pause()
         assert not isinstance(app.screen, ExportDialog)
         await gate.finish()
-        await pilot.pause()
+
+        def cancelled() -> list[str]:
+            return [n.message for n in app._notifications if n.message == "export cancelled"]
+
+        assert await _wait_for(lambda: len(cancelled()) >= 1, pilot)
+        assert len(cancelled()) == 1
         assert [n for n in app._notifications if n.severity == "error"] == []
         assert app.is_running
     assert not target.exists()
     assert app._exception is None
+
+
+async def test_closing_the_dialog_during_the_write_still_writes_the_file(
+    mock_app_state, sample_audit_entries, tmp_path, monkeypatch
+) -> None:
+    """Once the write has started it finishes, and the toast says where, not "cancelled"."""
+    from cja_audit_log_monitor.tui.modals import ExportDialog, export_dialog
+
+    gate = _Gate()
+    monkeypatch.setattr(export_dialog, "export_entries", gate.wrap(export_dialog.export_entries))
+    mock_app_state.page_loaded = True
+    mock_app_state.entries = sample_audit_entries
+    app = _make_app(mock_app_state)
+    target = tmp_path / "x.json"
+    async with app.run_test(size=(120, 40), notifications=True) as pilot:
+        await pilot.press("e")
+        await pilot.pause()
+        app.screen.query_one("#scope-all").value = True
+        await pilot.pause()
+        app.screen.query_one("#output-path").value = str(target)
+        await pilot.click("#export-button")
+        await gate.wait_entered()
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not isinstance(app.screen, ExportDialog)
+        await gate.finish()
+        messages = lambda: [n.message for n in app._notifications]  # noqa: E731
+        assert await _wait_for(lambda: any(m.startswith("exported") for m in messages()), pilot)
+        assert "export cancelled" not in messages()
+    assert target.exists()
+    assert app._exception is None
+
+
+def test_the_cancelled_toast_is_dropped_once_the_app_has_quit() -> None:
+    from cja_audit_log_monitor.tui.modals.export_dialog import _say_cancelled
+
+    app = MagicMock()
+    app.call_from_thread.side_effect = RuntimeError("App is not running")
+    _say_cancelled(app)  # no error
+    app.call_from_thread.assert_called_once()

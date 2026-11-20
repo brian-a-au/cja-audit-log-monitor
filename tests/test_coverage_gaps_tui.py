@@ -253,9 +253,9 @@ class TestExportDialog:
 
         original = ExportDialog._ask_overwrite
 
-        def record(self, key):
+        def record(self, app, key):
             asked.append(key)
-            original(self, key)
+            original(self, app, key)
 
         monkeypatch.setattr(export_dialog, "export_entries", racing_export)
         monkeypatch.setattr(ExportDialog, "_ask_overwrite", record)
@@ -263,7 +263,7 @@ class TestExportDialog:
         mock_app_state.entries = sample_audit_entries
         app = _make_app(mock_app_state)
         target = tmp_path / "out.json"
-        async with app.run_test(size=SIZE) as pilot:
+        async with app.run_test(size=SIZE, notifications=True) as pilot:
             dialog = await self._open(app, pilot, target)
             await pilot.click("#export-button")
             assert await _wait_for(started.is_set, pilot)
@@ -273,6 +273,8 @@ class TestExportDialog:
             release.set()
             assert await _wait_for(lambda: asked, pilot)
             assert dialog._overwrite_pending is None
+            messages = [n.message for n in app._notifications]
+            assert messages.count("export cancelled") == 1
             assert app.is_running
 
     async def test_auto_close_leaves_a_screen_opened_on_top(
