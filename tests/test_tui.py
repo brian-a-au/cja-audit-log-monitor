@@ -5210,3 +5210,87 @@ class TestLogBrowserFiltering:
             await pilot.pause()
             assert view.query_one("#filter-search", Input).value == "abc"
             assert app.focused is view.default_focus()
+
+
+class TestExportDialogMessages:
+    """The export dialog's status line for each way an export can stop."""
+
+    async def _open(self, app, pilot):
+        await pilot.pause()
+        await pilot.press("e")
+        await pilot.pause()
+        return app.screen
+
+    @staticmethod
+    def _status(dialog) -> str:
+        return _plain(dialog.query_one("#export-status", Static)).strip()
+
+    async def test_cancel_closes_the_dialog(self, mock_app_state):
+        from cja_audit_log_monitor.tui.modals import ExportDialog
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(120, 40)) as pilot:
+            dialog = await self._open(app, pilot)
+            assert isinstance(dialog, ExportDialog)
+            await pilot.click("#cancel-button")
+            await pilot.pause()
+            assert not isinstance(app.screen, ExportDialog)
+
+    async def test_an_empty_path_asks_for_one(self, mock_app_state, sample_audit_entries):
+        mock_app_state.page_loaded = True
+        mock_app_state.entries = sample_audit_entries
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(120, 40)) as pilot:
+            dialog = await self._open(app, pilot)
+            dialog.query_one("#output-path").value = "   "
+            await pilot.click("#export-button")
+            await pilot.pause()
+            assert self._status(dialog) == "enter a file path"
+
+    async def test_an_empty_page_has_nothing_to_export(self, mock_app_state, tmp_path):
+        mock_app_state.page_loaded = True
+        mock_app_state.entries = []
+        app = _make_app(mock_app_state)
+        target = tmp_path / "out.json"
+        async with app.run_test(size=(120, 40)) as pilot:
+            dialog = await self._open(app, pilot)
+            dialog.query_one("#scope-page").value = True
+            dialog.query_one("#output-path").value = str(target)
+            await pilot.click("#export-button")
+            await pilot.pause()
+            assert self._status(dialog) == "no entries to export"
+        assert not target.exists()
+
+    async def test_all_matching_with_no_results_writes_nothing(self, mock_app_state, tmp_path):
+        mock_app_state.page_loaded = True
+        mock_app_state.client.get_logs_sample.return_value = ([], 0)
+        app = _make_app(mock_app_state)
+        target = tmp_path / "out.json"
+        async with app.run_test(size=(120, 40)) as pilot:
+            dialog = await self._open(app, pilot)
+            dialog.query_one("#scope-all").value = True
+            dialog.query_one("#output-path").value = str(target)
+            await pilot.click("#export-button")
+            assert await _wait_for(lambda: self._status(dialog) == "no entries to export", pilot)
+            assert not dialog.query_one("#export-button", Button).disabled
+        assert not target.exists()
+
+    async def test_a_write_failure_is_shown_and_export_can_be_retried(
+        self, mock_app_state, sample_audit_entries, tmp_path
+    ):
+        mock_app_state.page_loaded = True
+        mock_app_state.entries = sample_audit_entries
+        app = _make_app(mock_app_state)
+        with patch(
+            "cja_audit_log_monitor.tui.modals.export_dialog.export_entries",
+            side_effect=OSError("disk full\nmore detail"),
+        ):
+            async with app.run_test(size=(120, 40)) as pilot:
+                dialog = await self._open(app, pilot)
+                dialog.query_one("#output-path").value = str(tmp_path / "out.json")
+                await pilot.click("#export-button")
+                assert await _wait_for(
+                    lambda: self._status(dialog).startswith("export failed: disk full"), pilot
+                )
+                assert "\n" not in self._status(dialog)
+                assert not dialog.query_one("#export-button", Button).disabled
