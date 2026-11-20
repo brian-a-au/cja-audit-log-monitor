@@ -83,6 +83,17 @@ class _Handler(BaseHTTPRequestHandler):
             self.wfile.flush()
             time.sleep(0.05)
 
+    def _trickle(self) -> None:
+        # The status line and headers one byte at a time, each well inside the read
+        # timeout, so only an overall deadline can end the wait.
+        reply = b"HTTP/1.1 200 OK\r\n" + b"X-Pad: " + b"a" * 10_000
+        for byte in reply:
+            if type(self).stop.is_set():
+                return
+            self.wfile.write(bytes([byte]))
+            self.wfile.flush()
+            time.sleep(0.05)
+
 
 @pytest.fixture
 def server() -> Iterator[tuple[str, list[str]]]:
@@ -296,3 +307,58 @@ async def test_tui_monitor_toasts_each_failing_channel_without_the_url(
         assert all(SECRET not in n.message for n in app._notifications)
         assert SECRET not in all_logs.text
         screen._stop_monitoring()
+
+
+def test_a_webhook_that_trickles_its_headers_fails_at_the_deadline(server, entry, all_logs) -> None:
+    """Each byte resets httpx's read timeout, so the send needs an overall deadline."""
+    base, hits = server
+    manager = _webhook_manager(f"{base}/trickle/{SECRET}", timeout=1)
+    sent, took = _within(10, lambda: manager.notify_alert("rule", "message", entry))
+    assert sent == 0
+    assert took < 1 + 1.5
+    assert hits == ["trickle"]
+    warnings = manager.pop_failures()
+    assert len(warnings) == 1
+    assert "127.0.0.1" in warnings[0]
+    assert "Failed to send webhook" in all_logs.text
+    assert SECRET not in all_logs.text
+    assert SECRET not in warnings[0]
+    manager.close()
+
+
+def test_slack_that_trickles_its_headers_fails_at_the_deadline(
+    server, entry, all_logs, monkeypatch
+) -> None:
+    from cja_audit_log_monitor import notifications
+
+    assert notifications.SLACK_DEADLINE == 30.0
+    monkeypatch.setattr(notifications, "SLACK_DEADLINE", 1.0)
+    base, _ = server
+    manager = _slack_manager(f"{base}/trickle/{SECRET}")
+    sent, took = _within(10, lambda: manager.notify_alert("rule", "message", entry))
+    assert sent == 0
+    assert took < 1 + 1.5
+    warnings = manager.pop_failures()
+    assert len(warnings) == 1 and "slack" in warnings[0]
+    assert "Failed to send Slack notification" in all_logs.text
+    assert SECRET not in all_logs.text
+    manager.close()
+
+
+def test_a_good_webhook_still_works_after_a_deadline_failure(server, entry) -> None:
+    """The next send gets a fresh connection, not the one the deadline shut down."""
+    base, hits = server
+    manager = NotificationManager(
+        NotificationConfig(
+            webhooks=[
+                WebhookConfig(url=f"{base}/trickle/{SECRET}", timeout=1),
+                WebhookConfig(url=f"{base}/ok/{SECRET}", timeout=1),
+            ]
+        )
+    )
+    sent, _ = _within(10, lambda: manager.notify_alert("rule", "message", entry))
+    assert sent == 1
+    assert hits == ["trickle", "ok"]
+    sent, _ = _within(10, lambda: manager.notify_alert("rule", "message", entry))
+    assert hits == ["trickle", "ok", "trickle", "ok"]
+    manager.close()
