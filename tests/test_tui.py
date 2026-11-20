@@ -5064,17 +5064,39 @@ class TestMonitorStatusTexts:
             assert any("gateway timeout" in m for m in messages)
             screen._stop_monitoring()
 
-    async def test_403_marks_the_header(self, mock_app_state, monkeypatch):
+    async def test_403_keeps_the_header_connected(self, mock_app_state, monkeypatch):
+        """A 403 is an access problem, not a lost connection, as in the dashboard."""
         from cja_audit_log_monitor.client import APIError
 
         app = _make_app(mock_app_state)
         async with app.run_test(size=(140, 40)) as pilot:
             screen = await _start_monitor_without_loop(app, pilot, monkeypatch)
-            app.set_connection_status("connected")
+            app.set_connection_status("connected", "org test")
             mock_app_state.client.get_logs.side_effect = APIError("forbidden", 403)
             await _drive_poll(screen, pilot)
-            assert "● connected" not in _status_text(app)
-            screen._stop_monitoring()
+            assert await _wait_for(lambda: not mock_app_state.monitor.is_running, pilot)
+            assert "● connected" in _status_text(app)
+            assert "disconnected" not in _status_text(app)
+            status = _status_indicator(screen)
+            assert "access denied · forbidden" in status
+            assert "monitor stopped" in status
+
+    async def test_a_400_stops_the_monitor_without_saying_access_denied(
+        self, mock_app_state, monkeypatch
+    ):
+        from cja_audit_log_monitor.client import APIError
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            screen = await _start_monitor_without_loop(app, pilot, monkeypatch)
+            mock_app_state.client.get_logs.side_effect = APIError("bad request", 400)
+            await _drive_poll(screen, pilot)
+            assert await _wait_for(lambda: not mock_app_state.monitor.is_running, pilot)
+            status = _status_indicator(screen)
+            assert "stopped" in status
+            assert "access denied" not in status
+            screen._stop_monitoring()  # stopping again is harmless
+            assert "stopped" in _status_indicator(screen)
 
     async def test_alerts_panel_clears_on_restart(self, mock_app_state, monkeypatch):
         from cja_audit_log_monitor.tui.widgets import AlertSummary

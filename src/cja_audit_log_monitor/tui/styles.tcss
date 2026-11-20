@@ -288,7 +288,7 @@ AlertSummary {
     border-left: heavy $success;
 }
 
-.monitor-stopped {
+.monitor-stopped, .monitor-denied {
     border-left: heavy $danger;
 }
 
