@@ -19,5 +19,5 @@ class FittedStatic(Static):
 
     def on_resize(self, event: events.Resize) -> None:
         """Redraw for the new width."""
-        if self._redraw is not None:
+        if self._redraw is not None:  # pragma: no branch - every use passes redraw
             self._redraw()

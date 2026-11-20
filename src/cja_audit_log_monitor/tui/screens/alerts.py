@@ -152,7 +152,7 @@ class AlertsView(ContentView):
         """Handle button presses."""
         if event.button.id == "test-rules":
             self.run_load(self._test_rules, self._show_results)
-        elif event.button.id == "reset-rules":
+        elif event.button.id == "reset-rules":  # pragma: no branch - only two buttons
             self._reset_rules()
 
     def _reset_rules(self) -> None:

@@ -147,7 +147,7 @@ class MonitorView(ContentView):
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         """Apply the interval when Enter is pressed in its box."""
-        if event.input.id == "interval-input":
+        if event.input.id == "interval-input":  # pragma: no branch - the only Input here
             self._apply_interval()
 
     def on_settings_reloaded(self) -> None:
@@ -176,7 +176,7 @@ class MonitorView(ContentView):
         """Handle button presses."""
         if event.button.id == "start-button":
             self._start_monitoring()
-        elif event.button.id == "stop-button":
+        elif event.button.id == "stop-button":  # pragma: no branch - only two buttons
             self._stop_monitoring()
 
     def action_toggle_monitor(self) -> None:

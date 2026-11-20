@@ -21,7 +21,7 @@ from pydantic_settings import (
 
 try:
     from pydantic_settings import SettingsError
-except ImportError:  # pydantic-settings 2.0 keeps it in the sources module
+except ImportError:  # pragma: no cover - pydantic-settings 2.0 has it in the sources module
     from pydantic_settings.sources import SettingsError  # type: ignore[no-redef,attr-defined]
 
 from .models import AlertRule, NotificationConfig, WebhookConfig
@@ -66,7 +66,9 @@ def _validation_summary(source: str, error: ValidationError) -> str:
 class ConfigFileSource(PydanticBaseSettingsSource):
     """Settings source that serves the YAML data staged by load_config."""
 
-    def get_field_value(self, field: FieldInfo, field_name: str) -> tuple[Any, str, bool]:
+    def get_field_value(  # pragma: no cover - base class needs it; pydantic calls __call__
+        self, field: FieldInfo, field_name: str
+    ) -> tuple[Any, str, bool]:
         return _config_file_data.get().get(field_name), field_name, False
 
     def __call__(self) -> dict[str, Any]:
@@ -248,7 +250,7 @@ def _set_outside_file(field: str) -> bool:
         from dotenv import dotenv_values
 
         return any(str(name).lower() == field for name in dotenv_values(env_file))
-    except Exception:  # an unreadable .env fails later with its own error
+    except Exception:  # pragma: no cover - CJASettings() already failed on an unreadable .env
         return False
 
 

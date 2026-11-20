@@ -124,12 +124,12 @@ class ExportDialog(ModalScreen):
 
     def on_input_changed(self, event: Input.Changed) -> None:
         """A new path needs its own overwrite confirmation."""
-        if event.input.id == "output-path":
+        if event.input.id == "output-path":  # pragma: no branch - the only Input here
             self._overwrite_pending = None
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         """Enter in the path field exports, like the export button."""
-        if event.input.id == "output-path":
+        if event.input.id == "output-path":  # pragma: no branch - the only Input here
             event.stop()
             self._do_export()
 
@@ -137,7 +137,7 @@ class ExportDialog(ModalScreen):
         """Handle button presses."""
         if event.button.id == "cancel-button":
             self.dismiss()
-        elif event.button.id == "export-button":
+        elif event.button.id == "export-button":  # pragma: no branch - only two buttons
             self._do_export()
 
     def _set_status(self, message: str, token: str = "$text-muted") -> None:

@@ -105,14 +105,14 @@ class EntryDetailPanel(VerticalScroll):
                 self.hide()
                 return
             self.show_entry(entry)
-        else:
+        else:  # pragma: no cover - the only caller passes an entry
             if self.is_visible():
                 self.hide()
 
     def _render_entry(self) -> None:
         """Render the current entry into the panel body."""
         entry = self._entry
-        if entry is None:
+        if entry is None:  # pragma: no cover - show_entry sets the entry first
             return
 
         action = entry.action or "-"
