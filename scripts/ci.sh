@@ -27,9 +27,14 @@ done
 LOGS=.ci/logs
 mkdir -p "$LOGS"
 
-# Options for every pytest run: a private temp folder and no shared cache.
+# pytest-xdist workers per test run. The full run has six stages at the same time, so each
+# gets 2; the quick run has the machine to itself and uses one worker per core.
+WORKERS=2
+[ "$QUICK" -eq 1 ] && WORKERS=auto
+
+# Options for every pytest run: a private temp folder, no shared cache, xdist workers.
 pytest_opts() {
-    echo "-q -p no:cacheprovider --basetemp=.ci/tmp-$1"
+    echo "-q -p no:cacheprovider --basetemp=.ci/tmp-$1 -n $WORKERS"
 }
 
 lint_and_test() {  # one Python version, in .ci/venv-VERSION

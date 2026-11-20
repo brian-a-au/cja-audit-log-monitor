@@ -1,0 +1,1 @@
+- Tests now run in parallel with pytest-xdist, on GitHub and in `scripts/ci.sh`. `scripts/ci.sh --quick` takes about 1 minute instead of about 7, and the full run about 4 minutes instead of about 8.
