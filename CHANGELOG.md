@@ -4,6 +4,10 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Fixed
+
+- In the TUI, the config file warnings and the export dialog's error messages showed the full path of your home folder. They now show it as `~`. The CLI warnings do the same.
+
 ## [0.1.2] - 2026-11-20
 
 ### Fixed

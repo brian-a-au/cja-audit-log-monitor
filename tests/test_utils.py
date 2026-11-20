@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from cja_audit_log_monitor.utils import RecentIds, display_path, entry_key, redact_url
+from cja_audit_log_monitor.utils import RecentIds, display_path, entry_key, hide_home, redact_url
 
 
 class TestDisplayPath:
@@ -117,3 +117,32 @@ def test_group_by_user_never_merges_two_accounts() -> None:
     groups = group_by_user(a + b)
     assert sorted(len(g) for g in groups.values()) == [3, 5]
     assert len(set(groups)) == 2
+
+
+class TestHideHome:
+    """hide_home replaces the home folder with '~' anywhere in a message."""
+
+    def test_replaces_every_home_path(self, tmp_path, monkeypatch):
+        home = tmp_path / "someone"
+        monkeypatch.setattr(Path, "home", lambda: home)
+        text = f"[Errno 13] Permission denied: '{home}/a.json' (and {home})"
+        assert hide_home(text) == "[Errno 13] Permission denied: '~/a.json' (and ~)"
+
+    def test_keeps_a_longer_name_that_starts_like_home(self, tmp_path, monkeypatch):
+        home = tmp_path / "someone"
+        monkeypatch.setattr(Path, "home", lambda: home)
+        assert hide_home(f"{home}else/x") == f"{home}else/x"
+
+    def test_leaves_other_text_alone(self):
+        assert hide_home("disk full") == "disk full"
+
+    def test_a_home_that_cannot_be_found_changes_nothing(self, monkeypatch):
+        def no_home():
+            raise RuntimeError("no home")
+
+        monkeypatch.setattr(Path, "home", no_home)
+        assert hide_home("/x/y") == "/x/y"
+
+    def test_a_root_home_changes_nothing(self, monkeypatch):
+        monkeypatch.setattr(Path, "home", lambda: Path("/"))
+        assert hide_home("/x/y") == "/x/y"

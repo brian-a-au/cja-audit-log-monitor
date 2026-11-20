@@ -25,6 +25,7 @@ except ImportError:  # pragma: no cover - pydantic-settings 2.0 has it in the so
     from pydantic_settings.sources import SettingsError  # type: ignore[no-redef,attr-defined]
 
 from .models import AlertRule, NotificationConfig, WebhookConfig
+from .utils import display_path
 
 logger = logging.getLogger(__name__)
 
@@ -210,7 +211,9 @@ def load_config(config_path: Path | None = None, *, use_file: bool = True) -> CJ
     if use_file and config_path.exists():
         config_data.update(_read_config_file(config_path))
     elif use_file and explicit and not config_path.is_symlink():
-        logger.warning("config file %s not found; using environment only", config_path)
+        logger.warning(
+            "config file %s not found; using environment only", display_path(config_path)
+        )
 
     token = _config_file_data.set(config_data)
     try:
@@ -296,7 +299,7 @@ def _read_config_file(config_path: Path) -> dict[str, Any]:
         raise fail(f"setting names must be text (found {type(bad_keys[0]).__name__})")
     for key in yaml_config:
         if key not in CJASettings.model_fields:
-            logger.warning("%s: ignoring unknown setting %r", config_path, key)
+            logger.warning("%s: ignoring unknown setting %r", display_path(config_path), key)
     _warn_nested_unknown_keys(yaml_config, config_path)
     return yaml_config
 
@@ -307,7 +310,7 @@ def _warn_unknown_keys(data: Any, model: type[BaseModel], where: str, path: Path
         return
     for key in data:
         if key not in model.model_fields:
-            logger.warning("%s: %s: ignoring unknown setting %r", path, where, key)
+            logger.warning("%s: %s: ignoring unknown setting %r", display_path(path), where, key)
 
 
 def _warn_nested_unknown_keys(config: dict[str, Any], path: Path) -> None:
@@ -329,11 +332,9 @@ def _warn_if_not_private(config_path: Path) -> None:
         return
     mode = stat.S_IMODE(config_path.stat().st_mode)
     if mode & (stat.S_IRWXG | stat.S_IRWXO):
+        where = display_path(config_path)  # ~ works in the shell command too
         logger.warning(
-            "%s is readable by other users (mode %o); run: chmod 600 %s",
-            config_path,
-            mode,
-            config_path,
+            "%s is readable by other users (mode %o); run: chmod 600 %s", where, mode, where
         )
 
 

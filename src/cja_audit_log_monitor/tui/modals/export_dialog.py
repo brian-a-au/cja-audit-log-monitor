@@ -12,7 +12,7 @@ from textual.worker import get_current_worker
 from ...export import check_export_path, export_entries
 from ...formatters import TCSS_TOKEN_HEX
 from ...models import AuditLogEntry
-from ...utils import display_path
+from ...utils import display_path, hide_home
 from ..state import AppState
 
 # Most entries "all matching" will fetch (10 requests at the API's page size of 1,000).
@@ -37,8 +37,11 @@ def swap_suffix(value: str, ext: str) -> str:
 
 
 def _one_line(error: Exception) -> str:
-    """An error message squeezed onto one line for the dialog's status row."""
-    return " ".join(str(error).split())
+    """An error message squeezed onto one line for the dialog's status row.
+
+    An OS error names the full file, so the home folder is shown as ``~``.
+    """
+    return " ".join(hide_home(str(error)).split())
 
 
 class ExportDialog(ModalScreen):
