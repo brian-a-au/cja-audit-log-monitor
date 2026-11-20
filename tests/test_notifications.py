@@ -151,16 +151,9 @@ class TestNotificationManager:
         assert payload["alert_type"] == "cja_audit_anomaly"
         assert payload["anomaly_type"] == "high_activity_user"
 
-    @patch("httpx.Client.request")
-    def test_send_webhook_success(
-        self,
-        mock_request: MagicMock,
-        webhook_config: WebhookConfig,
-    ) -> None:
+    def test_send_webhook_success(self, httpx_mock, webhook_config: WebhookConfig) -> None:
         """Test successful webhook send."""
-        mock_response = MagicMock()
-        mock_response.raise_for_status = MagicMock()
-        mock_request.return_value = mock_response
+        httpx_mock.add_response(url=webhook_config.url, status_code=200)
 
         manager = NotificationManager()
         result = manager.send_webhook(webhook_config, {"test": "payload"})
@@ -613,7 +606,7 @@ class TestLogFilterAndBadUrls:
         webhook = WebhookConfig(url="https://hook.example.com/h")
         manager = NotificationManager(NotificationConfig(webhooks=[webhook]))
         manager._client = MagicMock()
-        manager._client.request.side_effect = httpx.InvalidURL("SECRET")
+        manager._client.stream.side_effect = httpx.InvalidURL("SECRET")
 
         with caplog.at_level(logging.DEBUG):
             assert manager.send_webhook(webhook, {"x": 1}) is False
@@ -626,7 +619,7 @@ class TestLogFilterAndBadUrls:
             NotificationConfig(slack_webhook_url="https://hooks.slack.com/services/SECRET")
         )
         manager._client = MagicMock()
-        manager._client.post.side_effect = httpx.InvalidURL("SECRET")
+        manager._client.stream.side_effect = httpx.InvalidURL("SECRET")
 
         with caplog.at_level(logging.DEBUG):
             assert manager.send_slack("r", "m") is False
