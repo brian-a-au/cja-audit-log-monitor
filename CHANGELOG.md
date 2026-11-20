@@ -4,6 +4,8 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-11-20
+
 ### Fixed
 
 - In the TUI, the monitor's live stream showed only its column headers before monitoring started. It now shows `monitor stopped · press space to start` until the monitor starts, and again after a stop that left the stream empty.
@@ -117,7 +119,8 @@ Configuration and security
 - Control characters in audit data, e.g. terminal escape sequences in a component name, are replaced before any output, so they never reach your terminal.
 - The tool refreshes its access token before it expires and retries when the API limits the request rate.
 
-[Unreleased]: https://github.com/brian-a-au/cja-audit-log-monitor/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/brian-a-au/cja-audit-log-monitor/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/brian-a-au/cja-audit-log-monitor/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/brian-a-au/cja-audit-log-monitor/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/brian-a-au/cja-audit-log-monitor/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/brian-a-au/cja-audit-log-monitor/releases/tag/v0.1.0
