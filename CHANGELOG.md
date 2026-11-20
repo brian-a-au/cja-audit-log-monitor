@@ -6,6 +6,8 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Fixed
 
+- With Rich 15, text that held a zero-width joiner could come out narrower or wider than its column, so table columns could shift. Rich 15 counts a joiner and the character after it as one. Cutting and padding text to a width now checks the result with Rich's own measure.
+
 - A webhook or Slack endpoint that answered with a body that never ended blocked the monitor for good, because each new byte reset the timeout. Only the status of the reply is read now, so a huge or endless body cannot hold up a poll.
 - A date at the edge of the calendar with a time zone, such as `0001-01-01T00:00+05:00`, crashed the CLI. It is now a usage error that says the date is out of range.
 - The export path check crashed on a lone surrogate character and passed a path with a null character, which then failed when the file was written. Both are now refused with a message.

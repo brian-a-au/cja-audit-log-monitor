@@ -263,6 +263,7 @@ def test_redact_url_never_raises_and_is_printable(url: str) -> None:
 
 
 @given(tricky_text, st.integers(-3, 60))
+@example("\u200d\u200d\u3041" + "0", 2)  # Rich 15 measured this cut as 4 cells
 def test_cut_cells_fits_the_width(text: str, width: int) -> None:
     out = cut_cells(text, width)
     if width < 1:
@@ -276,6 +277,8 @@ def test_cut_cells_fits_the_width(text: str, width: int) -> None:
 
 
 @given(tricky_text, st.integers(1, 60))
+@example("\u200d", 1)  # Rich 15 joins a zero-width joiner with the next character
+@example("x\u200d", 3)
 def test_fit_cells_is_exactly_the_width(text: str, width: int) -> None:
     assert cell_len(fit_cells(text, width)) == width
 
