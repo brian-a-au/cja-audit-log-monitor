@@ -4,6 +4,8 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-19
+
 ### Fixed
 
 - In the log browser, the filter **reset** button crashed the app with Textual 8.
@@ -77,5 +79,6 @@ Configuration and security
 - Control characters in audit data, e.g. terminal escape sequences in a component name, are replaced before any output, so they never reach your terminal.
 - The tool refreshes its access token before it expires and retries when the API limits the request rate.
 
-[Unreleased]: https://github.com/brian-a-au/cja-audit-log-monitor/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/brian-a-au/cja-audit-log-monitor/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/brian-a-au/cja-audit-log-monitor/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/brian-a-au/cja-audit-log-monitor/releases/tag/v0.1.0
