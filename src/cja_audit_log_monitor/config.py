@@ -226,6 +226,13 @@ def load_config(config_path: Path | None = None, *, use_file: bool = True) -> CJ
         field = _settings_error_field(e)
         text = f"environment or .env: {field}: not valid JSON"
         raise ConfigError(text, text) from None
+    except UnicodeDecodeError:
+        # Only the .env file is read as text here; the YAML file was read above.
+        text = ".env is not UTF-8 text"
+        raise ConfigError(text, text) from None
+    except OSError as e:
+        text = f".env cannot be read ({e.strerror or type(e).__name__})"
+        raise ConfigError(text, text) from None
     finally:
         _config_file_data.reset(token)
 
