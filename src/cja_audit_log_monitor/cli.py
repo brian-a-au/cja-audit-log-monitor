@@ -740,6 +740,7 @@ def component(
     "-F",
     type=click.Choice(["json", "csv", "tsv"], case_sensitive=False),
     default="json",
+    show_default=False,  # worked out from the file name; the help says how
     help="Export format (default: from the file suffix .json, .csv or .tsv, else json)",
 )
 @click.option(

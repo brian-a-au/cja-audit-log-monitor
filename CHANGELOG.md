@@ -6,6 +6,7 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Fixed
 
+- `cli export --help` said the format comes from the file suffix and also showed `[default: json]`. It now shows only the first, which is what the command does.
 - A monitor in a busy org showed events twice and alerted on them twice. Each poll re-reads the 5 minutes before the last poll, and the monitor remembered only the last 5,000 events to tell old from new, so a window with more than 5,000 events brought old ones back as new. Remembered events are now forgotten by age, once they are older than the next poll's window.
 - The alert engine kept a history for every user a per-user rule had ever seen, so a long run with many users grew without limit. Events past their rule's window are now dropped about once a minute.
 - With Rich 15, text that held a zero-width joiner could come out narrower or wider than its column, so table columns could shift. Rich 15 counts a joiner and the character after it as one. Cutting and padding text to a width now checks the result with Rich's own measure.
@@ -19,6 +20,7 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Changed
 
+- A test now checks that the commands, flags and defaults in `docs/cli.md`, and every example command in the README and the docs, match the CLI.
 - Property-based tests (Hypothesis) now cover the date parser, text cleaning, CSV and TSV formula escaping, URL redaction, cell fitting and the export path check.
 - Textual is now capped below version 9. A new major version can rename APIs, as Textual 8 did, so the cap is raised only after a check.
 
