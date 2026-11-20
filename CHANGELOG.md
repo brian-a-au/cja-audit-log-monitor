@@ -9,6 +9,9 @@ All notable changes to this project are listed here. The format follows [Keep a 
 - A date at the edge of the calendar with a time zone, such as `0001-01-01T00:00+05:00`, crashed the CLI. It is now a usage error that says the date is out of range.
 - The export path check crashed on a lone surrogate character and passed a path with a null character, which then failed when the file was written. Both are now refused with a message.
 - A webhook or Slack URL with a control character in its host could put that character into a log line or a toast. Redacted URLs are now cleaned like audit data.
+- In the TUI, entry details labelled every time with the zone in effect now, so a July entry viewed in November showed a PDT time marked PST. Each time now names the zone in effect at that moment.
+- The time column, the hourly and daily chart labels, and the off-hours anomaly text named only the current zone. When the data spans a daylight saving change they now name both, for example `PST/PDT`.
+- The CLI `timeline` headings and the `query --today` and `--yesterday` messages now say that the days and hours are UTC.
 
 ### Changed
 

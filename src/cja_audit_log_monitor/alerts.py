@@ -14,9 +14,9 @@ from .utils import (
     get_user_identifier,
     get_user_key,
     group_by_user,
-    local_tz_name,
     to_local,
     user_identities,
+    zone_label,
 )
 
 logger = logging.getLogger(__name__)
@@ -367,12 +367,13 @@ def analyze_for_anomalies(
 
     # Check for unusual time patterns (if timestamps available)
     # Hours are UTC unless ``local`` is set; the description names the zone either way.
-    zone = local_tz_name() if local else "UTC"
     hour_counts: dict[int, int] = defaultdict(int)
+    hour_stamps: dict[int, list[datetime]] = defaultdict(list)
     for entry in entries:
         if entry.timestamp:
             ts = to_local(entry.timestamp) if local else entry.timestamp
             hour_counts[ts.hour] += 1
+            hour_stamps[ts.hour].append(entry.timestamp)
 
     if hour_counts:
         avg_per_hour = sum(hour_counts.values()) / max(1, min(lookback_hours, 24))
@@ -383,6 +384,8 @@ def analyze_for_anomalies(
                 and count >= OFF_HOURS_MIN_COUNT
                 and count > avg_per_hour * 2
             ):
+                # Across a daylight saving change one local hour can hold two offsets.
+                zone = zone_label(hour_stamps[hour]) if local else "UTC"
                 anomalies.append(
                     {
                         "type": "off_hours_activity",

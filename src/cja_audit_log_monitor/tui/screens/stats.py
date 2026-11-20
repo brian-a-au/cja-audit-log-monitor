@@ -17,7 +17,7 @@ from ...stats import (
     get_hourly_distribution,
     get_user_activity,
 )
-from ...utils import local_tz_name
+from ...utils import local_tz_name, zone_label
 from ..state import AppState
 from ..widgets import ActionBarChart, FittedStatic, HourlyChart
 from .base import (
@@ -166,6 +166,7 @@ class StatsView(ContentView):
             get_daily_distribution(entries, local=True),
             get_user_activity(entries),
             total,
+            zone_label(entry.timestamp for entry in entries),
         )
 
     def _show_load(self, days: int, load: tuple | None) -> None:
@@ -183,6 +184,7 @@ class StatsView(ContentView):
         daily: dict,
         users: list,
         total: int | None = None,
+        zone: str | None = None,
     ) -> None:
         """Update all statistics displays."""
         self.set_empty_state(None)
@@ -200,8 +202,8 @@ class StatsView(ContentView):
             stats.get("action_counts", {}), width=20
         )
         self.query_one("#stats-hourly-chart", HourlyChart).update_data(hourly)
-        # Refresh the zone name, which can change (daylight saving) in a long session.
-        zone = local_tz_name()
+        # The zones of the data: two names when it spans a daylight saving change.
+        zone = zone or local_tz_name()
         self.query_one("#stats-hourly-label", Static).update(f"HOURLY ACTIVITY · {zone}")
         self.query_one("#stats-daily-label", Static).update(f"DAILY ACTIVITY · {zone}")
 

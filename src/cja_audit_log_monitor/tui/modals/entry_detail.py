@@ -18,9 +18,17 @@ from ...formatters import (
     resolve_tcss_markup,
 )
 from ...models import AuditLogEntry
-from ...utils import get_user_identifier, local_tz_name
+from ...utils import get_user_identifier, zone_label
 
 LABEL_WIDTH = 14
+
+
+def _local_time(entry: AuditLogEntry) -> str:
+    """The entry's local time with the zone that was in effect then (PDT in July, PST in
+    January), not the zone in effect now."""
+    if entry.timestamp is None:
+        return "-"
+    return f"{format_timestamp(entry.timestamp, local=True)} {zone_label([entry.timestamp])}"
 
 
 def build_detail_table(entry: AuditLogEntry) -> Table:
@@ -33,7 +41,7 @@ def build_detail_table(entry: AuditLogEntry) -> Table:
     color = get_action_color(action)
     rows = [
         ("id", entry.id or "-"),
-        ("timestamp", f"{format_timestamp(entry.timestamp, local=True)} {local_tz_name()}"),
+        ("timestamp", _local_time(entry)),
         ("user", get_user_identifier(entry, default="-")),
         ("user id", entry.user_id or "-"),
         ("user email", entry.user_email or "-"),
