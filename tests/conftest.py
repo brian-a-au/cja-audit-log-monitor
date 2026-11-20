@@ -4,12 +4,19 @@ from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
 import pytest
+from hypothesis import settings
 
 from cja_audit_log_monitor.config import CJASettings
 from cja_audit_log_monitor.models import AuditLogEntry, AuditLogResponse
 from cja_audit_log_monitor.tui.state import AppState
 
 from .fakeapi import FakeApi, start
+
+# No per-example deadline: a slow CI runner must not turn a pass into a flaky failure.
+# Run `pytest --hypothesis-profile=deep` locally for a longer search.
+settings.register_profile("default", deadline=None)
+settings.register_profile("deep", deadline=None, max_examples=5000)
+settings.load_profile("default")
 
 _ENV_NAMES = (
     "ORG_ID CLIENT_ID SECRET SCOPES API_BASE_URL IMS_BASE_URL MONITOR_INTERVAL "

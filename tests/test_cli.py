@@ -3535,6 +3535,14 @@ class TestFiltersAndDates:
         result, _ = self._run(["search", "-e", "2026-1-5"])
         assert result.exit_code == 2
 
+    @pytest.mark.parametrize("value", ["0001-01-01T00:00+05:00", "9999-12-31T23:59-05:00"])
+    def test_a_date_past_the_calendar_edge_is_a_usage_error(self, value) -> None:
+        result, client = self._run(["search", "-s", value])
+        assert result.exit_code == 2
+        assert "out of range" in result.output
+        assert "Traceback" not in result.output
+        client.get_all_logs.assert_not_called()
+
     @pytest.mark.parametrize("args", [["-s", "2999-01-01"], ["-e", "1999-01-01"]])
     def test_one_sided_range_is_checked(self, args) -> None:
         result, client = self._run(["search", *args])

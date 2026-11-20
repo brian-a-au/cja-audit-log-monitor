@@ -311,7 +311,10 @@ def parse_date(date_str: str | None, end_of_day: bool = False) -> datetime | Non
         parsed = parsed.replace(tzinfo=UTC)
     if date_only and end_of_day:
         parsed = parsed.replace(hour=23, minute=59, second=59)
-    return parsed.astimezone(UTC)
+    try:
+        return parsed.astimezone(UTC)
+    except OverflowError:  # e.g. 0001-01-01T00:00+05:00 is before year 1 in UTC
+        raise click.BadParameter(f"{date_str!r} is out of range") from None
 
 
 def parse_date_range(
