@@ -7,7 +7,7 @@
 uv sync --all-extras
 ```
 
-This installs `pytest`, `pytest-asyncio`, `pytest-httpx`, `hypothesis`, and `ruff` alongside the runtime dependencies.
+This installs `pytest`, `pytest-asyncio`, `pytest-httpx`, `pytest-cov`, `pytest-xdist`, `hypothesis`, and `ruff` alongside the runtime dependencies.
 
 ## Tests
 
@@ -23,6 +23,9 @@ uv run pytest tests/test_client.py::TestAuditLogsClient::test_get_logs
 
 # With coverage (fails below 100%)
 uv run pytest --cov
+
+# Faster: spread the tests over every core with pytest-xdist
+uv run pytest -n auto --cov
 
 # A longer search in the property tests (5,000 examples each)
 uv run pytest tests/test_properties.py --hypothesis-profile=deep
@@ -51,7 +54,7 @@ Ruff checks lines up to 100 characters and targets Python 3.11. It uses the rule
 ## CI on your machine
 
 ```bash
-# Quick check before you push: ruff and the tests with coverage on Python 3.11 (about 5 minutes)
+# Quick check before you push: ruff and the tests with coverage on Python 3.11 (about 2 minutes)
 scripts/ci.sh --quick
 
 # Every CI stage, all at the same time (about 10 minutes)
@@ -67,7 +70,7 @@ The full run starts these stages at the same time, as `.github/workflows/ci.yml`
 - the newest stage, which installs the newest versions of the dependencies and runs the tests on Python 3.14
 - a build of the sdist and wheel, then a test install of the wheel, which runs `cja-audit-log-monitor --help`
 
-Each version stage runs `ruff check`, `ruff format --check` and the tests. Each stage writes its output to `.ci/logs/<stage>.log` and has its own temp folder and coverage file, so the stages do not share files. The script prints one line per stage, the end of the log of any stage that failed, and `All checks passed.` when every stage passed. `uv.lock` is tracked in the repository, so `uv sync` installs the same versions on every machine. Your normal `.venv` is not changed. uv downloads any Python version you do not have.
+Each version stage runs `ruff check`, `ruff format --check` and the tests. The tests run in parallel with pytest-xdist: one worker per core in the quick check and on GitHub, and 2 workers per stage in the full run, where six stages share the machine. Each stage writes its output to `.ci/logs/<stage>.log` and has its own temp folder and coverage file, so the stages do not share files. The script prints one line per stage, the end of the log of any stage that failed, and `All checks passed.` when every stage passed. `uv.lock` is tracked in the repository, so `uv sync` installs the same versions on every machine. Your normal `.venv` is not changed. uv downloads any Python version you do not have.
 
 GitHub runs every stage on every pull request and every push to `main`, and you can start them by hand from the Actions tab. That makes GitHub the real gate, and `--quick` is enough before you push.
 

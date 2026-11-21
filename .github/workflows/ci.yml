@@ -35,7 +35,7 @@ jobs:
       - name: Format
         run: uv run ruff format --check src tests scripts
       - name: Test
-        run: uv run pytest -q --cov
+        run: uv run pytest -q -n auto --cov
 
   floors:
     name: Lowest dependency floors
@@ -55,7 +55,7 @@ jobs:
           uv venv .ci/lowest --python 3.11
           uv pip install --python .ci/lowest --resolution lowest-direct -e ".[dev]"
       - name: Test
-        run: .ci/lowest/bin/pytest -q
+        run: .ci/lowest/bin/pytest -q -n auto
 
   newest:
     name: Newest dependency versions
@@ -75,7 +75,7 @@ jobs:
           uv venv .ci/newest --python 3.14
           uv pip install --python .ci/newest --resolution highest -e ".[dev]"
       - name: Test
-        run: .ci/newest/bin/pytest -q
+        run: .ci/newest/bin/pytest -q -n auto
 
   build:
     name: Build package

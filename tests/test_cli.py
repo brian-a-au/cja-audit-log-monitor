@@ -1868,6 +1868,19 @@ def _fake_client(entries):
     return client
 
 
+def test_cli_consoles_have_no_fixed_size_in_tests() -> None:
+    """The conftest fixture gives each test fresh consoles, made without COLUMNS or LINES.
+
+    A console made while both are set keeps that size for good, so an xdist worker that
+    started with COLUMNS=80 would otherwise render every CLI test 80 columns wide.
+    """
+    from cja_audit_log_monitor import cli as cli_module
+
+    for console in (cli_module.console, cli_module.err_console):
+        assert console._width is None
+        assert console._height is None
+
+
 class TestDataIsNotMarkup:
     """Names from the API render literally; they are never Rich markup."""
 
@@ -3861,7 +3874,8 @@ def test_signal_during_export_leaves_no_temp_file(fake_api, tmp_path, signal_nam
     try:
         assert fake_api.blocked.wait(30)
         proc.send_signal(getattr(signal, signal_name))
-        proc.communicate(timeout=10)
+        # Generous: with pytest-xdist the machine is busy, and a hang still fails here.
+        proc.communicate(timeout=30)
     finally:
         fake_api.block.clear()
         if proc.poll() is None:

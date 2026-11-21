@@ -34,6 +34,25 @@ def _isolate_env(monkeypatch, tmp_path):
     monkeypatch.setenv("CJA_CONFIG_PATH", str(tmp_path / "config.yaml"))
 
 
+@pytest.fixture(autouse=True)
+def _fresh_cli_consoles(monkeypatch):
+    """Give each test CLI consoles sized by its own environment, not the process's.
+
+    Rich fixes a console's size when COLUMNS and LINES are set at the time it is made.
+    The CLI makes its consoles on import, and on GitHub's Linux runners a pytest-xdist
+    worker can have COLUMNS=80 and LINES=24 set by then. Every CLI test in that worker
+    then rendered 80 columns wide, whatever COLUMNS the test passed to CliRunner.
+    """
+    from rich.console import Console
+
+    from cja_audit_log_monitor import cli
+
+    monkeypatch.delenv("COLUMNS", raising=False)
+    monkeypatch.delenv("LINES", raising=False)
+    monkeypatch.setattr(cli, "console", Console(emoji=False))
+    monkeypatch.setattr(cli, "err_console", Console(stderr=True, emoji=False))
+
+
 @pytest.fixture
 def sample_settings() -> CJASettings:
     """Create sample settings for testing."""
