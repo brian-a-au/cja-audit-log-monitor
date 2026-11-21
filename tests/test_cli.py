@@ -1880,8 +1880,20 @@ class TestDataIsNotMarkup:
 
         result = runner.invoke(main, ["cli", "list"], env={"COLUMNS": "200"})
 
+        import os
+
+        from cja_audit_log_monitor import cli as cli_module
+
+        c = cli_module.console
+        debug = (
+            f"DEBUG _width={c._width} _height={c._height} size={c.size} "
+            f"force={c._force_terminal} "
+            + " ".join(f"{k}={os.environ.get(k)!r}" for k in (
+                "COLUMNS", "LINES", "TERM", "FORCE_COLOR", "TTY_COMPATIBLE", "NO_COLOR",
+                "PYTEST_XDIST_WORKER"))
+        )
         assert result.exit_code == 0, result.output
-        assert "Q3 [/final] report" in result.output
+        assert "Q3 [/final] report" in result.output, debug
 
     @patch("cja_audit_log_monitor.cli.get_client")
     def test_stats_survives_bracketed_user_id(
