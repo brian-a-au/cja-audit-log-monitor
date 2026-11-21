@@ -1868,6 +1868,19 @@ def _fake_client(entries):
     return client
 
 
+def test_cli_consoles_have_no_fixed_size_in_tests() -> None:
+    """The conftest fixture gives each test fresh consoles, made without COLUMNS or LINES.
+
+    A console made while both are set keeps that size for good, so an xdist worker that
+    started with COLUMNS=80 would otherwise render every CLI test 80 columns wide.
+    """
+    from cja_audit_log_monitor import cli as cli_module
+
+    for console in (cli_module.console, cli_module.err_console):
+        assert console._width is None
+        assert console._height is None
+
+
 class TestDataIsNotMarkup:
     """Names from the API render literally; they are never Rich markup."""
 
@@ -1880,20 +1893,8 @@ class TestDataIsNotMarkup:
 
         result = runner.invoke(main, ["cli", "list"], env={"COLUMNS": "200"})
 
-        import os
-
-        from cja_audit_log_monitor import cli as cli_module
-
-        c = cli_module.console
-        debug = (
-            f"DEBUG _width={c._width} _height={c._height} size={c.size} "
-            f"force={c._force_terminal} "
-            + " ".join(f"{k}={os.environ.get(k)!r}" for k in (
-                "COLUMNS", "LINES", "TERM", "FORCE_COLOR", "TTY_COMPATIBLE", "NO_COLOR",
-                "PYTEST_XDIST_WORKER"))
-        )
         assert result.exit_code == 0, result.output
-        assert "Q3 [/final] report" in result.output, debug
+        assert "Q3 [/final] report" in result.output
 
     @patch("cja_audit_log_monitor.cli.get_client")
     def test_stats_survives_bracketed_user_id(
@@ -3873,7 +3874,8 @@ def test_signal_during_export_leaves_no_temp_file(fake_api, tmp_path, signal_nam
     try:
         assert fake_api.blocked.wait(30)
         proc.send_signal(getattr(signal, signal_name))
-        proc.communicate(timeout=10)
+        # Generous: with pytest-xdist the machine is busy, and a hang still fails here.
+        proc.communicate(timeout=30)
     finally:
         fake_api.block.clear()
         if proc.poll() is None:
