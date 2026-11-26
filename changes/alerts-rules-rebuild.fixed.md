@@ -1,0 +1,1 @@
+- In the TUI, a second refresh of the alerts view while its rules list was still being rebuilt could leave rule cards without their checkboxes until the app was restarted. Rebuilds now run one after another.

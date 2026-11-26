@@ -1875,6 +1875,31 @@ class TestAlertsViewRealEngine:
             assert len(app.query("#rules-list .rule-card")) == 2
             assert app.query_one("#rule-0", Checkbox)
 
+    @pytest.mark.parametrize("ticks", [0, 1, 2, 3, 4, 5, 6, 8])
+    async def test_second_refresh_mid_rebuild_keeps_working_cards(self, mock_app_state, ticks):
+        """A refresh that lands while a rebuild mounts its cards must not leave dead cards."""
+        import asyncio
+
+        state = self._state(mock_app_state, [AlertRule(name=f"r{i}") for i in range(5)])
+        app = _make_app(state)
+        async with app.run_test() as pilot:
+            await pilot.press("a")
+            await pilot.pause()
+            view = app._screens["alerts"]
+            view.refresh_data()
+            for _ in range(ticks):
+                await asyncio.sleep(0)
+            view.refresh_data()
+            for _ in range(50):
+                await pilot.pause()
+                if not any(w.is_running for w in view.workers):
+                    break
+            await pilot.pause()
+            cards = list(app.query("#rules-list .rule-card"))
+            assert len(cards) == 5
+            assert all(card.is_running for card in cards)
+            assert len(app.query("#rules-list Checkbox")) == 5
+
     async def test_toggle_is_session_only_and_reset_restores(self, mock_app_state):
         state = self._state(mock_app_state, [AlertRule(name="bulk_delete", enabled=True)])
         app = _make_app(state)
