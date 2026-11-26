@@ -38,6 +38,7 @@ def atomic_write(
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline=newline) as f:
             yield f
+            _sync(f)
         if overwrite:
             os.replace(tmp_name, path)
         else:
@@ -51,6 +52,20 @@ def atomic_write(
     if not overwrite:
         with suppress(OSError):
             os.unlink(tmp_name)
+
+
+# fsync errors that mean the file system cannot sync, not that the data was lost.
+_NO_SYNC_ERRNOS = frozenset({errno.EINVAL, errno.ENOTSUP, errno.EOPNOTSUPP})
+
+
+def _sync(f: TextIO) -> None:
+    """Put ``f``'s data on disk, so a crash after the rename cannot leave an empty file."""
+    f.flush()
+    try:
+        os.fsync(f.fileno())
+    except OSError as e:
+        if e.errno not in _NO_SYNC_ERRNOS:
+            raise
 
 
 def _publish_without_overwrite(tmp_name: str, path: Path) -> None:
