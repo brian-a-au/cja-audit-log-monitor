@@ -5420,6 +5420,27 @@ class TestLogBrowserFiltering:
             query = self._last_query(mock_app_state)
             assert (query.description, query.actions, query.page) == (None, None, 0)
 
+    async def test_reset_with_dropdowns_set_fetches_once(self, mock_app_state):
+        from textual.widgets import Select
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, "l")
+            view.query_one("#filter-action", Select).value = "DELETE"
+            view.query_one("#filter-component", Select).value = "PROJECT"
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            mock_app_state.client.get_logs.reset_mock()
+            await pilot.click("#filter-reset")
+            for _ in range(5):
+                await pilot.pause()
+                await app.workers.wait_for_complete()
+            assert mock_app_state.client.get_logs.call_count == 1
+            assert view.query_one("#filter-action", Select).is_blank()
+            assert view.query_one("#filter-component", Select).is_blank()
+            assert mock_app_state.filters.actions == []
+
     async def test_paging_buttons_move_between_pages(self, mock_app_state, sample_audit_entries):
         mock_app_state.client.get_logs.return_value = AuditLogResponse(
             content=sample_audit_entries, total_elements=120, last=False
