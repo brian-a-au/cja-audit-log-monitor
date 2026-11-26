@@ -16,6 +16,7 @@ from cja_audit_log_monitor.config import (
     create_default_config,
     load_config,
 )
+from cja_audit_log_monitor.utils import display_path
 
 
 class TestCJASettings:
@@ -424,7 +425,7 @@ def test_nested_typo_warns(tmp_path, caplog, yaml_text, where, key) -> None:
     path.chmod(0o600)
     with caplog.at_level(logging.WARNING):
         load_config(path)
-    expected = f"{path}: {where}: ignoring unknown setting {key!r}"
+    expected = f"{display_path(path)}: {where}: ignoring unknown setting {key!r}"
     assert expected in caplog.text
 
 
@@ -512,7 +513,8 @@ def test_missing_explicit_config_warns(tmp_path, caplog) -> None:
     missing = tmp_path / "missing.yaml"
     with caplog.at_level(logging.WARNING):
         load_config(missing)
-    assert f"config file {missing} not found; using environment only" in caplog.text
+    shown = display_path(missing)
+    assert f"config file {shown} not found; using environment only" in caplog.text
 
 
 def test_missing_default_config_is_quiet(caplog) -> None:

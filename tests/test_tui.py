@@ -15,6 +15,7 @@ from cja_audit_log_monitor.models import AlertRule, AuditLogEntry, AuditLogRespo
 from cja_audit_log_monitor.notifications import NotificationManager
 from cja_audit_log_monitor.tui.app import CJAAuditApp, HelpScreen
 from cja_audit_log_monitor.tui.state import AppState
+from cja_audit_log_monitor.utils import display_path
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -2579,7 +2580,7 @@ class TestExportScope:
             )
             status = dialog.query_one("#export-status").render().plain
             assert "exported 10,000 of 12,345 (limit reached)" in status
-            assert str(target.resolve()) in status.replace("\n", "")
+            assert display_path(target.resolve()) in status.replace("\n", "")
 
     async def test_path_with_markup_is_shown_literally(
         self, mock_app_state, sample_audit_entries, tmp_path
