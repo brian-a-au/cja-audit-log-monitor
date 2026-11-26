@@ -155,25 +155,10 @@ class AuditLogEntry(BaseModel):
         return data
 
 
-class PaginationInfo(BaseModel):
-    """Pagination information from API response."""
-
-    page: int = 0
-    page_size: int = Field(100, alias="pageSize")
-    total_elements: int = Field(0, alias="totalElements")
-    total_pages: int = Field(0, alias="totalPages")
-    number_of_elements: int = Field(0, alias="numberOfElements")
-    first: bool = True
-    last: bool = True
-
-    model_config = {"populate_by_name": True}
-
-
 class AuditLogResponse(BaseModel):
     """API response containing audit logs with pagination."""
 
     content: list[AuditLogEntry] = Field(default_factory=list)
-    page: PaginationInfo | None = None
     total_elements: int = Field(0, alias="totalElements")
     total_pages: int = Field(0, alias="totalPages")
     number_of_elements: int = Field(0, alias="numberOfElements")
@@ -245,7 +230,6 @@ class TokenInfo(BaseModel):
     access_token: SecretStr
     token_type: str = "bearer"
     expires_in: int
-    expires_at: datetime | None = None
 
 
 def _normalize_rule_names(value: Any, enum_cls: type[Enum], label: str) -> Any:

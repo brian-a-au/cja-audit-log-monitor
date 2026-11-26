@@ -1,6 +1,7 @@
 """Tests for export module."""
 
 import csv
+import errno
 import json
 import os
 import sys
@@ -351,6 +352,63 @@ class TestAtomicWrite:
     @staticmethod
     def _only(path: Path) -> list[str]:
         return sorted(p.name for p in path.parent.iterdir())
+
+    @pytest.mark.parametrize("overwrite", [True, False])
+    def test_data_is_synced_before_it_replaces_the_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, overwrite: bool
+    ) -> None:
+        """A crash right after the rename must not leave an empty file in place of the old."""
+        from cja_audit_log_monitor import export
+        from cja_audit_log_monitor.export import atomic_write
+
+        events: list[str] = []
+        real_fsync, real_replace, real_link = os.fsync, os.replace, os.link
+
+        def fsync(fd: int) -> None:
+            events.append(f"fsync:{os.fstat(fd).st_size}")
+            real_fsync(fd)
+
+        def replace(src, dst) -> None:
+            events.append("publish")
+            real_replace(src, dst)
+
+        def link(src, dst) -> None:
+            events.append("publish")
+            real_link(src, dst)
+
+        monkeypatch.setattr(export.os, "fsync", fsync)
+        monkeypatch.setattr(export.os, "replace", replace)
+        monkeypatch.setattr(export.os, "link", link)
+        target = tmp_path / "out.txt"
+        with atomic_write(target, overwrite=overwrite) as f:
+            f.write("new data")
+        assert events[:2] == ["fsync:8", "publish"]
+        assert target.read_text() == "new data"
+
+    @pytest.mark.parametrize(
+        ("code", "written"), [(errno.EINVAL, True), (errno.ENOTSUP, True), (errno.EIO, False)]
+    )
+    def test_fsync_errors(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, code: int, written: bool
+    ) -> None:
+        """A file system that cannot sync still gets the file; a failed sync keeps the old one."""
+        from cja_audit_log_monitor import export
+        from cja_audit_log_monitor.export import atomic_write
+
+        def fsync(fd: int) -> None:
+            raise OSError(code, os.strerror(code))
+
+        monkeypatch.setattr(export.os, "fsync", fsync)
+        target = tmp_path / "out.txt"
+        target.write_text("old")
+        if written:
+            with atomic_write(target) as f:
+                f.write("new")
+        else:
+            with pytest.raises(OSError), atomic_write(target) as f:
+                f.write("new")
+        assert target.read_text() == ("new" if written else "old")
+        assert self._only(target) == ["out.txt"]
 
     def test_error_in_body_keeps_original_and_removes_temp(self, tmp_path: Path) -> None:
         from cja_audit_log_monitor.export import atomic_write

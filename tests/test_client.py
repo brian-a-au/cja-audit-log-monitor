@@ -244,6 +244,28 @@ class TestGetLogsSample:
         assert len(entries) == 10
         assert len(paged) == 10
 
+    def test_negative_page_count_still_stops_on_a_repeated_page(self, client, httpx_mock) -> None:
+        import re
+
+        page = {**self._page(10, 0, 5000, last=False), "totalPages": -1}
+        calls: list[int] = []
+
+        def respond(request: httpx.Request) -> httpx.Response:
+            calls.append(1)
+            if len(calls) > 10:
+                raise RuntimeError("paging did not stop")
+            return httpx.Response(200, json=page)
+
+        httpx_mock.add_callback(
+            respond,
+            url=re.compile(r"https://cja\.adobe\.io/auditlogs/api/v1/auditlogs.*"),
+            is_reusable=True,
+        )
+        with client:
+            paged = list(client.get_logs_paginated())
+        assert len(paged) == 10
+        assert len(calls) == 2
+
     def test_small_result_stops_at_last_page(self, client, httpx_mock) -> None:
         import re
 
@@ -486,6 +508,18 @@ class TestResilience:
         with client, pytest.raises(APIError) as info:
             client.get_logs()
         assert str(info.value).startswith("API returned an unexpected response")
+
+    @pytest.mark.parametrize("extra", [{"totalElements": None}, {"totalPages": "many"}])
+    def test_unreadable_paging_field_raises_api_error(self, client, httpx_mock, extra) -> None:
+        httpx_mock.add_response(url=self.URL, json={"content": [], **extra})
+        with client, pytest.raises(APIError) as info:
+            client.get_logs()
+        assert str(info.value).startswith("API returned an unexpected response")
+
+    def test_unknown_page_field_is_ignored(self, client, httpx_mock) -> None:
+        httpx_mock.add_response(url=self.URL, json={"content": [], "page": 0, "totalPages": 1})
+        with client:
+            assert client.get_logs().total_pages == 1
 
     def test_final_429_reports_clamped_retry_after(self, client, httpx_mock, monkeypatch) -> None:
         sleeps: list[float] = []

@@ -1689,6 +1689,63 @@ class TestMonitorPolling:
             assert mock_app_state.monitor.entries_since_start == 0
             screen._stop_monitoring()
 
+    async def test_first_poll_fails_the_next_poll_reads_from_the_first_attempt(
+        self, mock_app_state, monkeypatch
+    ):
+        """After a failed first poll, events since that attempt are fetched, alerted and counted.
+
+        Events from before the first attempt stay context.
+        """
+        from cja_audit_log_monitor.client import APIError
+        from cja_audit_log_monitor.monitor import POLL_OVERLAP
+        from cja_audit_log_monitor.tui.widgets import LogTable
+
+        t0 = datetime(2026, 11, 26, 12, 0, tzinfo=UTC)
+        old = AuditLogEntry(id="old", action="EDIT", timestamp=t0 - timedelta(minutes=1))
+        gap = AuditLogEntry(id="gap", action="DELETE", timestamp=t0 + timedelta(minutes=10))
+        queries = []
+
+        def get_logs(query):
+            queries.append(query.model_copy())
+            if len(queries) == 1:
+                raise APIError("down", status_code=503)
+            return _logs_response([gap, old], last=True)
+
+        mock_app_state.client.get_logs.side_effect = get_logs
+        engine = mock_app_state.alert_engine
+        engine.check_batch.return_value = []
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            screen = await _start_monitor_without_loop(app, pilot, monkeypatch)
+            with patch("cja_audit_log_monitor.tui.screens.monitor.datetime") as fake_dt:
+                fake_dt.now.return_value = t0
+                await _drive_poll(screen, pilot)
+                fake_dt.now.return_value = t0 + timedelta(minutes=20)
+                await _drive_poll(screen, pilot)
+            assert queries[1].start_date == t0 - POLL_OVERLAP
+            engine.check_batch.assert_called_once_with([gap])
+            assert mock_app_state.monitor.entries_since_start == 1
+            table = screen.query_one("#monitor-log", LogTable)
+            assert [row.key.value for row in table.ordered_rows] == ["old", "gap"]
+            screen._stop_monitoring()
+
+    async def test_a_first_poll_that_works_never_alerts(self, mock_app_state, monkeypatch):
+        """An entry stamped just after the first poll's own time is context, not new."""
+        t0 = datetime(2026, 11, 26, 12, 0, tzinfo=UTC)
+        ahead = AuditLogEntry(id="ahead", action="DELETE", timestamp=t0 + timedelta(seconds=1))
+        mock_app_state.client.get_logs.return_value = _logs_response([ahead], last=True)
+        mock_app_state.client.get_logs.side_effect = None
+        engine = mock_app_state.alert_engine
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            screen = await _start_monitor_without_loop(app, pilot, monkeypatch)
+            with patch("cja_audit_log_monitor.tui.screens.monitor.datetime") as fake_dt:
+                fake_dt.now.return_value = t0
+                await _drive_poll(screen, pilot)
+            engine.check_batch.assert_not_called()
+            assert mock_app_state.monitor.entries_since_start == 0
+            screen._stop_monitoring()
+
     async def test_stop_during_fetch_sends_no_alerts(self, mock_app_state, monkeypatch):
         calls: list[int] = []
 
@@ -1834,6 +1891,31 @@ class TestAlertsViewRealEngine:
             await pilot.pause()
             assert len(app.query("#rules-list .rule-card")) == 2
             assert app.query_one("#rule-0", Checkbox)
+
+    @pytest.mark.parametrize("ticks", [0, 1, 2, 3, 4, 5, 6, 8])
+    async def test_second_refresh_mid_rebuild_keeps_working_cards(self, mock_app_state, ticks):
+        """A refresh that lands while a rebuild mounts its cards must not leave dead cards."""
+        import asyncio
+
+        state = self._state(mock_app_state, [AlertRule(name=f"r{i}") for i in range(5)])
+        app = _make_app(state)
+        async with app.run_test() as pilot:
+            await pilot.press("a")
+            await pilot.pause()
+            view = app._screens["alerts"]
+            view.refresh_data()
+            for _ in range(ticks):
+                await asyncio.sleep(0)
+            view.refresh_data()
+            for _ in range(50):
+                await pilot.pause()
+                if not any(w.is_running for w in view.workers):
+                    break
+            await pilot.pause()
+            cards = list(app.query("#rules-list .rule-card"))
+            assert len(cards) == 5
+            assert all(card.is_running for card in cards)
+            assert len(app.query("#rules-list Checkbox")) == 5
 
     async def test_toggle_is_session_only_and_reset_restores(self, mock_app_state):
         state = self._state(mock_app_state, [AlertRule(name="bulk_delete", enabled=True)])
@@ -5027,6 +5109,65 @@ class TestLayoutAndKeys:
             await pilot.pause()
             assert mock_app_state.filters.page == 1  # the last page of 60 entries at 50
 
+    async def test_total_drops_to_zero_on_a_later_page(self, mock_app_state):
+        """With no entries left at all, the browser goes back to page 1 of 1."""
+        from textual.widgets import Label
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, "l")
+            mock_app_state.filters.page = 2
+            view._update_table([], 0)
+            await pilot.pause()
+            assert mock_app_state.filters.page == 0
+            assert str(view.query_one("#page-info", Label).render()) == "page 1 of 1"
+            assert view.query_one("#prev-page", Button).disabled
+
+    async def test_a_page_with_entries_and_no_total_keeps_its_number(
+        self, mock_app_state, sample_audit_entries
+    ):
+        """A page that has entries is not moved to page 1 when the API sends no total."""
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, "l")
+            mock_app_state.filters.page = 2
+            view._update_table(sample_audit_entries, 0)
+            await pilot.pause()
+            assert mock_app_state.filters.page == 2
+
+    async def test_spinner_stays_on_while_the_last_page_is_refetched(
+        self, mock_app_state, sample_audit_entries
+    ):
+        """The load that moves to the last page keeps the loading indicator shown."""
+        import threading
+
+        from textual.widgets import LoadingIndicator
+
+        release = threading.Event()
+        pages: list[int] = []
+
+        def get_logs(query):
+            pages.append(query.page)
+            if query.page == 3:
+                return _logs_response([], total_elements=60)
+            if query.page == 1:
+                release.wait(10)
+            return _logs_response(sample_audit_entries, total_elements=60)
+
+        mock_app_state.client.get_logs.side_effect = get_logs
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, "l")
+            mock_app_state.filters.page = 3
+            mock_app_state.filters.page_size = 50
+            view.refresh_data()
+            indicator = view.query_one("#logs-loading", LoadingIndicator)
+            assert await _wait_for(lambda: pages[-1:] == [1], pilot)
+            await pilot.pause()
+            assert indicator.display  # the follow-up fetch is still running
+            release.set()
+            assert await _wait_for(lambda: not indicator.display, pilot)
+
     async def test_refresh_keeps_the_cursor_on_the_same_entry(
         self, mock_app_state, sample_audit_entries
     ):
@@ -5307,6 +5448,27 @@ class TestLogBrowserFiltering:
             assert view.query_one("#filter-action", Select).is_blank()
             query = self._last_query(mock_app_state)
             assert (query.description, query.actions, query.page) == (None, None, 0)
+
+    async def test_reset_with_dropdowns_set_fetches_once(self, mock_app_state):
+        from textual.widgets import Select
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, "l")
+            view.query_one("#filter-action", Select).value = "DELETE"
+            view.query_one("#filter-component", Select).value = "PROJECT"
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            mock_app_state.client.get_logs.reset_mock()
+            await pilot.click("#filter-reset")
+            for _ in range(5):
+                await pilot.pause()
+                await app.workers.wait_for_complete()
+            assert mock_app_state.client.get_logs.call_count == 1
+            assert view.query_one("#filter-action", Select).is_blank()
+            assert view.query_one("#filter-component", Select).is_blank()
+            assert mock_app_state.filters.actions == []
 
     async def test_paging_buttons_move_between_pages(self, mock_app_state, sample_audit_entries):
         mock_app_state.client.get_logs.return_value = AuditLogResponse(

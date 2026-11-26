@@ -5,6 +5,7 @@ from collections.abc import Iterator
 from textual.containers import Container, Horizontal, Vertical
 from textual.widget import Widget
 from textual.widgets import Button, Checkbox, LoadingIndicator, Static
+from textual.worker import Worker
 
 from ...formatters import literal, resolve_tcss_markup
 from ...stats import build_date_range_query
@@ -22,6 +23,9 @@ class AlertsView(ContentView):
         super().__init__(*args, **kwargs)
         # Widget ids are positional (rule-0, rule-1...) so any rule name is safe.
         self._rule_names: dict[str, str] = {}
+        # Set by each refresh; the rebuild worker runs until no refresh is waiting.
+        self._rebuild_pending = False
+        self._rebuild_worker: Worker | None = None
 
     def compose_content(self) -> Iterator[Widget]:
         """Yield widgets for embedding in main content area.
@@ -62,12 +66,22 @@ class AlertsView(ContentView):
         )
 
     def refresh_data(self) -> None:
-        """Refresh alert rules display."""
-        self.run_worker(
-            self._refresh_rules_list(),
-            group="alerts-refresh",
-            exclusive=True,
-        )
+        """Refresh alert rules display.
+
+        A rebuild is never cancelled partway: cards cancelled while they mount never start,
+        and stay without their checkboxes. A refresh during a rebuild runs one more after it.
+        """
+        self._rebuild_pending = True
+        if self._rebuild_worker is None or self._rebuild_worker.is_finished:
+            self._rebuild_worker = self.run_worker(
+                self._rebuild_until_current(), group="alerts-refresh"
+            )
+
+    async def _rebuild_until_current(self) -> None:
+        """Rebuild the rules list until no refresh is waiting."""
+        while self._rebuild_pending:
+            self._rebuild_pending = False
+            await self._refresh_rules_list()
 
     def on_settings_reloaded(self) -> None:
         """Show the rules of the new engine, so toggles reach the rule on the card."""

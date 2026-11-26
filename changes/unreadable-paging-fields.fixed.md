@@ -1,0 +1,1 @@
+- An API response with an unreadable paging field, e.g., `"totalElements": null`, ended a command with "Unexpected error: ValidationError". It now gives the usual API error. An unknown `page` field in a response is now ignored.

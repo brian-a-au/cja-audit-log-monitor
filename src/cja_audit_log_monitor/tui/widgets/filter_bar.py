@@ -106,6 +106,8 @@ class FilterBar(Static):
         """Reset all filter inputs."""
         self.query_one("#filter-search", Input).value = ""
         self.query_one("#filter-user", Input).value = ""
-        self.query_one("#filter-action", Select).clear()
-        self.query_one("#filter-component", Select).clear()
+        # FilterReset reloads the view, so clearing a dropdown must not reload it too.
+        with self.prevent(Select.Changed):
+            self.query_one("#filter-action", Select).clear()
+            self.query_one("#filter-component", Select).clear()
         self.post_message(self.FilterReset())

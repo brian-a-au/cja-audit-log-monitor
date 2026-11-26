@@ -13,7 +13,7 @@ from pydantic import ValidationError
 
 from .auth import TokenManager
 from .config import CJASettings
-from .models import AuditLogEntry, AuditLogQuery, AuditLogResponse
+from .models import AuditLogEntry, AuditLogQuery, AuditLogResponse, ComponentType
 
 logger = logging.getLogger(__name__)
 
@@ -315,7 +315,12 @@ class AuditLogsClient:
         if skipped:
             noun = "entry" if skipped == 1 else "entries"
             logger.warning("skipped %d %s the tool could not read", skipped, noun)
-        return AuditLogResponse.model_validate({**data, "content": entries})
+        try:
+            return AuditLogResponse.model_validate({**data, "content": entries})
+        except ValidationError:
+            raise APIError(
+                "API returned an unexpected response (unreadable paging fields)"
+            ) from None
 
     def get_logs_paginated(
         self,
@@ -352,11 +357,10 @@ class AuditLogsClient:
 
             # A page of entries already seen ends paging only when the API gives no page
             # count; otherwise late entries can still follow on later pages.
-            more_pages = bool(response.total_pages) and page + 1 < response.total_pages
             if (
                 response.last
-                or (not new_entries and not more_pages)
                 or is_final_page(page, response)
+                or (not new_entries and response.total_pages <= 0)
             ):
                 break
 
@@ -440,14 +444,13 @@ class AuditLogsClient:
         Args:
             component_id: The component ID.
             component_type: Optional component type filter.
+            max_entries: Optional limit on how many entries to return.
 
         Returns:
             List of audit log entries for the component.
         """
         query = AuditLogQuery(component_id=component_id)
         if component_type:
-            from .models import ComponentType
-
             try:
                 query.components = [ComponentType(component_type)]
             except ValueError:

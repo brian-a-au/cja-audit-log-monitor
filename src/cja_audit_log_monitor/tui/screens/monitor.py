@@ -25,6 +25,7 @@ from ...monitor import (
     is_retryable,
     seen_time,
     skipped_message,
+    split_after,
 )
 from ...utils import RecentIds, entry_key, to_local
 from ..state import AppState
@@ -73,6 +74,8 @@ class MonitorView(ContentView):
         self._refresh_worker: Worker | None = None
         # When the last successful poll ran; the next poll reads from just before it.
         self._last_poll_time: datetime | None = None
+        # When this session first tried to poll; events after it are new, not context.
+        self._first_attempt: datetime | None = None
         # Keys of recent entries, so the overlap between polls is not shown twice.
         self._seen = RecentIds(SEEN_IDS_MAX)
         # Guard shared poll state against concurrent refresh/background workers.
@@ -224,6 +227,7 @@ class MonitorView(ContentView):
         # A new session starts from now with nothing seen.
         self._seen = RecentIds(SEEN_IDS_MAX)
         self._last_poll_time = None
+        self._first_attempt = None
 
         # Update UI
         self.query_one("#start-button", Button).disabled = True
@@ -344,15 +348,20 @@ class MonitorView(ContentView):
 
         Runs on a worker thread. Each poll reads from just before the last good poll up to
         now and drops entries already seen (see ``fetch_unseen``). The first poll of a session
-        reads the whole window to seed the seen keys; its rows are context, not new events,
-        so they are neither alerted on nor counted. Nothing is written once ``stop`` is set,
+        reads the whole window to seed the seen keys. Its rows from before the session's first
+        attempt are context, not new events, so they are neither alerted on nor counted.
+        Nothing is written once ``stop`` is set,
         so a poll from a stopped session is dropped.
         """
         if stop.is_set():
             return
         now = datetime.now(UTC)
         first_poll = self._last_poll_time is None
-        query = build_poll_query(self._last_poll_time, now, POLL_PAGE_SIZE)
+        if first_poll and self._first_attempt is None:
+            self._first_attempt = now
+        # Until a poll works, read from the first attempt, so events after a failed
+        # first poll are still fetched.
+        query = build_poll_query(self._last_poll_time or self._first_attempt, now, POLL_PAGE_SIZE)
         warnings: list[str] = []
         try:
             new_entries, skipped = fetch_unseen(
@@ -365,9 +374,16 @@ class MonitorView(ContentView):
         if skipped != 0:
             warnings.append(skipped_message(skipped))
 
+        context: list[AuditLogEntry] = []
+        if first_poll:
+            context, new_entries = new_entries, []
+            if self._first_attempt is not None and self._first_attempt < now:
+                # An earlier attempt failed: entries after it are new, the rest are context.
+                new_entries, context = split_after(context, self._first_attempt)
+
         fired: list[FiredAlert] = []
         try:
-            if new_entries and not first_poll:
+            if new_entries:
                 # Checked right before alerting, so a stop sends no more notifications.
                 if stop.is_set():
                     return
@@ -382,7 +398,7 @@ class MonitorView(ContentView):
         if stop.is_set():
             return
         self.app.call_from_thread(
-            self._apply_poll, stop, now, new_entries, fired, warnings, first_poll
+            self._apply_poll, stop, now, new_entries, fired, warnings, context
         )
 
     def _apply_poll(
@@ -392,17 +408,18 @@ class MonitorView(ContentView):
         new_entries: list[AuditLogEntry],
         fired: list[FiredAlert],
         warnings: list[str],
-        context_only: bool = False,
+        context: list[AuditLogEntry] | None = None,
     ) -> None:
         """Show one good poll's results. Runs on the UI thread.
 
-        With ``context_only`` (a session's first poll), the entries are remembered and the
-        newest are shown, but they are not counted as new.
+        ``context`` holds the entries a session's first poll found from before it started.
+        They are remembered and the newest are shown, but they are not counted as new.
         """
         if stop.is_set():
             return  # the session this poll belongs to has ended
+        context = context or []
         # Remember entries only once the whole poll worked, so a failed page is re-read.
-        for entry in new_entries:
+        for entry in [*context, *new_entries]:
             self._seen.add(entry_key(entry), seen_time(entry, polled_at))
         self._last_poll_time = polled_at
         # The next poll starts at polled_at - POLL_OVERLAP, so older entries cannot come back.
@@ -410,20 +427,18 @@ class MonitorView(ContentView):
 
         monitor = self._state.monitor
         monitor.last_check = polled_at
-        if context_only:
-            new_entries = new_entries[-_CONTEXT_ROWS:]
-        else:
-            monitor.entries_since_start += len(new_entries)
+        monitor.entries_since_start += len(new_entries)
         monitor.alerts_triggered += len(fired)
         if monitor.last_error is not None:
             monitor.last_error = None
             self._set_status("running")
         self.app.note_api_ok()
 
-        if new_entries:
+        rows = [*context[-_CONTEXT_ROWS:], *new_entries]
+        if rows:
             # The newest row is at the bottom and the view follows it, like `tail -f`.
             table = self.query_one("#monitor-log", LogTable)
-            table.append_entries(new_entries, MONITOR_MAX_ROWS)
+            table.append_entries(rows, MONITOR_MAX_ROWS)
         for fa in fired:
             self._show_alert(fa.summary)
         for warning in warnings:

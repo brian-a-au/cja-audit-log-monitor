@@ -1,0 +1,2 @@
+- When IMS gave a token a lifetime of 0 seconds or less, the tool fetched a new token before every request. It now keeps such a token for at least a minute. A token that stops working sooner is still replaced when the API answers 401.
+- When IMS sent a token with an unreadable `expires_in`, the error said "IMS response had no access_token". It now says the `expires_in` is unreadable.

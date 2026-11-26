@@ -84,6 +84,20 @@ def build_poll_query(since: datetime | None, now: datetime, page_size: int) -> A
     )
 
 
+def split_after(
+    entries: list[AuditLogEntry], moment: datetime
+) -> tuple[list[AuditLogEntry], list[AuditLogEntry]]:
+    """Split ``entries`` into those after ``moment`` and the rest, keeping their order."""
+    after: list[AuditLogEntry] = []
+    rest: list[AuditLogEntry] = []
+    for entry in entries:
+        if entry.timestamp is not None and entry.timestamp > moment:
+            after.append(entry)
+        else:
+            rest.append(entry)
+    return after, rest
+
+
 def fetch_unseen(
     get_logs: Callable[[AuditLogQuery], AuditLogResponse],
     query: AuditLogQuery,
@@ -203,7 +217,9 @@ class AuditLogMonitor:
         now = datetime.now(UTC)
         if self._last_poll_time is None and self._first_attempt is None:
             self._first_attempt = now
-        query = build_poll_query(self._last_poll_time, now, POLL_PAGE_SIZE)
+        # Until a poll works, read from the first attempt, so events after a failed
+        # first poll are still fetched.
+        query = build_poll_query(self._last_poll_time or self._first_attempt, now, POLL_PAGE_SIZE)
         self._skipped = 0
 
         try:
@@ -350,9 +366,7 @@ class AuditLogMonitor:
         if is_baseline and self._first_attempt is not None:
             # Polls before this one failed: events after the first attempt are new, not
             # baseline, so they still raise alerts.
-            first = self._first_attempt
-            late = [e for e in entries if e.timestamp is not None and e.timestamp > first]
-            entries = [e for e in entries if e not in late]
+            late, entries = split_after(entries, self._first_attempt)
             for entry in late:
                 self._handle_entry(entry)
         if is_baseline:

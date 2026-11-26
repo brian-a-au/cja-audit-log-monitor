@@ -478,7 +478,6 @@ def cli_list(
     client, settings = get_client(config_path)
 
     query = AuditLogQuery(
-        page_size=min(limit, 100),
         components=parse_components(component),
     )
 
@@ -561,7 +560,6 @@ def search(
         components=parse_components(component),
         component_id=component_id,
         description=description,
-        page_size=min(limit, 100),
     )
 
     with client:
@@ -1605,7 +1603,6 @@ def query(
         user_id=user,
         actions=parse_actions(action),
         components=parse_components(component),
-        page_size=min(limit, 100),
     )
 
     if not quiet and output_format != "json":

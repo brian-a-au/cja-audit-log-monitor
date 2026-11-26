@@ -1,0 +1,1 @@
+- An export or report written with `--force` could leave an empty file in place of the old one after a crash or power loss. The tool now syncs the new file to disk before it replaces the old one.

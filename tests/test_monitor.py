@@ -1133,6 +1133,32 @@ class TestMonitorDetails:
             monitor._run_poll(MagicMock())
         engine.check_entry.assert_called_once_with(later)
 
+    def test_first_poll_fails_the_next_poll_reads_from_the_first_attempt(
+        self, mock_client: MagicMock
+    ) -> None:
+        """An event between a failed first poll and the next good one is fetched and alerted."""
+        t0 = datetime(2026, 11, 26, 12, 0, tzinfo=UTC)
+        gap = AuditLogEntry(id="gap", action="DELETE", timestamp=t0 + timedelta(minutes=10))
+        queries = []
+
+        def get_logs(query):
+            queries.append(query.model_copy())
+            if len(queries) == 1:
+                raise APIError("down", status_code=503)
+            return AuditLogResponse(content=[gap], last=True)
+
+        mock_client.get_logs.side_effect = get_logs
+        engine = MagicMock()
+        engine.check_entry.return_value = []
+        monitor = AuditLogMonitor(mock_client, console=MagicMock(), interval=5, alert_engine=engine)
+        with patch("cja_audit_log_monitor.monitor.datetime") as fake_dt:
+            fake_dt.now.return_value = t0
+            monitor._run_poll(MagicMock())
+            fake_dt.now.return_value = t0 + timedelta(minutes=20)
+            monitor._run_poll(MagicMock())
+        assert queries[1].start_date == t0 - POLL_OVERLAP
+        engine.check_entry.assert_called_once_with(gap)
+
 
 def test_cli_monitor_shows_every_channel_failure(mock_client: MagicMock) -> None:
     from cja_audit_log_monitor.alerts import AlertEngine

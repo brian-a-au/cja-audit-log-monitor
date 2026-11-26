@@ -31,11 +31,8 @@ def not_connected_message(error: str) -> str:
 
 ErrorKind = Literal["connection", "access", "rejected", "other"]
 
+# A "connection" error uses not_connected_message instead.
 _ERROR_COPY: dict[ErrorKind, tuple[str, str]] = {
-    "connection": (
-        "not connected",
-        "press c to open config, or run: cja-audit-log-monitor cli verify",
-    ),
     "access": (
         "access denied",
         "check that the API credential has a CJA product profile and the right scopes",
@@ -65,9 +62,10 @@ def classify_error(error: Exception) -> ErrorKind:
 
 def error_message(error: Exception) -> str:
     """Empty-state copy for a failed API call: what went wrong and what to do next."""
-    if classify_error(error) == "connection":
+    kind = classify_error(error)
+    if kind == "connection":
         return not_connected_message(str(error))
-    headline, hint = _ERROR_COPY[classify_error(error)]
+    headline, hint = _ERROR_COPY[kind]
     return resolve_tcss_markup(
         f"[$danger]●[/$danger] {headline} · {literal(str(error))}\n"
         f"[$text-muted]{hint}[/$text-muted]"
@@ -226,7 +224,9 @@ class ContentView(Vertical):
                 except Exception:
                     logger.exception("Showing a load error failed")
             finally:
-                self.show_loading(False)
+                # The callback may have started a newer load, which keeps the indicator.
+                if generation == self._load_generation:
+                    self.show_loading(False)
 
         def work() -> None:
             try:
