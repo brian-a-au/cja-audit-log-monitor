@@ -4,6 +4,21 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-11-26
+
+### Fixed
+
+- The CLI alert panel showed "None" for an entry with no action or component, e.g., `Component: None - None`, and "- UTC" for an entry with no time. It now shows "-", as the log tables do.
+- In the TUI, a second refresh of the alerts view while its rules list was still being rebuilt could leave rule cards without their checkboxes until the app was restarted. Rebuilds now run one after another.
+- An export or report written with `--force` could leave an empty file in place of the old one after a crash or power loss. The tool now syncs the new file to disk before it replaces the old one.
+- In the TUI log browser, pressing reset while the action or component dropdown was set sent two API requests. It now sends one.
+- When IMS gave a token a lifetime of 0 seconds or less, the tool fetched a new token before every request. It now keeps such a token for at least a minute. A token that stops working sooner is still replaced when the API answers 401.
+- When IMS sent a token with an unreadable `expires_in`, the error said "IMS response had no access_token". It now says the `expires_in` is unreadable.
+- In the TUI log browser, when every entry was gone while you were past page 1, the footer showed "page 3 of 1" and the prev button stayed on. It now goes back to page 1.
+- In the TUI log browser, the loading indicator went away while the browser fetched the last page after the total shrank. It now stays until that page is shown.
+- When the monitor's first poll failed, the next poll that worked read only the last few minutes, so events in between were never shown or alerted on. Both the CLI and the TUI monitor now read from the first attempt. In the TUI, those events are now also counted and alerted on, not shown as context.
+- An API response with an unreadable paging field, e.g., `"totalElements": null`, ended a command with "Unexpected error: ValidationError". It now gives the usual API error. An unknown `page` field in a response is now ignored.
+
 ## [0.1.4] - 2026-11-25
 
 ### Changed
@@ -128,7 +143,8 @@ Configuration and security
 - Control characters in audit data, e.g. terminal escape sequences in a component name, are replaced before any output, so they never reach your terminal.
 - The tool refreshes its access token before it expires and retries when the API limits the request rate.
 
-[Unreleased]: https://github.com/brian-a-au/cja-audit-log-monitor/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/brian-a-au/cja-audit-log-monitor/compare/v0.1.5...HEAD
+[0.1.5]: https://github.com/brian-a-au/cja-audit-log-monitor/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/brian-a-au/cja-audit-log-monitor/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/brian-a-au/cja-audit-log-monitor/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/brian-a-au/cja-audit-log-monitor/compare/v0.1.1...v0.1.2

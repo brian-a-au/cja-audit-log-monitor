@@ -1,2 +1,0 @@
-- In the TUI log browser, when every entry was gone while you were past page 1, the footer showed "page 3 of 1" and the prev button stayed on. It now goes back to page 1.
-- In the TUI log browser, the loading indicator went away while the browser fetched the last page after the total shrank. It now stays until that page is shown.

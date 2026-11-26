@@ -1,1 +1,0 @@
-- In the TUI log browser, pressing reset while the action or component dropdown was set sent two API requests. It now sends one.

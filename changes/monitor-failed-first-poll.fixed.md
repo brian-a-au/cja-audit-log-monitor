@@ -1,1 +1,0 @@
-- When the monitor's first poll failed, the next poll that worked read only the last few minutes, so events in between were never shown or alerted on. Both the CLI and the TUI monitor now read from the first attempt. In the TUI, those events are now also counted and alerted on, not shown as context.
