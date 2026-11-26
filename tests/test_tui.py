@@ -1689,6 +1689,46 @@ class TestMonitorPolling:
             assert mock_app_state.monitor.entries_since_start == 0
             screen._stop_monitoring()
 
+    async def test_first_poll_fails_the_next_poll_reads_from_the_first_attempt(
+        self, mock_app_state, monkeypatch
+    ):
+        """After a failed first poll, events since that attempt are fetched, alerted and counted.
+
+        Events from before the first attempt stay context.
+        """
+        from cja_audit_log_monitor.client import APIError
+        from cja_audit_log_monitor.monitor import POLL_OVERLAP
+        from cja_audit_log_monitor.tui.widgets import LogTable
+
+        t0 = datetime(2026, 11, 26, 12, 0, tzinfo=UTC)
+        old = AuditLogEntry(id="old", action="EDIT", timestamp=t0 - timedelta(minutes=1))
+        gap = AuditLogEntry(id="gap", action="DELETE", timestamp=t0 + timedelta(minutes=10))
+        queries = []
+
+        def get_logs(query):
+            queries.append(query.model_copy())
+            if len(queries) == 1:
+                raise APIError("down", status_code=503)
+            return _logs_response([gap, old], last=True)
+
+        mock_app_state.client.get_logs.side_effect = get_logs
+        engine = mock_app_state.alert_engine
+        engine.check_batch.return_value = []
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            screen = await _start_monitor_without_loop(app, pilot, monkeypatch)
+            with patch("cja_audit_log_monitor.tui.screens.monitor.datetime") as fake_dt:
+                fake_dt.now.return_value = t0
+                await _drive_poll(screen, pilot)
+                fake_dt.now.return_value = t0 + timedelta(minutes=20)
+                await _drive_poll(screen, pilot)
+            assert queries[1].start_date == t0 - POLL_OVERLAP
+            engine.check_batch.assert_called_once_with([gap])
+            assert mock_app_state.monitor.entries_since_start == 1
+            table = screen.query_one("#monitor-log", LogTable)
+            assert [row.key.value for row in table.ordered_rows] == ["old", "gap"]
+            screen._stop_monitoring()
+
     async def test_stop_during_fetch_sends_no_alerts(self, mock_app_state, monkeypatch):
         calls: list[int] = []
 
