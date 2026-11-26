@@ -4,8 +4,13 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-11-25
+
 ### Changed
 
+- Changelog entries for unreleased changes now live as one file per pull request in `changes/`, and `scripts/changelog.py release` folds them into `CHANGELOG.md` at release time. Open pull requests no longer conflict over the top of the changelog.
+- Tests now run in parallel with pytest-xdist, on GitHub and in `scripts/ci.sh`. `scripts/ci.sh --quick` takes about 1 minute instead of about 7, and the full run about 4 minutes instead of about 8.
+- The credential setup steps in the README, `.env.example`, `cli init` and the "OAuth not configured" error now list `SCOPES` with `ORG_ID`, `CLIENT_ID` and `SECRET`. They use a placeholder instead of a scope list that often did not match the credential. The config file that `cli init` writes no longer sets `scopes`.
 - `scripts/ci.sh` now starts all its stages at the same time, each with its own log under `.ci/logs/`. `scripts/ci.sh --quick` runs only ruff and the tests with coverage on Python 3.11, which is enough before a push now that GitHub runs every stage.
 
 ## [0.1.3] - 2026-11-20
@@ -123,7 +128,8 @@ Configuration and security
 - Control characters in audit data, e.g. terminal escape sequences in a component name, are replaced before any output, so they never reach your terminal.
 - The tool refreshes its access token before it expires and retries when the API limits the request rate.
 
-[Unreleased]: https://github.com/brian-a-au/cja-audit-log-monitor/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/brian-a-au/cja-audit-log-monitor/compare/v0.1.4...HEAD
+[0.1.4]: https://github.com/brian-a-au/cja-audit-log-monitor/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/brian-a-au/cja-audit-log-monitor/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/brian-a-au/cja-audit-log-monitor/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/brian-a-au/cja-audit-log-monitor/compare/v0.1.0...v0.1.1
