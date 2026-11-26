@@ -521,14 +521,14 @@ def test_missing_default_config_is_quiet(caplog) -> None:
     assert "not found" not in caplog.text
 
 
-def test_first_message_names_only_the_needed_credentials(sample_settings) -> None:
+def test_first_message_names_all_four_credentials(sample_settings) -> None:
     from cja_audit_log_monitor.auth import AuthenticationError, TokenManager
 
     with pytest.raises(AuthenticationError) as info:
         TokenManager(CJASettings(_env_file=None)).get_token()
     text = str(info.value)
     assert "ORG_ID" in text and "CLIENT_ID" in text and "SECRET" in text
-    assert "SCOPES" not in text
+    assert "SCOPES" in text
     assert ".env.example" not in text
 
 

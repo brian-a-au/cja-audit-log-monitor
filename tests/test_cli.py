@@ -3017,10 +3017,10 @@ def test_cli_config_marks_a_missing_file(tmp_path) -> None:
     assert f"{missing} (not found)" in result.stdout
 
 
-def test_init_message_does_not_ask_for_scopes(tmp_path) -> None:
+def test_init_message_asks_for_scopes(tmp_path) -> None:
     result = CliRunner().invoke(main, ["-c", str(tmp_path / "c.yaml"), "cli", "init"])
     assert result.exit_code == 0
-    assert "SCOPES" not in result.stdout
+    assert "SCOPES=your_scopes_from_developer_console" in result.stdout
     assert ".env.example" not in result.stdout
 
 
