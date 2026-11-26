@@ -413,8 +413,8 @@ default_days: 7
 # Monitoring settings
 monitor_interval: 60
 
-# OAuth scopes
-scopes: openid,AdobeID,read_organizations,additional_info.projectedProductContext
+# OAuth scopes: set SCOPES as an environment variable or in a .env file
+# scopes: your_scopes_from_developer_console
 
 """
 

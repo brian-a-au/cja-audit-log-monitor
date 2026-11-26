@@ -41,13 +41,16 @@ pipx install cja-audit-log-monitor
 
 The tool uses an Adobe OAuth Server-to-Server credential from the [Adobe Developer Console](https://developer.adobe.com/console). See [docs/configuration.md](https://github.com/brian-a-au/cja-audit-log-monitor/blob/main/docs/configuration.md) for the full steps.
 
-Set these environment variables, or put them in a `.env` file in the folder where you run the tool:
+Set these four environment variables, or put them in a `.env` file in the folder where you run the tool:
 
 ```bash
 ORG_ID=YOUR_ORG_ID@AdobeOrg
 CLIENT_ID=your_client_id
 SECRET=your_client_secret
+SCOPES=your_scopes_from_developer_console
 ```
+
+Copy `SCOPES` exactly as the credential page in the Developer Console shows it, after you have added both the CJA and Experience Platform APIs.
 
 Then check that the connection works:
 

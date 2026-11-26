@@ -1,0 +1,1 @@
+- The credential setup steps in the README, `.env.example`, `cli init` and the "OAuth not configured" error now list `SCOPES` with `ORG_ID`, `CLIENT_ID` and `SECRET`. They use a placeholder instead of a scope list that often did not match the credential. The config file that `cli init` writes no longer sets `scopes`.

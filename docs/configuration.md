@@ -36,9 +36,9 @@ You can find these values on the project's **OAuth Server-to-Server** credential
 | `ORG_ID` | The Organization ID on the project overview | `YOUR_ORG_ID@AdobeOrg` |
 | `CLIENT_ID` | The Client ID on the credential page | `your_client_id` |
 | `SECRET` | **Retrieve client secret** on the credential page | `your_client_secret` |
-| `SCOPES` | The Scopes on the credential page | `openid,AdobeID,read_organizations,additional_info.projectedProductContext` |
+| `SCOPES` | The Scopes on the credential page | `your_scopes_from_developer_console` |
 
-Copy `SCOPES` exactly as the Developer Console shows it. If you add, remove or reorder scopes, Adobe returns an `invalid_scope` error. If you leave `SCOPES` out, the tool uses the example value above.
+Copy `SCOPES` exactly as the Developer Console shows it. If you add, remove or reorder scopes, Adobe returns an `invalid_scope` error. Set `SCOPES` even though the tool can start without it. If you leave it out, the tool falls back to `openid,AdobeID,read_organizations,additional_info.projectedProductContext`, which is often not the list on your credential.
 
 Keep these values private. Never commit them to version control.
 
@@ -50,7 +50,7 @@ You can set the four values as environment variables. You can also put them in a
 ORG_ID=YOUR_ORG_ID@AdobeOrg
 CLIENT_ID=your_client_id
 SECRET=your_client_secret
-SCOPES=openid,AdobeID,read_organizations,additional_info.projectedProductContext
+SCOPES=your_scopes_from_developer_console
 ```
 
 If you work from a clone of the repository, copy `.env.example` to `.env` and fill it in. The repository's `.gitignore` already covers `.env`.
