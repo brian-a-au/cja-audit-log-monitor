@@ -310,6 +310,20 @@ def test_alert_time_names_utc():
     assert "2026-11-17 23:25:13 UTC" in console.export_text()
 
 
+def test_alert_with_missing_fields_shows_dashes():
+    from rich.console import Console
+
+    from cja_audit_log_monitor.formatters import format_alert
+
+    console = Console(file=io.StringIO(), width=100, record=True, color_system=None)
+    console.print(format_alert(AuditLogEntry(id="1"), "rule", "fired"))
+    text = console.export_text()
+    assert "None" not in text
+    assert "Time: -" in text and "- UTC" not in text
+    assert "Action: · -" in text
+    assert "Component: -" in text and "Component: - -" not in text
+
+
 class TestDataIsNotMarkup:
     """API-supplied text must render literally, never as Rich markup."""
 

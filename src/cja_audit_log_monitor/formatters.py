@@ -377,7 +377,8 @@ def format_alert(
     content.append(f"{message}\n\n", style="bold red")
 
     content.append("Time: ", style="bold")
-    content.append(f"{format_timestamp(entry.timestamp)} UTC\n")
+    zone = " UTC" if entry.timestamp is not None else ""
+    content.append(f"{format_timestamp(entry.timestamp)}{zone}\n")
 
     content.append("User: ", style="bold")
     content.append(f"{get_user_identifier(entry)}\n")
@@ -385,10 +386,13 @@ def format_alert(
     content.append("Action: ", style="bold")
     action_color = get_action_color(entry.action or "")
     action_icon = get_action_icon(entry.action or "")
-    content.append(f"{action_icon} {entry.action}\n", style=action_color)
+    content.append(f"{action_icon} {entry.action or '-'}\n", style=action_color)
 
     content.append("Component: ", style="bold")
-    content.append(f"{entry.component_type} - {entry.component_name or entry.component_id}\n")
+    component = " - ".join(
+        part for part in (entry.component_type, entry.component_name or entry.component_id) if part
+    )
+    content.append(f"{component or '-'}\n")
 
     return Panel(
         content,

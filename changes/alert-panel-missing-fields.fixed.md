@@ -1,0 +1,1 @@
+- The CLI alert panel showed "None" for an entry with no action or component, e.g., `Component: None - None`, and "- UTC" for an entry with no time. It now shows "-", as the log tables do.
