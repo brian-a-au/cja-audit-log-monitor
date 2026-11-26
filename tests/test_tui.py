@@ -1731,13 +1731,17 @@ class TestMonitorPolling:
             screen = app._screens["monitor"]
             app.notify = MagicMock()
             screen._start_monitoring()  # the real loop; it then waits the 60 s interval
-            assert await _wait_for(lambda: raised and app.notify.called, pilot)
+
+            def error_toast_shown() -> bool:
+                return any(c.args and "ui bug" in str(c.args[0]) for c in app.notify.call_args_list)
+
+            # The logged traceback also becomes a toast, and it can come first. Wait
+            # for the error toast itself, not for any toast.
+            assert await _wait_for(lambda: raised and error_toast_shown(), pilot)
             await pilot.pause()
             assert app.is_running
             assert screen._monitor_worker.state == WorkerState.RUNNING
             assert mock_app_state.monitor.is_running
-            # The logged traceback also becomes a toast, so do not rely on the order.
-            assert any("ui bug" in c.args[0] for c in app.notify.call_args_list)
             # The next poll works.
             assert screen.refresh_data() is True
             assert await _wait_for(
