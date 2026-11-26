@@ -315,7 +315,12 @@ class AuditLogsClient:
         if skipped:
             noun = "entry" if skipped == 1 else "entries"
             logger.warning("skipped %d %s the tool could not read", skipped, noun)
-        return AuditLogResponse.model_validate({**data, "content": entries})
+        try:
+            return AuditLogResponse.model_validate({**data, "content": entries})
+        except ValidationError:
+            raise APIError(
+                "API returned an unexpected response (unreadable paging fields)"
+            ) from None
 
     def get_logs_paginated(
         self,

@@ -155,25 +155,10 @@ class AuditLogEntry(BaseModel):
         return data
 
 
-class PaginationInfo(BaseModel):
-    """Pagination information from API response."""
-
-    page: int = 0
-    page_size: int = Field(100, alias="pageSize")
-    total_elements: int = Field(0, alias="totalElements")
-    total_pages: int = Field(0, alias="totalPages")
-    number_of_elements: int = Field(0, alias="numberOfElements")
-    first: bool = True
-    last: bool = True
-
-    model_config = {"populate_by_name": True}
-
-
 class AuditLogResponse(BaseModel):
     """API response containing audit logs with pagination."""
 
     content: list[AuditLogEntry] = Field(default_factory=list)
-    page: PaginationInfo | None = None
     total_elements: int = Field(0, alias="totalElements")
     total_pages: int = Field(0, alias="totalPages")
     number_of_elements: int = Field(0, alias="numberOfElements")
