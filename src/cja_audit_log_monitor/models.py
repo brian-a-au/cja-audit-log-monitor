@@ -230,7 +230,6 @@ class TokenInfo(BaseModel):
     access_token: SecretStr
     token_type: str = "bearer"
     expires_in: int
-    expires_at: datetime | None = None
 
 
 def _normalize_rule_names(value: Any, enum_cls: type[Enum], label: str) -> Any:
