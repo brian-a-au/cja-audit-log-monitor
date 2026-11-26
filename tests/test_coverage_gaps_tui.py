@@ -437,6 +437,24 @@ class TestMonitorStopRaces:
             await pilot.pause()
             assert mock_app_state.monitor.last_error is None
 
+    async def test_stop_during_a_first_poll_shows_no_context(self, mock_app_state, monkeypatch):
+        from cja_audit_log_monitor.tui.widgets import LogTable
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=SIZE) as pilot:
+            screen = await _start_monitor_without_loop(app, pilot, monkeypatch)
+            stop = threading.Event()
+
+            def fetch(query):
+                stop.set()
+                return AuditLogResponse(content=_monitor_entries(0, 2), last=True)
+
+            mock_app_state.client.get_logs.side_effect = fetch
+            await asyncio.to_thread(screen._poll_for_new_entries, stop)
+            await pilot.pause()
+            assert screen.query_one("#monitor-log", LogTable).row_count == 0
+            assert screen._last_poll_time is None
+
     async def test_results_for_an_ended_session_are_dropped(self, mock_app_state, monkeypatch):
         from cja_audit_log_monitor.tui.widgets import LogTable
 
