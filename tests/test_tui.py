@@ -5092,6 +5092,53 @@ class TestLayoutAndKeys:
             await pilot.pause()
             assert mock_app_state.filters.page == 1  # the last page of 60 entries at 50
 
+    async def test_total_drops_to_zero_on_a_later_page(self, mock_app_state):
+        """With no entries left at all, the browser goes back to page 1 of 1."""
+        from textual.widgets import Label
+
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, "l")
+            mock_app_state.filters.page = 2
+            view._update_table([], 0)
+            await pilot.pause()
+            assert mock_app_state.filters.page == 0
+            assert str(view.query_one("#page-info", Label).render()) == "page 1 of 1"
+            assert view.query_one("#prev-page", Button).disabled
+
+    async def test_spinner_stays_on_while_the_last_page_is_refetched(
+        self, mock_app_state, sample_audit_entries
+    ):
+        """The load that moves to the last page keeps the loading indicator shown."""
+        import threading
+
+        from textual.widgets import LoadingIndicator
+
+        release = threading.Event()
+        pages: list[int] = []
+
+        def get_logs(query):
+            pages.append(query.page)
+            if query.page == 3:
+                return _logs_response([], total_elements=60)
+            if query.page == 1:
+                release.wait(10)
+            return _logs_response(sample_audit_entries, total_elements=60)
+
+        mock_app_state.client.get_logs.side_effect = get_logs
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, "l")
+            mock_app_state.filters.page = 3
+            mock_app_state.filters.page_size = 50
+            view.refresh_data()
+            indicator = view.query_one("#logs-loading", LoadingIndicator)
+            assert await _wait_for(lambda: pages[-1:] == [1], pilot)
+            await pilot.pause()
+            assert indicator.display  # the follow-up fetch is still running
+            release.set()
+            assert await _wait_for(lambda: not indicator.display, pilot)
+
     async def test_refresh_keeps_the_cursor_on_the_same_entry(
         self, mock_app_state, sample_audit_entries
     ):

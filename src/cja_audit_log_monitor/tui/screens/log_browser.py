@@ -89,6 +89,9 @@ class LogBrowserView(ContentView):
             self._state.filters.page = last_page
             self.refresh_data()
             return
+        if not total:
+            # No entries at all: a later page number would show "page 3 of 1".
+            self._state.filters.page = 0
         table = self.query_one("#log-table", LogTable)
         table.load_entries(entries)
         self._state.entries = entries

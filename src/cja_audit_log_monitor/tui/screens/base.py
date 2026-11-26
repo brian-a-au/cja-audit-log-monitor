@@ -226,7 +226,9 @@ class ContentView(Vertical):
                 except Exception:
                     logger.exception("Showing a load error failed")
             finally:
-                self.show_loading(False)
+                # The callback may have started a newer load, which keeps the indicator.
+                if generation == self._load_generation:
+                    self.show_loading(False)
 
         def work() -> None:
             try:
