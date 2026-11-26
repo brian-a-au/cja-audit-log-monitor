@@ -13,9 +13,10 @@ from .models import TokenInfo
 
 logger = logging.getLogger(__name__)
 
-# The shortest time a token is kept, so a lifetime of 0 does not cost an IMS call per request.
-# A token that really expires sooner gets a 401, and the client then fetches a new one.
-MIN_TOKEN_LIFETIME = 60
+# The shortest time, in seconds, a token is kept, so a lifetime of 0 does not cost an IMS
+# call per request. A token that really expires sooner gets a 401, and the client then
+# fetches a new one.
+MIN_TOKEN_KEEP = 60
 
 
 class AuthenticationError(Exception):
@@ -59,9 +60,10 @@ class TokenManager:
 
             # Refresh 5 minutes early, or at half the lifetime for a short-lived token.
             # A lifetime is capped at a day, so an odd value cannot overflow the date.
-            lifetime = min(max(token.expires_in, MIN_TOKEN_LIFETIME), 86_400)
+            lifetime = min(max(token.expires_in, 0), 86_400)
             margin = 300 if lifetime > 600 else lifetime // 2
-            expiry = datetime.now(UTC) + timedelta(seconds=lifetime - margin)
+            keep = max(lifetime - margin, MIN_TOKEN_KEEP)
+            expiry = datetime.now(UTC) + timedelta(seconds=keep)
             self._token = token
             self._token_expiry = expiry
 
@@ -100,7 +102,7 @@ class TokenManager:
                     raise AuthenticationError("IMS response had no access_token")
                 try:
                     expires_in = int(token_data.get("expires_in", 86400))
-                except (ValueError, TypeError):
+                except (ValueError, TypeError, OverflowError):
                     raise AuthenticationError("IMS response had an unreadable expires_in") from None
                 try:
                     return TokenInfo(

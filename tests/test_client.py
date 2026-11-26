@@ -244,6 +244,28 @@ class TestGetLogsSample:
         assert len(entries) == 10
         assert len(paged) == 10
 
+    def test_negative_page_count_still_stops_on_a_repeated_page(self, client, httpx_mock) -> None:
+        import re
+
+        page = {**self._page(10, 0, 5000, last=False), "totalPages": -1}
+        calls: list[int] = []
+
+        def respond(request: httpx.Request) -> httpx.Response:
+            calls.append(1)
+            if len(calls) > 10:
+                raise RuntimeError("paging did not stop")
+            return httpx.Response(200, json=page)
+
+        httpx_mock.add_callback(
+            respond,
+            url=re.compile(r"https://cja\.adobe\.io/auditlogs/api/v1/auditlogs.*"),
+            is_reusable=True,
+        )
+        with client:
+            paged = list(client.get_logs_paginated())
+        assert len(paged) == 10
+        assert len(calls) == 2
+
     def test_small_result_stops_at_last_page(self, client, httpx_mock) -> None:
         import re
 

@@ -360,7 +360,7 @@ class AuditLogsClient:
             if (
                 response.last
                 or is_final_page(page, response)
-                or (not new_entries and not response.total_pages)
+                or (not new_entries and response.total_pages <= 0)
             ):
                 break
 

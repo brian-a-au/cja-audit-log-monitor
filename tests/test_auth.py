@@ -362,19 +362,29 @@ class TestImsMessages:
         with pytest.raises(AuthenticationError, match="IMS response had no access_token"):
             TokenManager(sample_settings).get_token()
 
-    @pytest.mark.parametrize("expires_in", ["soon", None, "86399.0", [1]])
+    @pytest.mark.parametrize("expires_in", ["soon", None, "86399.0", [1], "1e400"])
     def test_an_unreadable_lifetime_is_named_in_the_error(
         self, sample_settings, httpx_mock, expires_in
     ):
-        httpx_mock.add_response(url=self.IMS, json={"access_token": "a", "expires_in": expires_in})
+        if expires_in == "1e400":  # JSON reads this as float infinity, which int() refuses
+            httpx_mock.add_response(url=self.IMS, text='{"access_token": "a", "expires_in": 1e400}')
+        else:
+            httpx_mock.add_response(
+                url=self.IMS, json={"access_token": "a", "expires_in": expires_in}
+            )
         with pytest.raises(AuthenticationError, match="IMS response had an unreadable expires_in"):
             TokenManager(sample_settings).get_token()
 
     @pytest.mark.parametrize("expires_in", [0, -5])
     def test_a_zero_lifetime_token_is_still_reused(self, sample_settings, httpx_mock, expires_in):
-        """A token IMS says lasts 0 seconds is kept a short while, not fetched per request."""
+        """A token IMS says lasts 0 seconds is kept a minute, not fetched per request."""
+        from datetime import UTC, datetime, timedelta
+
         httpx_mock.add_response(url=self.IMS, json={"access_token": "a", "expires_in": expires_in})
         manager = TokenManager(sample_settings)
         manager.get_token()
         manager.get_token()
         assert len(httpx_mock.get_requests()) == 1
+        assert manager._token_expiry is not None
+        kept = manager._token_expiry - datetime.now(UTC)
+        assert timedelta(seconds=55) < kept <= timedelta(seconds=60)

@@ -1729,6 +1729,23 @@ class TestMonitorPolling:
             assert [row.key.value for row in table.ordered_rows] == ["old", "gap"]
             screen._stop_monitoring()
 
+    async def test_a_first_poll_that_works_never_alerts(self, mock_app_state, monkeypatch):
+        """An entry stamped just after the first poll's own time is context, not new."""
+        t0 = datetime(2026, 11, 26, 12, 0, tzinfo=UTC)
+        ahead = AuditLogEntry(id="ahead", action="DELETE", timestamp=t0 + timedelta(seconds=1))
+        mock_app_state.client.get_logs.return_value = _logs_response([ahead], last=True)
+        mock_app_state.client.get_logs.side_effect = None
+        engine = mock_app_state.alert_engine
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            screen = await _start_monitor_without_loop(app, pilot, monkeypatch)
+            with patch("cja_audit_log_monitor.tui.screens.monitor.datetime") as fake_dt:
+                fake_dt.now.return_value = t0
+                await _drive_poll(screen, pilot)
+            engine.check_batch.assert_not_called()
+            assert mock_app_state.monitor.entries_since_start == 0
+            screen._stop_monitoring()
+
     async def test_stop_during_fetch_sends_no_alerts(self, mock_app_state, monkeypatch):
         calls: list[int] = []
 
@@ -5105,6 +5122,18 @@ class TestLayoutAndKeys:
             assert mock_app_state.filters.page == 0
             assert str(view.query_one("#page-info", Label).render()) == "page 1 of 1"
             assert view.query_one("#prev-page", Button).disabled
+
+    async def test_a_page_with_entries_and_no_total_keeps_its_number(
+        self, mock_app_state, sample_audit_entries
+    ):
+        """A page that has entries is not moved to page 1 when the API sends no total."""
+        app = _make_app(mock_app_state)
+        async with app.run_test(size=(140, 40)) as pilot:
+            view = await _show_and_load(app, pilot, "l")
+            mock_app_state.filters.page = 2
+            view._update_table(sample_audit_entries, 0)
+            await pilot.pause()
+            assert mock_app_state.filters.page == 2
 
     async def test_spinner_stays_on_while_the_last_page_is_refetched(
         self, mock_app_state, sample_audit_entries

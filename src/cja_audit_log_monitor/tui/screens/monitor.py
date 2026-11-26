@@ -375,10 +375,11 @@ class MonitorView(ContentView):
             warnings.append(skipped_message(skipped))
 
         context: list[AuditLogEntry] = []
-        if first_poll and self._first_attempt is not None:
-            # Entries from before the first attempt are context. Later ones are new, because
-            # a poll after the first attempt failed.
-            new_entries, context = split_after(new_entries, self._first_attempt)
+        if first_poll:
+            context, new_entries = new_entries, []
+            if self._first_attempt is not None and self._first_attempt < now:
+                # An earlier attempt failed: entries after it are new, the rest are context.
+                new_entries, context = split_after(context, self._first_attempt)
 
         fired: list[FiredAlert] = []
         try:
