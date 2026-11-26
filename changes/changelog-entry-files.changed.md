@@ -1,1 +1,0 @@
-- Changelog entries for unreleased changes now live as one file per pull request in `changes/`, and `scripts/changelog.py release` folds them into `CHANGELOG.md` at release time. Open pull requests no longer conflict over the top of the changelog.
