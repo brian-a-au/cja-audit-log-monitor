@@ -48,7 +48,7 @@ When a view can't load data, it shows one of these messages with the error from 
 
 The header shows `disconnected` after a login or network failure in any view. It shows `connected` again after the next successful load.
 
-If the config file has an error, the TUI does not open. It prints one line that starts with `Configuration error:` and names the file and the problem. Fix the file and start the TUI again. If the file breaks while the TUI is open, **reload settings** in the config view keeps the settings it has and says why.
+If the config file has an error, or a path you gave with `-c` or `CJA_CONFIG_PATH` does not exist, the TUI does not open. It prints one line that starts with `Configuration error:` and names the file and the problem. Fix the file and start the TUI again. If the file breaks while the TUI is open, **reload settings** in the config view keeps the settings it has and says why.
 
 The TUI has no log file, and `-v` does not change what it shows. Warnings that the CLI prints on stderr, e.g. about unknown settings, file permissions or failed deliveries, appear as toasts in the TUI.
 

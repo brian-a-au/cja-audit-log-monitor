@@ -80,7 +80,7 @@ cja-audit-log-monitor --version
 Three options work with the TUI and with every CLI command. Put them before `cli` or `tui`:
 
 - `-v` / `--verbose` turns on debug logging to stderr. It affects the CLI only. The TUI has no log file, and it shows logged warnings as toasts.
-- `-c` / `--config PATH` reads a config file other than `~/.cja-audit-log-monitor/config.yaml`. The file can be YAML or JSON. You can also set the path with the `CJA_CONFIG_PATH` environment variable.
+- `-c` / `--config PATH` reads a config file other than `~/.cja-audit-log-monitor/config.yaml`. The file can be YAML or JSON. You can also set the path with the `CJA_CONFIG_PATH` environment variable. A path that you name in one of these two ways must exist.
 - `--profile NAME` uses the credential in the profile `~/.cja/orgs/NAME/config.json`.
 
 CLI commands write data to stdout and messages to stderr. Most of them accept `-F json`. See the [CLI reference](https://github.com/brian-a-au/cja-audit-log-monitor/blob/main/docs/cli.md) for every command and flag.

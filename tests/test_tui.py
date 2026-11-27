@@ -4616,17 +4616,6 @@ async def test_config_warning_toasts_show_the_home_folder_as_tilde(tmp_path, mon
         assert any(m.startswith(f"{where}: alert_rules[0]: ignoring") for m in messages())
 
 
-async def test_missing_config_toast_shows_the_home_folder_as_tilde(tmp_path, monkeypatch) -> None:
-    home = _fake_home(tmp_path, monkeypatch)
-    app = _make_app(AppState(home / "missing.yaml"))
-    async with app.run_test(size=(140, 40), notifications=True) as pilot:
-        assert await _wait_for(
-            lambda: any("not found" in n.message for n in app._notifications), pilot
-        )
-        found = [n.message for n in app._notifications if "not found" in n.message]
-        assert found == ["config file ~/missing.yaml not found; using environment only"]
-
-
 async def test_tui_shows_a_warning_logged_on_a_worker_thread(mock_app_state) -> None:
     import asyncio
     import logging

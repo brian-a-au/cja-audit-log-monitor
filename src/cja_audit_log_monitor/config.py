@@ -205,17 +205,19 @@ def load_config_with_report(
     cannot be read or a setting is invalid. No credential at all is not an error here.
     """
     explicit = config_path is not None
+    # A path the person named, with -c or with CJA_CONFIG_PATH, must be there.
+    named = "-c" if explicit else "CJA_CONFIG_PATH" if os.getenv("CJA_CONFIG_PATH") else None
     if config_path is None:
         config_path = get_config_path()
 
     config_data: dict[str, Any] = {}
-    if config_path.exists():
+    if explicit and profile is not None:
+        pass  # --profile with -c is an error of its own; the lookup below reports it
+    elif config_path.exists():
         config_data = _read_config_file(config_path)
-    elif explicit and not config_path.is_symlink():
-        logger.warning(
-            "config file %s not found; using environment only",
-            display_path(config_path),
-        )
+    elif named:
+        problem = f"does not exist (given with {named})"
+        raise ConfigError(f"{config_path}: {problem}", f"{config_path.name}: {problem}")
 
     report = resolve_credential(
         profile=profile, config_data=config_data, config_path=config_path, config_is_flag=explicit

@@ -36,7 +36,7 @@ These options go before `cli` or `tui`, e.g. `cja-audit-log-monitor -c ./config.
 | Option | Meaning |
 |---|---|
 | `-v`, `--verbose` | Turn on debug logging. The log lines go to stderr. They never contain the client secret. This option affects the CLI only. The TUI has no log file and shows warnings as toasts. |
-| `-c`, `--config PATH` | Read the config file at `PATH` instead of the default file. The file can be YAML or JSON. If it holds a credential, that credential is used. See [Configuration](configuration.md#where-the-config-file-lives). |
+| `-c`, `--config PATH` | Read the config file at `PATH` instead of the default file. The file can be YAML or JSON, and it must exist. If it holds a credential, that credential is used. See [Configuration](configuration.md#where-the-config-file-lives). |
 | `--profile NAME` | Use the credential in the profile `~/.cja/orgs/NAME/config.json`. The tool reads the file and never writes it. You cannot give `--profile` and `-c` together. See [Profiles](configuration.md#profiles). |
 | `--version` | Print the version and exit. |
 | `--help` | Print the help and exit. |

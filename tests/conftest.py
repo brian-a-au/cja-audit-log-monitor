@@ -31,7 +31,11 @@ def _isolate_env(monkeypatch, tmp_path, tmp_path_factory):
         monkeypatch.delenv(name, raising=False)
         monkeypatch.delenv(name.lower(), raising=False)
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("CJA_CONFIG_PATH", str(tmp_path / "config.yaml"))
+    # The default config file of a test is in its own folder. It does not exist unless the
+    # test writes it. CJA_CONFIG_PATH is left unset, because a path it names must exist.
+    from cja_audit_log_monitor import config
+
+    monkeypatch.setattr(config, "DEFAULT_CONFIG_FILE", tmp_path / "config.yaml")
     # Profiles are read from the home folder: give each test an empty one.
     home = tmp_path_factory.mktemp("home")
     monkeypatch.setenv("HOME", str(home))

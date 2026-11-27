@@ -50,6 +50,8 @@ class FakeApi:
 
     def env(self, config_path: Path) -> dict[str, str]:
         """Environment for a child process that talks only to this server."""
+        if not config_path.exists():  # a path named in CJA_CONFIG_PATH must exist
+            config_path.touch(mode=0o600)
         env = dict(os.environ)
         env.update(
             {

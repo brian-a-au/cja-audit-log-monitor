@@ -113,7 +113,7 @@ The tool looks for the config file in this order:
 2. The path in the `CJA_CONFIG_PATH` environment variable. A `~` at the start is read as your home folder.
 3. `~/.cja-audit-log-monitor/config.yaml`.
 
-`cli init` writes to the same path that the tool reads. `cli config` shows which path is in use, and adds "(not found)" when the file does not exist. If the file you give with `-c` does not exist, the tool gives a warning and uses the environment variables and `.env` only.
+`cli init` writes to the same path that the tool reads. `cli config` shows which path is in use, and adds "(not found)" when the file does not exist. A path that you name must exist. If the file you give with `-c` or with `CJA_CONFIG_PATH` does not exist, or is a folder, the tool stops with a `Configuration error:` line that names the path, and exits 1. It does not go on to another place. Only the default file, `~/.cja-audit-log-monitor/config.yaml`, can be absent. `cli init` is the exception, because it creates the file.
 
 ### The file is private
 

@@ -2979,11 +2979,11 @@ def test_config_error_is_one_line(tmp_path) -> None:
 
 def test_env_error_names_the_environment(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("API_BASE_URL", "http://example.com")
-    result = CliRunner().invoke(main, ["-c", str(tmp_path / "missing.yaml"), "cli", "list"])
+    result = CliRunner().invoke(main, ["cli", "list"])
     assert result.exit_code == 1
     line = result.stderr.strip()
     assert line.startswith("Configuration error: environment or .env: api_base_url")
-    assert "missing.yaml" not in line
+    assert "config.yaml" not in line
 
 
 def test_env_value_overriding_a_file_value_is_blamed_on_the_environment(tmp_path, monkeypatch):
@@ -2998,11 +2998,15 @@ def test_env_value_overriding_a_file_value_is_blamed_on_the_environment(tmp_path
     assert str(info.value).startswith("environment or .env: monitor_interval")
 
 
-def test_cli_config_marks_a_missing_file(tmp_path) -> None:
+def test_cli_config_marks_a_missing_file(tmp_path, monkeypatch) -> None:
     # "Config file: " plus a 60 character path ends near column 80, so a plain print would
     # break the line before "(not found)", as it did on the Linux CI runner.
+    # Only the default file can be missing: a path given with -c must exist.
+    from cja_audit_log_monitor import config
+
     missing = "m" * 55 + ".yaml"  # relative to the test's working folder, tmp_path
-    result = CliRunner().invoke(main, ["-c", missing, "cli", "config"])
+    monkeypatch.setattr(config, "DEFAULT_CONFIG_FILE", Path(missing))
+    result = CliRunner().invoke(main, ["cli", "config"])
     assert result.exit_code == 0
     assert f"{missing} (not found)" in result.stdout
 
@@ -3693,7 +3697,7 @@ def test_cli_config_shows_the_org_id_in_full(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("CLIENT_ID", "aaaa1111bbbb2222cccc3333dddd4444")
     monkeypatch.setenv("SECRET", "fake-secret-A-not-a-credential-0001")
     monkeypatch.setenv("SCOPES", "openid,AdobeID")
-    result = CliRunner().invoke(main, ["-c", str(tmp_path / "x.yaml"), "cli", "config"])
+    result = CliRunner().invoke(main, ["cli", "config"])
     assert "ABCDEF0123456789@AdobeOrg" in result.stdout
 
 
