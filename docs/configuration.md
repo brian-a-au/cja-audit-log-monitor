@@ -38,7 +38,7 @@ You can find these values on the project's **OAuth Server-to-Server** credential
 | `SECRET` | **Retrieve client secret** on the credential page | `your_client_secret` |
 | `SCOPES` | The Scopes on the credential page | `your_scopes_from_developer_console` |
 
-Copy `SCOPES` exactly as the Developer Console shows it. If you add, remove or reorder scopes, Adobe returns an `invalid_scope` error. Set `SCOPES` even though the tool can start without it. If you leave it out, the tool falls back to `openid,AdobeID,read_organizations,additional_info.projectedProductContext`, which is often not the list on your credential.
+Copy `SCOPES` exactly as the Developer Console shows it. If you add, remove or reorder scopes, Adobe returns an `invalid_scope` error. The tool has no built-in scopes, so you must set `SCOPES`. A credential without scopes is an error that names `scopes` as missing.
 
 Keep these values private. Never commit them to version control.
 
@@ -57,6 +57,42 @@ If you work from a clone of the repository, copy `.env.example` to `.env` and fi
 
 The variable names have no prefix, and case does not matter. `ORG_ID` must end with `@AdobeOrg`.
 
+The tool reads `.env` only from the folder you run it in. It does not look in parent folders, and it does not copy the values into the environment.
+
+### Profiles
+
+A profile is a folder that holds one credential. The Customer Journey Analytics tools share the folder `~/.cja/orgs/`, so one profile works in each of them. Profile `prod` is the file `~/.cja/orgs/prod/config.json`:
+
+```json
+{
+  "org_id": "YOUR_ORG_ID@AdobeOrg",
+  "client_id": "your_client_id",
+  "secret": "your_client_secret",
+  "scopes": "your_scopes_from_developer_console"
+}
+```
+
+Use a profile with `--profile`, e.g. `cja-audit-log-monitor --profile prod cli verify`. The option goes before `cli` or `tui`. You can also set the `CJA_PROFILE` environment variable to the name.
+
+- The tool reads a profile and never writes one. Create the folder and the file yourself, and keep the file private with `chmod 600`.
+- A profile name holds letters, digits, dots, underscores and hyphens. It starts with a letter or a digit, and it has 64 characters or fewer.
+- The keys are lower case. A key in upper case, e.g. `ORG_ID`, is not read, and the tool gives a warning. The tool accepts a `sandbox` key and does not use it. It ignores any other key.
+- A profile that does not exist is an error. The tool does not go on to another source.
+
+### Where the credential comes from
+
+The tool looks for the credential in these places, in this order. It uses the first place that holds any of the four fields.
+
+1. The profile you give with `--profile`, or the config file you give with `-c` / `--config` when that file holds credential fields. You cannot give both.
+2. The profile named in the `CJA_PROFILE` environment variable.
+3. The environment variables `ORG_ID`, `CLIENT_ID`, `SECRET` and `SCOPES`.
+4. The `.env` file in the current folder.
+5. The default config file.
+
+One place gives all four fields. The tool never takes some fields from one place and the rest from another. If the first place that holds a field does not hold all four, the tool stops with an error that names the missing fields. For example, if `ORG_ID`, `CLIENT_ID` and `SECRET` are set as environment variables and `SCOPES` is not, the error names `SCOPES`, even when `.env` holds a full credential.
+
+Run `cja-audit-log-monitor cli config` to see which place the tool uses. See [Check the credential](cli.md#check-the-credential).
+
 ## 4. (Optional) Create a config file
 
 The config file holds alert rules, notification channels and default values. Create it with this command:
@@ -73,7 +109,7 @@ See [Alert Rules](alert-rules.md) for the rule format and [Delivery channels](al
 
 The tool looks for the config file in this order:
 
-1. The path you give with `-c` / `--config`, e.g. `cja-audit-log-monitor -c ./config.yaml cli list`. The option goes before `cli` or `tui`.
+1. The path you give with `-c` / `--config`, e.g. `cja-audit-log-monitor -c ./config.yaml cli list`. The option goes before `cli` or `tui`. The file can be YAML or JSON, because the tool reads JSON as YAML.
 2. The path in the `CJA_CONFIG_PATH` environment variable. A `~` at the start is read as your home folder.
 3. `~/.cja-audit-log-monitor/config.yaml`.
 
@@ -83,9 +119,11 @@ The tool looks for the config file in this order:
 
 When `cli init` creates the folder, it makes it so that only you can open it (mode 0700). It does not change a folder that already exists. It refuses to write through a symbolic link. It creates the file so that only you can read it (mode 0600). The file can hold webhook URLs and `Authorization` headers, so keep it that way.
 
-If other users can read the file, the tool gives a warning each time it loads the file. The warning suggests `chmod 600` with the file's path.
+If other users can read the file, the tool gives a warning each time it loads the file. The warning suggests `chmod 600` with the file's path. The tool gives the same warning for a profile, and for a `.env` file that holds a credential field.
 
 ### Which value wins
+
+This order is for every setting except the four credential fields. For the credential, see [Where the credential comes from](#where-the-credential-comes-from).
 
 The tool reads each setting from these places, from highest priority to lowest:
 
@@ -108,7 +146,7 @@ So a value in an environment variable or in `.env` always beats the same value i
 | `alert_rules` | the built-in rules | A list of rules | See [Alert Rules](alert-rules.md). Leave the key out to use the built-in rules. `alert_rules: []` means no rules. |
 | `notifications` | none | A block of channels | See [Delivery channels](alert-rules.md#delivery-channels). |
 
-The config file can also hold the credentials, with the keys `org_id`, `client_id`, `secret` and `scopes`. An environment variable or `.env` still wins over the file.
+The config file can also hold the credential, with the keys `org_id`, `client_id`, `secret` and `scopes`. It must hold all four or none of them. A credential in the file you give with `-c` wins over the environment variables and `.env`. A credential in the default config file is used only when no other place holds one.
 
 The two URLs must use https. Plain http is allowed only for `localhost` and `127.0.0.1`, which is useful for tests. Any other http URL stops the settings from loading. So does a URL that holds a user name or a password.
 
@@ -120,7 +158,9 @@ The CLI prints these warnings on stderr. The TUI shows them as toasts. The TUI h
 
 The CLI prints one line that starts with `Configuration error:` and names the problem. When the bad value came from the config file, the line names the file. When it came from an environment variable or `.env`, the line says `environment or .env`. Then it exits 1.
 
-The TUI still starts. It loads settings from the environment variables and `.env` only. The header shows a short warning about the file, so you can fix it and use **reload settings** in the config view. If the file is still broken when you reload, the TUI keeps the settings it has and says why.
+The TUI does the same. It prints the line and does not open, so it never runs with settings from another place. If the file breaks while the TUI is open and you use **reload settings** in the config view, the TUI keeps the settings it has and says why.
+
+An error in the credential lookup is reported the same way, e.g. a profile that does not exist or a source that holds only some of the four fields.
 
 ## 5. Verify
 
@@ -128,4 +168,6 @@ The TUI still starts. It loads settings from the environment variables and `.env
 cja-audit-log-monitor cli verify
 ```
 
-When it works, the command prints `Connection successful`, your organization ID, the API URL and the number of logs available. When it fails, it prints the error and exits 1. If it fails, see [Troubleshooting](troubleshooting.md).
+The command signs in and then fetches one audit log entry. It reports the two steps separately. When both work, it prints `Connection successful`, your organization ID, the API URL and the number of logs available. When one fails, it prints the error with a code and what to do, and exits 1. See [Check the credential](cli.md#check-the-credential) for the codes and [Troubleshooting](troubleshooting.md) for more help.
+
+To see where the tool finds the credential without a call to Adobe, run `cja-audit-log-monitor cli config`.

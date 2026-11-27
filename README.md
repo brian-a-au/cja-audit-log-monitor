@@ -50,7 +50,9 @@ SECRET=your_client_secret
 SCOPES=your_scopes_from_developer_console
 ```
 
-Copy `SCOPES` exactly as the credential page in the Developer Console shows it, after you have added both the CJA and Experience Platform APIs.
+Copy `SCOPES` exactly as the credential page in the Developer Console shows it, after you have added both the CJA and Experience Platform APIs. The tool has no built-in scopes, so all four values are required.
+
+You can also keep the credential in a profile, which the Customer Journey Analytics tools share. Profile `prod` is the file `~/.cja/orgs/prod/config.json`, and you use it with `--profile prod` or `CJA_PROFILE=prod`. The tool takes all four values from one place and never mixes two places. See [Where the credential comes from](https://github.com/brian-a-au/cja-audit-log-monitor/blob/main/docs/configuration.md#where-the-credential-comes-from) for the order.
 
 Then check that the connection works:
 
@@ -75,10 +77,11 @@ cja-audit-log-monitor cli anomalies --watch
 cja-audit-log-monitor --version
 ```
 
-Two options work with the TUI and with every CLI command. Put them before `cli` or `tui`:
+Three options work with the TUI and with every CLI command. Put them before `cli` or `tui`:
 
 - `-v` / `--verbose` turns on debug logging to stderr. It affects the CLI only. The TUI has no log file, and it shows logged warnings as toasts.
-- `-c` / `--config PATH` reads a config file other than `~/.cja-audit-log-monitor/config.yaml`. You can also set the path with the `CJA_CONFIG_PATH` environment variable.
+- `-c` / `--config PATH` reads a config file other than `~/.cja-audit-log-monitor/config.yaml`. The file can be YAML or JSON. You can also set the path with the `CJA_CONFIG_PATH` environment variable.
+- `--profile NAME` uses the credential in the profile `~/.cja/orgs/NAME/config.json`.
 
 CLI commands write data to stdout and messages to stderr. Most of them accept `-F json`. See the [CLI reference](https://github.com/brian-a-au/cja-audit-log-monitor/blob/main/docs/cli.md) for every command and flag.
 

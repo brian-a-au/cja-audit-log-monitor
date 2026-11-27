@@ -9,7 +9,7 @@ The config view shows the settings the app is using, and it can test the connect
 - **Two buttons** at the top, `verify connection` and `reload settings`. They come first, so they are on screen at every size.
 - **Connection status.** When the login works, it shows a green dot, the org ID, the API URL and the number of logs available. When it fails, it shows a red dot and the error.
 - **API configuration.** This is the path of the config file in use, the CJA API base URL and the IMS base URL. Your home folder is shown as `~`.
-- **Authentication.** This is the full organization ID, the start of the client ID, and whether OAuth is set up. The view never shows the secret.
+- **Authentication.** This is the full organization ID, the first 4 and last 4 characters of the client ID, and whether OAuth is set up. The view never shows the secret.
 - **Defaults.** These are the page size, the number of days and the monitor interval.
   - The page size is the number of rows on each log browser page. Only the log browser uses it.
   - The number of days sets the window of the dashboard and the statistics view. It is also the CLI default for `--days`.
@@ -23,7 +23,7 @@ Below 160 columns, the sections are in one column, so long values such as the AP
 
 - **Test the connection** with `verify connection`. It runs the same login and API call as `cja-audit-log-monitor cli verify`.
 - **Load the settings again** with `reload settings` after you edit `.env` or the config file. The app reads the settings again and rebuilds the API client, the alert rules and the notification channels. Views you have already opened load again with the new page size, days and interval. A rule you turned off in the alerts view stays off. If the config file has an error, the app keeps the settings it has and shows a toast that says why. While the monitor runs, the app refuses to reload and tells you to stop the monitor first.
-- **Check which credentials the app uses.** The org ID and the start of the client ID tell you which values it loaded. This helps when both environment variables and `.env` set them. Environment variables win over `.env`, and both win over the config file. See [Which value wins](../configuration.md#which-value-wins).
+- **Check which credentials the app uses.** The org ID and the two ends of the client ID tell you which values it loaded. This helps when more than one place holds a credential. See [Where the credential comes from](../configuration.md#where-the-credential-comes-from).
 - **Check the API URL.** A wrong API base URL is a common mistake. The URL must use https.
 
 ## When to use it

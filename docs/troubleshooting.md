@@ -31,7 +31,9 @@ A usage error, e.g. an unknown flag or a value below the minimum, exits 2. See [
 
 `must be an https:// URL` means `API_BASE_URL` or `IMS_BASE_URL` uses plain http. Use https. Plain http is allowed only for `localhost` and `127.0.0.1`.
 
-If the tool keeps using old credentials after you edit `.env`, check your shell. An environment variable with the same name beats the value in `.env`, and the name can be in any case, e.g. `org_id`. Run `unset ORG_ID CLIENT_ID SECRET SCOPES` (and the lowercase names) to clear them.
+If the tool keeps using old credentials after you edit `.env`, check your shell. The environment variables beat `.env`, and the names can be in any case, e.g. `org_id`. A profile named in `CJA_PROFILE` beats both. Run `cja-audit-log-monitor cli config` to see which place the tool uses. Run `unset CJA_PROFILE ORG_ID CLIENT_ID SECRET SCOPES` (and the lowercase names) to clear the variables.
+
+If the error says that some of the four credential fields are set and one is missing, one place holds only part of a credential. The message names the place and the missing fields. Add the missing fields there, or remove the fields that are set there so that the tool goes on to the next place. The tool has no built-in scopes, so `SCOPES` is one of the four.
 
 The tool retries a 429 (rate limit) response and a 500, 502, 503 or 504 response a few times. It waits as long as the `Retry-After` header asks, but never more than 60 seconds. If the last try still fails, you see the error.
 
@@ -46,7 +48,7 @@ When a view can't load data, it shows one of these messages with the error from 
 
 The header shows `disconnected` after a login or network failure in any view. It shows `connected` again after the next successful load.
 
-If the config file has an error, the TUI still starts. It uses only the environment variables and `.env`, and the header shows a short warning that names the file and the problem. Fix the file and press **reload settings** in the config view.
+If the config file has an error, the TUI does not open. It prints one line that starts with `Configuration error:` and names the file and the problem. Fix the file and start the TUI again. If the file breaks while the TUI is open, **reload settings** in the config view keeps the settings it has and says why.
 
 The TUI has no log file, and `-v` does not change what it shows. Warnings that the CLI prints on stderr, e.g. about unknown settings, file permissions or failed deliveries, appear as toasts in the TUI.
 
