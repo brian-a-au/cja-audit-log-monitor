@@ -33,7 +33,18 @@ from .config import (
     ConfigError,
     create_default_config,
     get_config_path,
-    load_config,
+    load_config_with_report,
+)
+from .credentials import (
+    NO_CREDENTIAL,
+    PRODUCT,
+    SPEC,
+    TOOL,
+    CredentialError,
+    CredentialReport,
+    Source,
+    mask_client_id,
+    mask_secret,
 )
 from .export import atomic_write, check_export_path, export_entries
 from .formatters import (
@@ -48,7 +59,7 @@ from .models import API_EARLIEST, ActionType, AuditLogEntry, AuditLogQuery, Comp
 from .monitor import AuditLogMonitor, is_retryable
 from .notifications import AnomalyDedupFilter, NotificationManager
 from .stats import build_date_range_query, calculate_stats, generate_report, stats_for_json
-from .utils import user_identities
+from .utils import display_path, user_identities
 
 P = ParamSpec("P")
 R = TypeVar("R")
@@ -270,14 +281,24 @@ def setup_logging(verbose: bool) -> None:
     )
 
 
+def load_settings(config_path: Path | None = None) -> tuple[CJASettings, CredentialReport]:
+    """Load the settings, with the profile from ``--profile`` when one was given."""
+    ctx = click.get_current_context(silent=True)
+    profile = ctx.obj.get("profile") if ctx is not None and ctx.obj else None
+    return load_config_with_report(config_path, profile=profile)
+
+
 def get_client(config_path: Path | None = None) -> tuple[AuditLogsClient, CJASettings]:
     """Create and return configured API client.
 
-    Raises ConfigError for unusable configuration; ``handle_cli_errors`` reports it.
+    Raises ConfigError for unusable configuration, and CredentialError when the
+    credential lookup fails; ``handle_cli_errors`` reports both. When no source gave a
+    credential, the first API call raises AuthenticationError.
     """
-    settings = load_config(config_path)
+    settings, report = load_settings(config_path)
     token_manager = TokenManager(settings)
     client = AuditLogsClient(settings, token_manager)
+    client.credential_source = report.winner
     return client, settings
 
 
@@ -381,11 +402,16 @@ def parse_components(components: tuple[str, ...] | None) -> list[ComponentType] 
     "-c",
     # readable=False: the config loader reports an unreadable file in its own one line form.
     type=click.Path(exists=False, readable=False, path_type=Path),
-    help="Path to config file",
+    help="Path to config file (YAML or JSON)",
+)
+@click.option(
+    "--profile",
+    metavar="NAME",
+    help="Use the credential in the profile ~/.cja/orgs/NAME/config.json",
 )
 @click.version_option(version=__version__)
 @click.pass_context
-def main(ctx: click.Context, verbose: bool, config: Path | None) -> None:
+def main(ctx: click.Context, verbose: bool, config: Path | None, profile: str | None) -> None:
     """CJA Audit Log Monitor - Query and analyze Adobe CJA audit logs.
 
     Running without a subcommand launches the TUI interface.
@@ -396,17 +422,27 @@ def main(ctx: click.Context, verbose: bool, config: Path | None) -> None:
     ctx.ensure_object(dict)
     ctx.obj["verbose"] = verbose
     ctx.obj["config_path"] = config
+    ctx.obj["profile"] = profile
 
     # If no subcommand is given, launch the TUI
     if ctx.invoked_subcommand is None:
-        run_tui(config)
+        run_tui(config, profile)
 
 
-def run_tui(config_path: Path | None) -> None:
-    """Run the TUI, then end the process without waiting for abandoned worker threads."""
+def run_tui(config_path: Path | None, profile: str | None = None) -> None:
+    """Run the TUI, then end the process without waiting for abandoned worker threads.
+
+    The settings are loaded first. A config file or a credential lookup that fails stops
+    the TUI before it opens, with the same one line the CLI prints.
+    """
     from .tui import CJAAuditApp
 
-    app = CJAAuditApp(config_path)
+    try:
+        settings, _ = load_config_with_report(config_path, profile=profile)
+    except ConfigError as e:
+        err_console.print(f"[red]Configuration error:[/red] {literal(str(e))}", soft_wrap=True)
+        sys.exit(1)
+    app = CJAAuditApp(config_path, profile=profile, settings=settings)
     # A loop of our own: asyncio.run() would wait for every worker thread at the end,
     # including one still waiting on the network after the user quit.
     loop = asyncio.new_event_loop()
@@ -1179,13 +1215,25 @@ def init(ctx: click.Context) -> None:
 
 
 @cli.command()
+@output_format_option
 @click.pass_context
 @handle_cli_errors
-def config(ctx: click.Context) -> None:
-    """Show current configuration (without secrets)."""
+def config(ctx: click.Context, output_format: str) -> None:
+    """Show current configuration (without secrets). Makes no network call."""
     config_path = ctx.obj.get("config_path")
 
-    settings = load_config(config_path)
+    try:
+        settings, report = load_settings(config_path)
+    except CredentialError as e:
+        # The lookup failed: JSON still reports the sources and the problem.
+        if output_format != "json" or e.report is None:
+            raise
+        emit_json(e.report.as_json(__version__))
+        sys.exit(1)
+
+    if output_format == "json":
+        emit_json(report.as_json(__version__))
+        return
 
     console.print("[bold]Current Configuration[/bold]\n")
     effective_config_path = config_path or get_config_path()
@@ -1198,11 +1246,22 @@ def config(ctx: click.Context) -> None:
     console.print(f"Default days: {settings.default_days}")
     console.print(f"Monitor interval: {settings.monitor_interval}s")
     console.print(f"OAuth configured: {settings.is_oauth_configured()}")
-    org_display = settings.org_id or "(not set)"
-    client_display = f"{settings.client_id[:8]}..." if settings.client_id else "(not set)"
-    console.print(f"Org ID: {literal(org_display)}")
-    console.print(f"Client ID: {literal(client_display)}")
+    winner = report.winner
+    source_display = _source_label(winner) if winner else "(none)"
+    console.print(f"Credential source: {literal(source_display)}", soft_wrap=True)
+    console.print(f"Org ID: {literal(settings.org_id or '(not set)')}")
+    console.print(f"Client ID: {literal(mask_client_id(settings.client_id))}")
+    console.print(f"Secret: {mask_secret(settings.secret.get_secret_value())}")
+    console.print(f"Scopes: {literal(settings.scopes or '(not set)')}", soft_wrap=True)
+    for source in report.sources:
+        if not source.used:
+            console.print(
+                f"Not used: {literal(source.name)} (a higher source gave the credential)",
+                soft_wrap=True,
+            )
     console.print(f"Alert rules: {len(settings.alert_rules)}")
+    for problem in report.problems():
+        err_console.print(f"[yellow]{literal(problem['message'])}[/yellow]", soft_wrap=True)
 
 
 @cli.command()
@@ -1223,50 +1282,97 @@ def components(ctx: click.Context) -> None:
         console.print(f"  {comp.value}")
 
 
+def _source_label(source: Source) -> str:
+    """A source by name, with the file of a profile."""
+    if source.profile and source.path:
+        return f"{source.name} ({display_path(source.path)})"
+    return source.name
+
+
+# What to do for each sign-in code of the Adobe credentials standard.
+_SIGN_IN_FIXES = {
+    "bad_client_id": "Copy the client ID again from the credential in the Developer Console.",
+    "bad_secret": (
+        "Copy the client secret again from the Developer Console. "
+        "A secret that was replaced no longer works."
+    ),
+    "scopes_rejected": (
+        "Copy the scopes exactly as the Developer Console shows them for this credential."
+    ),
+    "unreachable": "Check the network, the proxy and Adobe's status page, then try again.",
+    "sign_in_failed": "Read the message, then check the credential in the Developer Console.",
+}
+
+
+def _step_line(label: str, step: dict[str, Any], fixes: dict[str, str]) -> str:
+    """One line for a result of the live test: ok, not run, or failed with its code."""
+    if step["ok"] is None:
+        return f"  {label}: not run"
+    if step["ok"]:
+        return f"  {label}: [green]ok[/green]"
+    fix = fixes.get(step["code"], "")
+    return f"  {label}: [red]failed[/red] ({step['code']}). {literal(fix)}".rstrip()
+
+
 @cli.command()
 @output_format_option
 @click.pass_context
 @handle_cli_errors
 def verify(ctx: click.Context, output_format: str) -> None:
-    """Verify API connection and authentication."""
+    """Test the credential: sign in, then fetch one audit log entry."""
     config_path = ctx.obj.get("config_path")
 
-    try:
-        client, settings = get_client(config_path)
+    client, _ = get_client(config_path)
+    winner = client.credential_source
+    if winner is None:
+        raise CredentialError("no_credential", NO_CREDENTIAL)
 
-        if output_format != "json":
-            err_console.print("[dim]Verifying connection...[/dim]\n")
+    if output_format != "json":
+        err_console.print("[dim]Verifying connection...[/dim]\n")
 
-        with client:
-            result = client.verify_connection()
+    with client:
+        result = client.verify_connection()
+    sign_in, product_access = result["sign_in"], result["product_access"]
+    ok = bool(sign_in["ok"] and product_access["ok"])
 
-        if output_format == "json":
-            emit_json(result)
+    if output_format == "json":
+        document = {
+            "schema": f"{SPEC}/live-test",
+            "tool": TOOL,
+            "tool_version": __version__,
+            "product": PRODUCT,
+            "ok": ok,
+            "source": {"kind": winner.kind, "name": winner.name},
+            "sign_in": sign_in,
+            "product_access": product_access,
+            "org_id": result["org_id"],
+            "api_url": result["api_url"],
+        }
+        if "total_logs_available" in result:
+            document["total_logs_available"] = result["total_logs_available"]
+        emit_json(document)
+    else:
+        if ok:
+            console.print("[green]✓[/green] Connection successful")
+        elif not sign_in["ok"]:
+            console.print(f"[red]✗[/red] Authentication failed: {literal(str(result['error']))}")
         else:
-            if result["connected"] and result["authenticated"]:
-                console.print("[green]✓[/green] Connection successful")
-                console.print(f"  Organization: {literal(str(result['org_id']))}")
-                console.print(f"  API URL: {literal(str(result['api_url']))}")
-                total_logs = result.get("total_logs_available", "N/A")
-                console.print(f"  Total logs available: {literal(str(total_logs))}")
-            elif not result["authenticated"]:
-                console.print(
-                    f"[red]✗[/red] Authentication failed: {literal(str(result['error']))}"
-                )
-            else:
-                console.print("[red]✗[/red] Connection failed")
-                if result["error"]:
-                    console.print(f"  Error: {literal(str(result['error']))}")
+            console.print("[red]✗[/red] Connection failed")
+            console.print(f"  Error: {literal(str(result['error']))}")
+        console.print(_step_line("Sign-in", sign_in, _SIGN_IN_FIXES), soft_wrap=True)
+        log_fetch_fixes = {
+            "no_product_access": str(product_access["message"]),
+            "unreachable": _SIGN_IN_FIXES["unreachable"],
+        }
+        console.print(_step_line("Log fetch", product_access, log_fetch_fixes), soft_wrap=True)
+        console.print(f"  Credential: {literal(_source_label(winner))}", soft_wrap=True)
+        if ok:
+            console.print(f"  Organization: {literal(str(result['org_id']))}")
+            console.print(f"  API URL: {literal(str(result['api_url']))}")
+            total_logs = result.get("total_logs_available", "N/A")
+            console.print(f"  Total logs available: {literal(str(total_logs))}")
 
-        if not (result["connected"] and result["authenticated"]):
-            sys.exit(1)
-
-    except (AuthenticationError, APIError) as e:  # verify_connection reports most itself
-        if output_format == "json":
-            emit_json({"connected": False, "error": str(e)})
-        else:
-            label = "Authentication failed" if isinstance(e, AuthenticationError) else "API error"
-            console.print(f"[red]✗[/red] {label}: {literal(str(e))}")
+    if not ok:
         sys.exit(1)
 
 
@@ -1440,7 +1546,7 @@ def alerts_list(ctx: click.Context, output_format: str) -> None:
     """List all alert rules."""
     config_path = ctx.obj.get("config_path")
 
-    settings = load_config(config_path)
+    settings, _ = load_settings(config_path)
     engine = AlertEngine(engine_rules(settings))
     rules_status = engine.get_rule_status()
 
@@ -1852,7 +1958,7 @@ def show(ctx: click.Context, entry_id: str, max_entries: int) -> None:
 @click.pass_context
 def tui(ctx: click.Context) -> None:
     """Launch the TUI interface (same as running without arguments)."""
-    run_tui(ctx.obj.get("config_path"))
+    run_tui(ctx.obj.get("config_path"), ctx.obj.get("profile"))
 
 
 if __name__ == "__main__":  # pragma: no cover - only when run as a script

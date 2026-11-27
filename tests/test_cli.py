@@ -4,13 +4,18 @@ import json
 import re
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 import pytest
 from click.testing import CliRunner
 
 from cja_audit_log_monitor.cli import main, parse_date
+from cja_audit_log_monitor.credentials import CredentialReport, Source
 from cja_audit_log_monitor.models import AuditLogEntry, AuditLogResponse
+
+from .conftest import verify_result
+
+ENV_SOURCE = Source(kind="environment", name="environment variables")
 
 
 def _settings() -> MagicMock:
@@ -111,7 +116,7 @@ class TestInitCommand:
 class TestConfigCommand:
     """Tests for config command."""
 
-    @patch("cja_audit_log_monitor.cli.load_config")
+    @patch("cja_audit_log_monitor.cli.load_settings")
     def test_show_config(
         self,
         mock_load: MagicMock,
@@ -119,13 +124,13 @@ class TestConfigCommand:
         sample_settings,
     ) -> None:
         """Test showing current configuration."""
-        mock_load.return_value = sample_settings
+        mock_load.return_value = (sample_settings, CredentialReport())
 
         result = runner.invoke(main, ["cli", "config"])
         assert result.exit_code == 0
         assert "Current Configuration" in result.output
 
-    @patch("cja_audit_log_monitor.cli.load_config")
+    @patch("cja_audit_log_monitor.cli.load_settings")
     def test_show_config_uses_explicit_config_path(
         self,
         mock_load: MagicMock,
@@ -133,7 +138,7 @@ class TestConfigCommand:
         sample_settings,
     ) -> None:
         """Test config output reflects an explicit --config path."""
-        mock_load.return_value = sample_settings
+        mock_load.return_value = (sample_settings, CredentialReport())
 
         result = runner.invoke(main, ["--config", "custom.yaml", "cli", "config"])
         assert result.exit_code == 0
@@ -343,14 +348,8 @@ class TestVerifyCommand:
     ) -> None:
         """Test verify command with successful connection."""
         mock_client = MagicMock()
-        mock_client.verify_connection.return_value = {
-            "connected": True,
-            "authenticated": True,
-            "org_id": "TEST123@AdobeOrg",
-            "api_url": "https://cja.adobe.io",
-            "total_logs_available": 1000,
-            "error": None,
-        }
+        mock_client.credential_source = ENV_SOURCE
+        mock_client.verify_connection.return_value = verify_result(total_logs_available=1000)
         mock_client.__enter__ = MagicMock(return_value=mock_client)
         mock_client.__exit__ = MagicMock(return_value=False)
         mock_get_client.return_value = (mock_client, _settings())
@@ -367,20 +366,15 @@ class TestVerifyCommand:
     ) -> None:
         """Test verify command with JSON output."""
         mock_client = MagicMock()
-        mock_client.verify_connection.return_value = {
-            "connected": True,
-            "authenticated": True,
-            "org_id": "TEST123@AdobeOrg",
-            "api_url": "https://cja.adobe.io",
-            "error": None,
-        }
+        mock_client.credential_source = ENV_SOURCE
+        mock_client.verify_connection.return_value = verify_result()
         mock_client.__enter__ = MagicMock(return_value=mock_client)
         mock_client.__exit__ = MagicMock(return_value=False)
         mock_get_client.return_value = (mock_client, _settings())
 
         result = runner.invoke(main, ["cli", "verify", "--output-format", "json"])
         assert result.exit_code == 0
-        assert '"connected"' in result.output
+        assert '"adobe-credentials/v1/live-test"' in result.output
 
 
 class TestExportSafety:
@@ -1834,22 +1828,16 @@ class TestJsonOutputIsMachineSafe:
         mock_client = MagicMock()
         mock_client.get_all_logs.return_value = [entry]
         mock_client.get_component_logs.return_value = [entry]
-        mock_client.verify_connection.return_value = {
-            "connected": True,
-            "authenticated": True,
-            "org_id": "org",
-            "api_url": "https://example.invalid",
-            "total_logs_available": 1,
-            "error": None,
-        }
+        mock_client.credential_source = ENV_SOURCE
+        mock_client.verify_connection.return_value = verify_result(total_logs_available=1)
         mock_client.__enter__ = MagicMock(return_value=mock_client)
         mock_client.__exit__ = MagicMock(return_value=False)
 
         with (
             patch("cja_audit_log_monitor.cli.get_client", return_value=(mock_client, _settings())),
-            patch("cja_audit_log_monitor.cli.load_config") as mock_load,
+            patch("cja_audit_log_monitor.cli.load_settings") as mock_load,
         ):
-            mock_load.return_value.alert_rules = []
+            mock_load.return_value = (MagicMock(alert_rules=[]), CredentialReport())
             result = runner.invoke(main, ["-v", "cli", *args])
 
         assert result.exit_code == 0, result.output
@@ -2257,21 +2245,23 @@ class TestEmptyResultsAndStreams:
         assert result.exit_code == 2
         assert "Invalid value" in result.output
 
-    @patch("cja_audit_log_monitor.cli.load_config")
+    @patch("cja_audit_log_monitor.cli.load_settings")
     def test_config_escapes_credential_display(
         self, mock_load: MagicMock, runner: CliRunner
     ) -> None:
         settings = MagicMock()
         settings.org_id = "[/red]boom@AdobeOrg"
         settings.client_id = "[bold]cid-1234567"
+        settings.scopes = "[dim]openid"
         settings.alert_rules = []
-        mock_load.return_value = settings
+        mock_load.return_value = (settings, CredentialReport())
 
         result = runner.invoke(main, ["cli", "config"])
 
         assert result.exit_code == 0, result.output
         assert "[/red]boom@AdobeOrg" in result.output
-        assert "[bold]ci..." in result.output
+        assert "[bol****4567" in result.output
+        assert "[dim]openid" in result.output
 
 
 def test_anomaly_dispatch_error_log_has_no_exception_text(caplog):
@@ -3639,16 +3629,6 @@ class TestMessagesAndHelp:
 
         assert "45" in str(RateLimitError(retry_after=45))
 
-    def test_verify_prints_authentication_failed(self, runner) -> None:
-        from cja_audit_log_monitor.auth import AuthenticationError
-
-        client = self._client()
-        client.verify_connection.side_effect = AuthenticationError("invalid_client")
-        with patch("cja_audit_log_monitor.cli.get_client", return_value=(client, _settings())):
-            result = runner.invoke(main, ["cli", "verify"])
-        assert result.exit_code == 1
-        assert "Authentication failed:" in result.stdout
-
     @pytest.mark.parametrize(
         ("command", "option"),
         [
@@ -3686,17 +3666,14 @@ def test_verify_says_authentication_failed_for_an_ims_failure(runner) -> None:
     client = MagicMock()
     client.__enter__ = MagicMock(return_value=client)
     client.__exit__ = MagicMock(return_value=False)
-    client.verify_connection.return_value = {
-        "connected": False,
-        "authenticated": False,
-        "org_id": "o",
-        "api_url": "u",
-        "error": "invalid_client",
-    }
+    client.credential_source = ENV_SOURCE
+    client.verify_connection.return_value = verify_result("bad_secret", error="invalid_client")
     with patch("cja_audit_log_monitor.cli.get_client", return_value=(client, _settings())):
         result = runner.invoke(main, ["cli", "verify"])
     assert result.exit_code == 1
     assert "Authentication failed: invalid_client" in result.stdout
+    assert "Sign-in: failed (bad_secret). Copy the client secret again" in result.stdout
+    assert "Log fetch: not run" in result.stdout
 
 
 def test_dns_failure_is_a_network_error_naming_the_host(sample_settings, httpx_mock) -> None:
@@ -3713,6 +3690,9 @@ def test_dns_failure_is_a_network_error_naming_the_host(sample_settings, httpx_m
 
 def test_cli_config_shows_the_org_id_in_full(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("ORG_ID", "ABCDEF0123456789@AdobeOrg")
+    monkeypatch.setenv("CLIENT_ID", "aaaa1111bbbb2222cccc3333dddd4444")
+    monkeypatch.setenv("SECRET", "fake-secret-A-not-a-credential-0001")
+    monkeypatch.setenv("SCOPES", "openid,AdobeID")
     result = CliRunner().invoke(main, ["-c", str(tmp_path / "x.yaml"), "cli", "config"])
     assert "ABCDEF0123456789@AdobeOrg" in result.stdout
 
@@ -4038,26 +4018,17 @@ class TestCommandEdges:
 
     def test_verify_reports_a_failed_connection(self, runner: CliRunner) -> None:
         client = _client_with([])
-        client.verify_connection.return_value = {
-            "connected": False,
-            "authenticated": True,
-            "error": "boom [x]",
-        }
+        client.credential_source = ENV_SOURCE
+        client.verify_connection.return_value = verify_result(
+            product="unreachable", error="boom [x]"
+        )
         with patch("cja_audit_log_monitor.cli.get_client", return_value=(client, _settings())):
             result = runner.invoke(main, ["cli", "verify"])
         assert result.exit_code == 1
         assert "Connection failed" in result.output
         assert "Error: boom [x]" in result.output
-
-    def test_verify_text_reports_an_api_error(self, runner: CliRunner) -> None:
-        from cja_audit_log_monitor.client import APIError
-
-        client = _client_with([])
-        client.verify_connection.side_effect = APIError("server said no")
-        with patch("cja_audit_log_monitor.cli.get_client", return_value=(client, _settings())):
-            result = runner.invoke(main, ["cli", "verify"])
-        assert result.exit_code == 1
-        assert "server said no" in result.output
+        assert "Sign-in: ok" in result.output
+        assert "Log fetch: failed (unreachable). Check the network" in result.output
 
     def test_api_network_error_is_labelled(self, runner: CliRunner) -> None:
         from cja_audit_log_monitor.client import APIError
@@ -4081,7 +4052,7 @@ class TestCommandEdges:
         with patch("cja_audit_log_monitor.cli.run_tui") as run_tui:
             result = runner.invoke(main, ["-c", str(path), "tui"])
         assert result.exit_code == 0
-        run_tui.assert_called_once_with(path)
+        run_tui.assert_called_once_with(path, None)
 
     def test_run_tui_uses_its_own_loop_and_exits_with_the_app_code(self) -> None:
         from cja_audit_log_monitor import cli
@@ -4092,7 +4063,7 @@ class TestCommandEdges:
             patch.object(cli, "exit_without_waiting_for_workers") as exit_now,
         ):
             cli.run_tui(None)
-        make_app.assert_called_once_with(None)
+        make_app.assert_called_once_with(None, profile=None, settings=ANY)
         loop = app.run.call_args.kwargs["loop"]
         assert loop.is_closed()
         exit_now.assert_called_once_with(3)

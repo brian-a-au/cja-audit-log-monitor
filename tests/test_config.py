@@ -56,8 +56,15 @@ class TestCJASettings:
             client_id="id",
             secret="mysecret",
             org_id="org@AdobeOrg",
+            scopes="openid",
         )
         assert settings.is_oauth_configured()
+
+    def test_is_oauth_configured_needs_scopes(self) -> None:
+        """The tool has no built-in scopes, so a credential without scopes is not complete."""
+        settings = CJASettings(client_id="id", secret="mysecret", org_id="org@AdobeOrg")
+        assert settings.scopes == ""
+        assert not settings.is_oauth_configured()
 
     def test_is_oauth_configured_partial(self) -> None:
         """Test OAuth configuration check returns False when partially configured."""
@@ -121,11 +128,6 @@ class TestBadConfigFile:
         with pytest.raises(ConfigError, match=str(path)):
             load_config(path)
 
-    def test_use_file_false_ignores_the_file(self, tmp_path: Path) -> None:
-        path = tmp_path / "config.yaml"
-        path.write_text("monitor_interval: [1, \n")
-        assert load_config(path, use_file=False).monitor_interval == 60
-
     def test_output_format_is_not_a_setting(self) -> None:
         assert "output_format" not in CJASettings.model_fields
 
@@ -180,10 +182,10 @@ class TestConfigPriority:
 
     def test_env_beats_config_file(self, tmp_path, monkeypatch) -> None:
         path = tmp_path / "c.yaml"
-        path.write_text("client_id: from_yaml\nmonitor_interval: 10\n")
-        monkeypatch.setenv("CLIENT_ID", "from_env")
+        path.write_text("default_days: 3\nmonitor_interval: 10\n")
+        monkeypatch.setenv("DEFAULT_DAYS", "5")
         settings = load_config(path)
-        assert settings.client_id == "from_env"
+        assert settings.default_days == 5
         assert settings.monitor_interval == 10
 
     def test_dotenv_beats_config_file(self, tmp_path) -> None:
@@ -586,7 +588,7 @@ class TestUnusableDotEnv:
 
         (tmp_path / ".env").write_bytes(b"ORG_ID=x\xff\xfe@AdobeOrg\n")
         with pytest.raises(ConfigError, match=r"\.env is not UTF-8 text"):
-            load_config(tmp_path / "missing.yaml", use_file=False)
+            load_config()
 
     def test_an_unreadable_dotenv_is_a_config_error(self, tmp_path) -> None:
         import os
@@ -600,7 +602,7 @@ class TestUnusableDotEnv:
             pytest.skip("running as a user who can read any file")
         try:
             with pytest.raises(ConfigError, match=r"\.env cannot be read"):
-                load_config(tmp_path / "missing.yaml", use_file=False)
+                load_config()
         finally:
             env.chmod(0o600)
 

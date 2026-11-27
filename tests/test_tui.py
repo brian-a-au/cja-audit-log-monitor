@@ -3703,19 +3703,23 @@ def test_state_survives_bad_config_file(tmp_path) -> None:
     assert str(path) in (state.config_error or "")
 
 
-def test_state_survives_bad_config_file_and_bad_env(tmp_path, monkeypatch) -> None:
-    """Bad YAML plus an invalid env value still yields settings and the file error."""
+def test_bad_config_file_does_not_fall_back_to_the_environment(tmp_path, monkeypatch) -> None:
+    """With bad YAML the state has the defaults and no credential, whatever the environment."""
     from cja_audit_log_monitor.tui.state import AppState
 
     path = tmp_path / "config.yaml"
     path.write_text("monitor_interval: [1, \n")
-    monkeypatch.setenv("MONITOR_INTERVAL", "abc")
+    monkeypatch.setenv("ORG_ID", "A1B2C3D4E5F6A7B8C9D0E1F2@AdobeOrg")
+    monkeypatch.setenv("CLIENT_ID", "aaaa1111bbbb2222cccc3333dddd4444")
+    monkeypatch.setenv("SECRET", "fake-secret-A-not-a-credential-0001")
+    monkeypatch.setenv("SCOPES", "openid,AdobeID")
+    monkeypatch.setenv("MONITOR_INTERVAL", "30")
     state = AppState(path)
     assert state.settings.monitor_interval == 60
+    assert not state.settings.is_oauth_configured()
+    assert state.settings.client_id == ""
     assert str(path) in (state.config_error or "")
-    summary = state.config_error_summary or ""
-    assert summary.startswith("config.yaml: ")
-    assert "environment or .env: monitor_interval" in summary
+    assert (state.config_error_summary or "").startswith("config.yaml: ")
 
 
 async def test_header_keeps_connection_status_with_bad_config(mock_app_state, tmp_path) -> None:
@@ -4656,10 +4660,10 @@ class TestReloadKeepsWhatWorks:
     @staticmethod
     def _state(tmp_path):
         path = tmp_path / "config.yaml"
-        path.write_text("client_id: from-file\nmonitor_interval: 30\n")
+        path.write_text("api_base_url: https://from-file.example\nmonitor_interval: 30\n")
         path.chmod(0o600)
         state = AppState(path)
-        assert state.settings.client_id == "from-file"
+        assert state.settings.api_base_url == "https://from-file.example"
         return state, path
 
     def test_reload_onto_a_broken_config_keeps_working_settings(self, tmp_path):
@@ -4669,7 +4673,7 @@ class TestReloadKeepsWhatWorks:
         path.write_text("monitor_interval: [unclosed\n")
         with pytest.raises(ConfigError):
             state.reload_settings()
-        assert state.settings.client_id == "from-file"
+        assert state.settings.api_base_url == "https://from-file.example"
         assert state.settings.monitor_interval == 30
         assert state.config_error_summary
 
@@ -4677,7 +4681,7 @@ class TestReloadKeepsWhatWorks:
         state, path = self._state(tmp_path)
         state.alert_engine.rules[0].enabled = False
         name = state.alert_engine.rules[0].name
-        path.write_text("client_id: from-file\nmonitor_interval: 45\n")
+        path.write_text("api_base_url: https://from-file.example\nmonitor_interval: 45\n")
         state.reload_settings()
         assert state.settings.monitor_interval == 45
         rules = {rule.name: rule for rule in state.alert_engine.rules}
@@ -4700,7 +4704,7 @@ class TestReloadKeepsWhatWorks:
             await app._screens["settings"]._reload_settings()
             await pilot.pause()
             assert any("keeping the current settings" in n.message for n in app._notifications)
-            assert state.settings.client_id == "from-file"
+            assert state.settings.api_base_url == "https://from-file.example"
 
 
 # ---------------------------------------------------------------------------

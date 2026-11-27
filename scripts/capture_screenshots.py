@@ -156,6 +156,7 @@ def create_mock_settings():
         client_id="demo_client_12345",
         secret="demo_secret",
         org_id="ABC123DEF@AdobeOrg",
+        scopes="openid,AdobeID",
     )
 
 

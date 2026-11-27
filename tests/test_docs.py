@@ -93,7 +93,7 @@ def test_documented_flags_match_the_command(name: str) -> None:
 def test_other_commands_have_no_flags_but_the_ones_named() -> None:
     for name in _other_commands():
         flags = _flags(COMMANDS[name])
-        if name == "verify":
+        if name in ("config", "verify"):
             assert flags == {"-F", "--output-format"}
         else:
             assert flags == set(), name

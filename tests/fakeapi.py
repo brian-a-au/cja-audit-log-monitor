@@ -58,6 +58,7 @@ class FakeApi:
                 "ORG_ID": "FAKEORG@AdobeOrg",
                 "CLIENT_ID": "fake-client",
                 "SECRET": "fake-secret",
+                "SCOPES": "openid,AdobeID",
                 "CJA_CONFIG_PATH": str(config_path),
                 "PYTHONUNBUFFERED": "1",
             }

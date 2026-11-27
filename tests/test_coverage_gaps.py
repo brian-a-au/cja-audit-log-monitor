@@ -175,7 +175,7 @@ class TestNoSubcommandLaunchesTui:
         with patch.object(cli_module, "run_tui") as run_tui:
             result = runner.invoke(main, ["--config", str(config)])
         assert result.exit_code == 0
-        run_tui.assert_called_once_with(config)
+        run_tui.assert_called_once_with(config, None)
 
 
 class TestEmptyJsonResults:
@@ -276,32 +276,6 @@ class TestInitCommand:
         assert result.exit_code == 0
         assert "Created config file" in result.output
         assert "old: true" not in config.read_text()
-
-
-class TestVerifyCommand:
-    def test_connection_failed_without_error_text(self, runner):
-        client = _client()
-        client.verify_connection.return_value = {
-            "connected": False,
-            "authenticated": True,
-            "org_id": "x@AdobeOrg",
-            "api_url": "https://cja.adobe.io",
-            "error": None,
-        }
-        with _patch_client(client):
-            result = runner.invoke(main, ["cli", "verify"])
-        assert result.exit_code == 1
-        assert "Connection failed" in result.output
-        assert "Error:" not in result.output
-
-    def test_json_reports_a_raised_error(self, runner):
-        import json
-
-        client = _client()
-        client.verify_connection.side_effect = AuthenticationError("bad secret")
-        with _patch_client(client):
-            result = runner.invoke(main, ["cli", "verify", "-F", "json"])
-        assert json.loads(result.output) == {"connected": False, "error": "bad secret"}
 
 
 class TestQueryQuiet:

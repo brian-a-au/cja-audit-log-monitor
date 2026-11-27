@@ -51,6 +51,14 @@ def is_final_page(page: int, response: AuditLogResponse) -> bool:
     return response.total_pages > 0 and page + 1 >= response.total_pages
 
 
+# The one message for "no access" in the CJA tools (Adobe credentials standard, rule L2.6).
+NO_PRODUCT_ACCESS = (
+    "The credential cannot reach Customer Journey Analytics. Add the Customer Journey "
+    "Analytics API and the Adobe Experience Platform API to the credential in the Developer "
+    "Console, and add its technical account to a CJA product profile in the Admin Console."
+)
+
+
 class APIError(Exception):
     """Raised when API request fails."""
 
@@ -102,6 +110,8 @@ class AuditLogsClient:
     ) -> None:
         self.settings = settings
         self.token_manager = token_manager or TokenManager(settings)
+        # The source the credential came from, when the CLI found it (credentials.Source).
+        self.credential_source: Any = None
         self._client: httpx.Client | None = None
         self._client_lock = threading.Lock()
         self._closed = False
@@ -459,10 +469,12 @@ class AuditLogsClient:
         return self.get_all_logs(query, max_entries=max_entries)
 
     def verify_connection(self) -> dict[str, Any]:
-        """Verify API connection and authentication.
+        """Test the credential in two steps: sign-in, then one call to the audit log API.
 
         Returns:
-            Dictionary with connection status and details.
+            Dictionary with connection status and details. ``sign_in`` and
+            ``product_access`` each hold ``ok`` (None when the step did not run), ``code``
+            (a code of the Adobe credentials standard, or None) and ``message``.
         """
         result: dict[str, Any] = {
             "connected": False,
@@ -470,20 +482,36 @@ class AuditLogsClient:
             "org_id": self.settings.org_id,
             "api_url": self.settings.api_base_url,
             "error": None,
+            "sign_in": {"ok": None, "code": None, "message": None},
+            "product_access": {"ok": None, "code": None, "message": None},
         }
 
         try:
-            # First check if we can get a token
             token = self.token_manager.get_token()
-            result["authenticated"] = bool(token)
-
-            # Try to fetch a single log entry to verify API access
-            query = AuditLogQuery(page_size=1)
-            response = self.get_logs(query)
-            result["connected"] = True
-            result["total_logs_available"] = response.total_elements
-
         except Exception as e:
             result["error"] = str(e)
+            result["sign_in"] = {
+                "ok": False,
+                "code": getattr(e, "code", "sign_in_failed"),
+                "message": getattr(e, "detail", str(e)[:200]),
+            }
+            return result
+        result["authenticated"] = bool(token)
+        result["sign_in"]["ok"] = True
 
+        try:
+            # Fetch a single log entry to verify API access
+            response = self.get_logs(AuditLogQuery(page_size=1))
+        except Exception as e:
+            result["error"] = str(e)
+            no_access = getattr(e, "status_code", None) in (401, 403)
+            result["product_access"] = {
+                "ok": False,
+                "code": "no_product_access" if no_access else "unreachable",
+                "message": NO_PRODUCT_ACCESS if no_access else str(e),
+            }
+            return result
+        result["connected"] = True
+        result["total_logs_available"] = response.total_elements
+        result["product_access"]["ok"] = True
         return result

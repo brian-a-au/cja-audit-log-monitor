@@ -64,7 +64,15 @@ build-backend = "hatchling.build"
 packages = ["src/cja_audit_log_monitor"]
 
 [tool.hatch.build.targets.sdist]
-include = ["/src", "/tests", "/README.md", "/LICENSE", "/CHANGELOG.md", "/.env.example"]
+include = [
+    "/src",
+    "/tests",
+    "/README.md",
+    "/LICENSE",
+    "/CHANGELOG.md",
+    "/.env.example",
+    "/known-differences.json",
+]
 
 [tool.ruff]
 line-length = 100

@@ -20,18 +20,22 @@ settings.load_profile("default")
 
 _ENV_NAMES = (
     "ORG_ID CLIENT_ID SECRET SCOPES API_BASE_URL IMS_BASE_URL MONITOR_INTERVAL "
-    "DEFAULT_PAGE_SIZE DEFAULT_DAYS OUTPUT_FORMAT CJA_CONFIG_PATH"
+    "DEFAULT_PAGE_SIZE DEFAULT_DAYS OUTPUT_FORMAT CJA_CONFIG_PATH CJA_PROFILE"
 ).split()
 
 
 @pytest.fixture(autouse=True)
-def _isolate_env(monkeypatch, tmp_path):
+def _isolate_env(monkeypatch, tmp_path, tmp_path_factory):
     """Keep shell env vars, a local .env and the real config file out of every test."""
     for name in _ENV_NAMES:
         monkeypatch.delenv(name, raising=False)
         monkeypatch.delenv(name.lower(), raising=False)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("CJA_CONFIG_PATH", str(tmp_path / "config.yaml"))
+    # Profiles are read from the home folder: give each test an empty one.
+    home = tmp_path_factory.mktemp("home")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
 
 
 @pytest.fixture(autouse=True)
@@ -51,6 +55,28 @@ def _fresh_cli_consoles(monkeypatch):
     monkeypatch.delenv("LINES", raising=False)
     monkeypatch.setattr(cli, "console", Console(emoji=False))
     monkeypatch.setattr(cli, "err_console", Console(stderr=True, emoji=False))
+
+
+def verify_result(sign_in: str | None = None, product: str | None = None, **extra) -> dict:
+    """What ``verify_connection`` returns. Each argument is the failure code of that step.
+
+    With a sign-in code the log fetch did not run. ``extra`` replaces or adds keys.
+    """
+    result = {
+        "connected": sign_in is None and product is None,
+        "authenticated": sign_in is None,
+        "org_id": "TEST123@AdobeOrg",
+        "api_url": "https://cja.adobe.io",
+        "error": sign_in or product,
+        "sign_in": {"ok": sign_in is None, "code": sign_in, "message": sign_in},
+        "product_access": {
+            "ok": None if sign_in else product is None,
+            "code": product,
+            "message": product,
+        },
+    }
+    result.update(extra)
+    return result
 
 
 @pytest.fixture
@@ -156,13 +182,11 @@ def mock_app_state(sample_settings, sample_audit_entries) -> AppState:
         number=0,
         size=50,
     )
-    mock_client.verify_connection.return_value = {
-        "connected": True,
-        "authenticated": True,
-        "org_id": sample_settings.org_id,
-        "api_url": sample_settings.api_base_url,
-        "total_logs_available": len(sample_audit_entries),
-    }
+    mock_client.verify_connection.return_value = verify_result(
+        org_id=sample_settings.org_id,
+        api_url=sample_settings.api_base_url,
+        total_logs_available=len(sample_audit_entries),
+    )
     mock_client.close = MagicMock()
     state._client = mock_client
 

@@ -7,6 +7,7 @@ from textual.widget import Widget
 from textual.widgets import Button, LoadingIndicator, Static
 
 from ...config import ConfigError
+from ...credentials import mask_client_id
 from ...formatters import literal, resolve_tcss_markup
 from ...utils import display_path
 from .base import ContentView
@@ -58,7 +59,7 @@ class SettingsView(ContentView):
 
         # Authentication section
         org_display = settings.org_id or "(not set)"
-        client_display = f"{settings.client_id[:12]}…" if settings.client_id else "(not set)"
+        client_display = mask_client_id(settings.client_id)
         auth_section = Vertical(
             Static("AUTHENTICATION", classes="section-label"),
             Horizontal(

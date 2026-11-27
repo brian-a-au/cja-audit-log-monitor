@@ -13,6 +13,7 @@ from textual.message import Message
 from textual.screen import ModalScreen
 from textual.widgets import ContentSwitcher, Footer, Static
 
+from ..config import CJASettings
 from ..formatters import cut_cells, literal, resolve_tcss_markup
 from . import log_toasts
 from .screens.base import ContentView, classify_error
@@ -126,14 +127,21 @@ class CJAAuditApp(App):
         Binding("q", "quit", "quit"),
     ]
 
-    def __init__(self, config_path: Path | None = None) -> None:
+    def __init__(
+        self,
+        config_path: Path | None = None,
+        profile: str | None = None,
+        settings: CJASettings | None = None,
+    ) -> None:
         """Initialize the TUI application.
 
         Args:
             config_path: Optional path to config file.
+            profile: Optional name of the profile that gives the credential.
+            settings: Settings that are already loaded from those two.
         """
         super().__init__()
-        self.state = AppState(config_path)
+        self.state = AppState(config_path, profile, settings)
         self._current_screen = "dashboard"
         self._screens: dict[str, ContentView] = {}
         self._mounted_views: set[str] = set()

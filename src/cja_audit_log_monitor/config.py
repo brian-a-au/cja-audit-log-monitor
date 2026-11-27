@@ -3,8 +3,6 @@
 import logging
 import os
 import re
-import stat
-import sys
 from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
@@ -24,6 +22,13 @@ try:
 except ImportError:  # pragma: no cover - pydantic-settings 2.0 has it in the sources module
     from pydantic_settings.sources import SettingsError  # type: ignore[no-redef,attr-defined]
 
+from .credentials import (
+    CREDENTIAL_FIELDS,
+    ConfigError,
+    CredentialReport,
+    resolve_credential,
+    warn_if_not_private,
+)
 from .models import AlertRule, NotificationConfig, WebhookConfig
 from .utils import display_path
 
@@ -38,19 +43,6 @@ MAX_DAYS = 3_650  # about ten years
 
 # Parsed YAML for the load_config call in progress; read by ConfigFileSource.
 _config_file_data: ContextVar[dict[str, Any]] = ContextVar("_config_file_data", default={})
-
-
-class ConfigError(Exception):
-    """The config file could not be read or holds invalid settings.
-
-    ``str(error)`` is the full message; ``summary`` is a one-line version for
-    tight spaces such as the TUI header.
-    """
-
-    def __init__(self, message: str, summary: str | None = None) -> None:
-        super().__init__(message)
-        first_line = (message.strip().splitlines() or [""])[0]
-        self.summary = summary or first_line
 
 
 def _validation_summary(source: str, error: ValidationError) -> str:
@@ -92,10 +84,8 @@ class CJASettings(BaseSettings):
     secret: SecretStr = Field(
         default=SecretStr(""), description="Adobe OAuth client secret (SECRET)"
     )
-    scopes: str = Field(
-        default="openid,AdobeID,read_organizations,additional_info.projectedProductContext",
-        description="OAuth scopes (SCOPES, comma-separated)",
-    )
+    # No built-in scopes: they are copied from the credential in the Developer Console.
+    scopes: str = Field(default="", description="OAuth scopes (SCOPES, comma-separated)")
 
     # API settings
     api_base_url: str = Field(
@@ -185,42 +175,70 @@ class CJASettings(BaseSettings):
         return [s.strip() for s in self.scopes.split(",") if s.strip()]
 
     def is_oauth_configured(self) -> bool:
-        """Check if OAuth credentials are configured."""
-        return bool(self.client_id and self.secret.get_secret_value() and self.org_id)
+        """Check if all four credential fields are set."""
+        return bool(
+            self.client_id and self.secret.get_secret_value() and self.org_id and self.scopes
+        )
 
 
-def load_config(config_path: Path | None = None, *, use_file: bool = True) -> CJASettings:
-    """Load configuration from the config file, .env and environment variables.
+def load_config(config_path: Path | None = None, *, profile: str | None = None) -> CJASettings:
+    """Load the settings. See ``load_config_with_report``."""
+    return load_config_with_report(config_path, profile=profile)[0]
 
-    Priority (highest to lowest):
+
+def load_config_with_report(
+    config_path: Path | None = None, *, profile: str | None = None
+) -> tuple[CJASettings, CredentialReport]:
+    """Load the settings, and report where the credential came from.
+
+    The four credential fields come whole from one source (see ``credentials.py``):
+    ``profile`` or an explicit ``config_path``, then CJA_PROFILE, the environment
+    variables, ``.env`` and the default config file.
+
+    Every other setting is read key by key, from highest priority to lowest:
     1. Environment variables
     2. .env file
     3. Config file
     4. Default values
 
-    With ``use_file=False`` the config file is not read at all.
+    Raises CredentialError when the credential lookup fails, and ConfigError when a file
+    cannot be read or a setting is invalid. No credential at all is not an error here.
     """
-    config_data: dict[str, Any] = {}
-
-    # Determine config file path
     explicit = config_path is not None
     if config_path is None:
         config_path = get_config_path()
 
-    # Load from YAML config file if it exists
-    if use_file and config_path.exists():
-        config_data.update(_read_config_file(config_path))
-    elif use_file and explicit and not config_path.is_symlink():
+    config_data: dict[str, Any] = {}
+    if config_path.exists():
+        config_data = _read_config_file(config_path)
+    elif explicit and not config_path.is_symlink():
         logger.warning(
-            "config file %s not found; using environment only", display_path(config_path)
+            "config file %s not found; using environment only",
+            display_path(config_path),
         )
 
-    token = _config_file_data.set(config_data)
+    report = resolve_credential(
+        profile=profile, config_data=config_data, config_path=config_path, config_is_flag=explicit
+    )
+    if report.error is not None:
+        raise report.error
+
+    # The credential is passed in whole, so pydantic-settings never mixes its fields.
+    other_settings = {k: v for k, v in config_data.items() if k not in CREDENTIAL_FIELDS}
+    token = _config_file_data.set(other_settings)
     try:
-        return CJASettings()
+        return CJASettings(**report.values), report
     except ValidationError as e:
         field = str(e.errors()[0]["loc"][0]) if e.errors()[0]["loc"] else ""
-        if use_file and field in config_data and not _set_outside_file(field):
+        winner = report.winner
+        if (
+            field in CREDENTIAL_FIELDS
+            and winner is not None
+            and winner.path is not None
+            and winner.kind != "dotenv"
+        ):
+            source, short = str(winner.path), winner.path.name
+        elif field in other_settings and not _set_outside_file(field):
             source, short = str(config_path), config_path.name
         else:
             source = short = "environment or .env"
@@ -230,13 +248,6 @@ def load_config(config_path: Path | None = None, *, use_file: bool = True) -> CJ
         # The message never holds the value; keep only the field name.
         field = _settings_error_field(e)
         text = f"environment or .env: {field}: not valid JSON"
-        raise ConfigError(text, text) from None
-    except UnicodeDecodeError:
-        # Only the .env file is read as text here; the YAML file was read above.
-        text = ".env is not UTF-8 text"
-        raise ConfigError(text, text) from None
-    except OSError as e:
-        text = f".env cannot be read ({e.strerror or type(e).__name__})"
         raise ConfigError(text, text) from None
     finally:
         _config_file_data.reset(token)
@@ -274,7 +285,7 @@ def _read_config_file(config_path: Path) -> dict[str, Any]:
         return ConfigError(f"{config_path}: {problem}", f"{config_path.name}: {problem}")
 
     try:
-        _warn_if_not_private(config_path)
+        warn_if_not_private(config_path)
         with open(config_path, encoding="utf-8") as f:
             yaml_config = yaml.safe_load(f)
     except yaml.YAMLError as e:
@@ -298,7 +309,7 @@ def _read_config_file(config_path: Path) -> dict[str, Any]:
     if bad_keys:
         raise fail(f"setting names must be text (found {type(bad_keys[0]).__name__})")
     for key in yaml_config:
-        if key not in CJASettings.model_fields:
+        if key not in CJASettings.model_fields and key != "sandbox":
             logger.warning("%s: ignoring unknown setting %r", display_path(config_path), key)
     _warn_nested_unknown_keys(yaml_config, config_path)
     return yaml_config
@@ -324,18 +335,6 @@ def _warn_nested_unknown_keys(config: dict[str, Any], path: Path) -> None:
     if isinstance(notifications, dict) and isinstance(notifications.get("webhooks"), list):
         for index, webhook in enumerate(notifications["webhooks"]):
             _warn_unknown_keys(webhook, WebhookConfig, f"notifications.webhooks[{index}]", path)
-
-
-def _warn_if_not_private(config_path: Path) -> None:
-    """Warn when the config file is readable by group or others (POSIX only)."""
-    if sys.platform == "win32":
-        return
-    mode = stat.S_IMODE(config_path.stat().st_mode)
-    if mode & (stat.S_IRWXG | stat.S_IRWXO):
-        where = display_path(config_path)  # ~ works in the shell command too
-        logger.warning(
-            "%s is readable by other users (mode %o); run: chmod 600 %s", where, mode, where
-        )
 
 
 def create_default_config(config_path: Path | None = None) -> Path:
@@ -413,8 +412,8 @@ default_days: 7
 # Monitoring settings
 monitor_interval: 60
 
-# OAuth scopes: set SCOPES as an environment variable or in a .env file
-# scopes: your_scopes_from_developer_console
+# The credential: set ORG_ID, CLIENT_ID, SECRET and SCOPES as environment variables or in
+# a .env file, or use a profile. The tool has no built-in scopes.
 
 """
 
