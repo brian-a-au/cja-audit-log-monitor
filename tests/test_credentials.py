@@ -200,7 +200,7 @@ class TestOneSourceWinsWhole:
         with pytest.raises(CredentialError) as info:
             load_config()
         assert (info.value.code, info.value.missing) == ("partial_source", ["secret"])
-        assert "environment variables" in str(info.value) and "SECRET is missing" in str(info.value)
+        assert "environment variables" in str(info.value) and "Missing: SECRET." in str(info.value)
         source = info.value.report.sources[0]
         assert (source.used, source.skipped) == (False, "partial")
 
@@ -210,7 +210,7 @@ class TestOneSourceWinsWhole:
             load_config()
         assert info.value.missing == ["scopes"]
         assert f"config file {path}" in str(info.value).replace("~", str(Path.home()))
-        assert "scopes is missing" in str(info.value)
+        assert "Missing: scopes." in str(info.value)
 
     def test_an_empty_value_counts_as_missing(self, monkeypatch) -> None:
         set_env(monkeypatch, {**A, "scopes": ""})
@@ -228,7 +228,7 @@ class TestOneSourceWinsWhole:
     def test_a_partial_config_flag_file_is_an_error(self, tmp_path, monkeypatch) -> None:
         set_env(monkeypatch, B)
         path = write_config(tmp_path / "given.yaml", {"client_id": "x"})
-        with pytest.raises(CredentialError, match="org_id, secret, scopes is missing"):
+        with pytest.raises(CredentialError, match="Missing: org_id, secret, scopes"):
             load_config(path)
 
     def test_a_partial_profile_is_an_error_with_no_fall_back(self, monkeypatch) -> None:
@@ -634,7 +634,7 @@ class TestVerifyCommand:
         result = CliRunner().invoke(main, ["cli", "list"])
         assert result.exit_code == 1
         assert "Configuration error: environment variables:" in result.stderr
-        assert "SCOPES is missing" in result.stderr
+        assert "Missing: SCOPES." in result.stderr
 
 
 class TestTui:

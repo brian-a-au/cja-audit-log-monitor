@@ -33,7 +33,7 @@ A usage error, e.g. an unknown flag or a value below the minimum, exits 2. See [
 
 If the tool keeps using old credentials after you edit `.env`, check your shell. The environment variables beat `.env`, and the names can be in any case, e.g. `org_id`. A profile named in `CJA_PROFILE` beats both. Run `cja-audit-log-monitor cli config` to see which place the tool uses. Run `unset CJA_PROFILE ORG_ID CLIENT_ID SECRET SCOPES` (and the lowercase names) to clear the variables.
 
-If the error says that some of the four credential fields are set and one is missing, one place holds only part of a credential. The message names the place and the missing fields. Add the missing fields there, or remove the fields that are set there so that the tool goes on to the next place. The tool has no built-in scopes, so `SCOPES` is one of the four.
+If the error says that only some of the four credential fields are set, one place holds only part of a credential. The message names the place and the missing fields. Add the missing fields there, or remove the fields that are set there so that the tool goes on to the next place. The tool has no built-in scopes, so `SCOPES` is one of the four.
 
 The tool retries a 429 (rate limit) response and a 500, 502, 503 or 504 response a few times. It waits as long as the `Retry-After` header asks, but never more than 60 seconds. If the last try still fails, you see the error.
 

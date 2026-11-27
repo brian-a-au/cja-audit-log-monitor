@@ -342,8 +342,8 @@ def resolve_credential(
                     names = [name.upper() for name in names]
                 raise CredentialError(
                     "partial_source",
-                    f"{first.name}: some of the four credential fields are set and "
-                    f"{', '.join(names)} is missing. One source must give all four.",
+                    f"{first.name}: only some of the four credential fields are set. "
+                    f"Missing: {', '.join(names)}. One source must give all four.",
                     missing=first.missing,
                 )
             first.used = True
