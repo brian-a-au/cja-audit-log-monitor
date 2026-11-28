@@ -116,7 +116,10 @@ def warn_if_not_private(path: Path) -> None:
     """
     if sys.platform == "win32":
         return
-    mode = stat.S_IMODE(path.stat().st_mode)
+    status = path.stat()
+    if not stat.S_ISREG(status.st_mode):
+        return  # e.g. a folder: the caller reports it, and chmod 600 would be wrong advice
+    mode = stat.S_IMODE(status.st_mode)
     if mode & (stat.S_IRWXG | stat.S_IRWXO):
         where = display_path(path)  # ~ works in the shell command too
         logger.warning(

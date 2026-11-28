@@ -539,9 +539,11 @@ class TestNamedConfigFileMustExist:
         with pytest.raises(ConfigError, match="does not exist"):
             load_config(link)
 
-    def test_a_folder_is_an_error(self, tmp_path) -> None:
+    def test_a_folder_is_an_error(self, tmp_path, caplog) -> None:
+        tmp_path.chmod(0o755)
         with pytest.raises(ConfigError, match="is a folder, not a file"):
             load_config(tmp_path)
+        assert "chmod 600" not in caplog.text  # that advice is for a file
 
     def test_a_missing_file_in_the_variable_is_an_error(self, tmp_path, monkeypatch) -> None:
         missing = tmp_path / "missing.yaml"
