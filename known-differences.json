@@ -1,0 +1,27 @@
+{
+  "spec": "adobe-credentials/v1",
+  "tool": "cja-audit-log-monitor",
+  "tool_version": "0.1.5",
+  "not_applicable": [
+    {
+      "rule": "L1.1",
+      "reason": "Only the part about child processes. The tool starts no worker and no child process, so it never passes a credential to one. Case mask-009 is skipped."
+    },
+    {
+      "rule": "L1.3",
+      "reason": "Only the part about writing a profile. The tool reads profiles and never writes one, so cases perm-001, perm-002 and perm-003 are skipped. The config file that cli init writes has mode 0600, and a folder it creates has mode 0700."
+    }
+  ],
+  "differences": [
+    {
+      "rule": "L2.1",
+      "cases": ["check-007"],
+      "summary": "An unknown key in the config file gives a warning, not a debug line. The config file also holds alert rules and other settings, and the warning is how a person finds a mistyped setting name. An unknown key in a profile gives a debug line, as the rule says."
+    },
+    {
+      "rule": "L2.4",
+      "cases": ["lookup-012", "partial-007", "partial-008"],
+      "summary": "These cases expect the notices that a tool prints until it applies Level 3. This tool applies Level 3, so it has no such notice to print. A partial source is the error partial_source, and .env wins over the default config file without a notice."
+    }
+  ]
+}

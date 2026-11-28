@@ -171,7 +171,7 @@ async def test_a_load_sent_before_a_reload_does_not_land_after_it(
     config_reads: list[int] = []
     monkeypatch.setattr(
         "cja_audit_log_monitor.tui.state.load_config",
-        lambda path: config_reads.append(1) or mock_app_state.settings,
+        lambda path, profile=None: config_reads.append(1) or mock_app_state.settings,
     )
     gate = _Gate()
     calls = {"n": 0}

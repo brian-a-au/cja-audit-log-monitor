@@ -84,7 +84,7 @@ GitHub runs every stage on every pull request and every push to `main`, and you 
 
 ## Releases
 
-1. Set the new version in `pyproject.toml`, and run `python scripts/changelog.py release <version>`. It writes a dated section to `CHANGELOG.md` from the Unreleased entries and the files in `changes/`, then deletes those files.
+1. Set the new version in `pyproject.toml` and in `known-differences.json`, and run `python scripts/changelog.py release <version>`. It writes a dated section to `CHANGELOG.md` from the Unreleased entries and the files in `changes/`, then deletes those files.
 2. Merge that change to `main`.
 3. Push a tag that matches the version, e.g. `git tag v0.2.0 && git push origin v0.2.0`.
 
@@ -92,9 +92,17 @@ The tag starts `.github/workflows/release.yml`. It runs CI, checks that the tag 
 
 ## Project layout
 
-The package lives in `src/cja_audit_log_monitor/`. Core modules: `cli.py`, `auth.py`, `client.py`, `config.py`, `models.py`, `alerts.py`, `monitor.py`, `notifications.py`, `formatters.py`, `stats.py`, `export.py`, `utils.py`. The TUI lives under `src/cja_audit_log_monitor/tui/` (app, state, styles, screens, widgets, modals).
+The package lives in `src/cja_audit_log_monitor/`. Core modules: `cli.py`, `auth.py`, `client.py`, `config.py`, `credentials.py`, `models.py`, `alerts.py`, `monitor.py`, `notifications.py`, `formatters.py`, `stats.py`, `export.py`, `utils.py`. The TUI lives under `src/cja_audit_log_monitor/tui/` (app, state, styles, screens, widgets, modals).
 
 Each TUI view (`tui/screens/*.py`) subclasses `ContentView`, a plain widget that the app mounts once, on first visit, into a `ContentSwitcher`. Views are not Textual `Screen` objects. A `Screen` mounted as a child gets no space on the screen and shows nothing.
+
+## The Adobe credentials standard
+
+The tool follows version 1 of the Adobe credentials standard, which the Adobe tooling repos share. The standard says how a tool finds, checks, shows and protects the credential. `src/cja_audit_log_monitor/credentials.py` holds the lookup.
+
+- `tests/standard_cases/` holds a copy of the shared cases, the JSON shapes and the codes. `SOURCE.json` there records the commit they came from and a checksum for each file. Do not edit the copies. Copy them again with the `sync_cases.py` script of the standard.
+- `tests/test_standard_cases.py` runs every case against the tool.
+- `known-differences.json` lists the cases the tool does not pass, each with the reason. A listed case must fail and every other case must pass, so the list can only get shorter.
 
 ## Screenshots
 

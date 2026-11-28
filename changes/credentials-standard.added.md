@@ -1,0 +1,6 @@
+- Profiles. `--profile NAME` uses the credential in `~/.cja/orgs/NAME/config.json`, a folder that the Customer Journey Analytics tools share. You can also name the profile in the `CJA_PROFILE` environment variable. The tool reads a profile and never writes one. A profile that does not exist is an error, and so is `--profile` together with `-c`. See [Profiles](docs/configuration.md#profiles).
+- `cli config` now shows where the credential comes from, whether the secret is set, and the scopes. It also lists each place that holds a credential and was not used. `cli config -F json` writes the same facts in the shape `adobe-credentials/v1/config-check`. The command makes no network call.
+- `cli verify` now reports sign-in and the log fetch as two separate results. A failed result has a code and says what to do, e.g. `bad_secret`, `scopes_rejected` or `no_product_access`. See [Check the credential](docs/cli.md#check-the-credential).
+- The tool now warns when other users can read a profile, or a `.env` file that holds a credential field. It already gave this warning for the config file.
+- The docs now say that `-c` accepts a JSON file as well as a YAML file.
+- The tool now follows version 1 of the Adobe credentials standard. The shared test cases are in `tests/standard_cases/`, and `known-differences.json` lists the cases the tool does not pass.

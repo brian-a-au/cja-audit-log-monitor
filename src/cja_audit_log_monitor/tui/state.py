@@ -63,14 +63,22 @@ class MonitorState:
 class AppState:
     """Centralized application state for the TUI."""
 
-    def __init__(self, config_path: Path | None = None) -> None:
+    def __init__(
+        self,
+        config_path: Path | None = None,
+        profile: str | None = None,
+        settings: CJASettings | None = None,
+    ) -> None:
         """Initialize application state.
 
         Args:
             config_path: Optional path to config file.
+            profile: Optional name of the profile that gives the credential.
+            settings: Settings that are already loaded from those two.
         """
         self._config_path = config_path
-        self._settings: CJASettings | None = None
+        self._profile = profile
+        self._settings: CJASettings | None = settings
         self._client: AuditLogsClient | None = None
         self._client_lock = threading.Lock()
         self._token_manager: TokenManager | None = None
@@ -105,19 +113,13 @@ class AppState:
         """Get settings, loading if necessary."""
         if self._settings is None:
             try:
-                self._settings = load_config(self.config_path)
+                self._settings = load_config(self._config_path, profile=self._profile)
             except ConfigError as e:
-                # Keep the app usable: fall back to env-only settings and
-                # let the header show what is wrong with the file.
+                # No fall back to another source: the app has the built-in defaults and
+                # no credential, and the header shows what is wrong.
                 self.config_error = str(e)
                 self.config_error_summary = e.summary
-                try:
-                    self._settings = load_config(use_file=False)
-                except ConfigError as env_error:
-                    # Env/.env values are invalid too: start on plain defaults.
-                    self._settings = CJASettings.model_construct()
-                    self.config_error = f"{self.config_error}\n{env_error}"
-                    self.config_error_summary = f"{e.summary}; {env_error.summary}"
+                self._settings = CJASettings.model_construct()
         return self._settings
 
     @property
@@ -195,7 +197,7 @@ class AppState:
         if self.monitor.is_running:
             raise RuntimeError("stop the monitor first")
         try:
-            new_settings = load_config(self._config_path)
+            new_settings = load_config(self._config_path, profile=self._profile)
         except ConfigError as e:
             self.config_error = str(e)
             self.config_error_summary = e.summary

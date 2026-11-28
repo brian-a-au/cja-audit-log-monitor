@@ -56,8 +56,15 @@ class TestCJASettings:
             client_id="id",
             secret="mysecret",
             org_id="org@AdobeOrg",
+            scopes="openid",
         )
         assert settings.is_oauth_configured()
+
+    def test_is_oauth_configured_needs_scopes(self) -> None:
+        """The tool has no built-in scopes, so a credential without scopes is not complete."""
+        settings = CJASettings(client_id="id", secret="mysecret", org_id="org@AdobeOrg")
+        assert settings.scopes == ""
+        assert not settings.is_oauth_configured()
 
     def test_is_oauth_configured_partial(self) -> None:
         """Test OAuth configuration check returns False when partially configured."""
@@ -95,9 +102,9 @@ class TestLoadConfig:
             assert settings.default_days == 14
 
     def test_load_nonexistent_file(self) -> None:
-        """Test loading with non-existent config file uses defaults."""
-        settings = load_config(Path("/nonexistent/config.yaml"))
-        assert settings.default_page_size == 100  # Default value
+        """A config file that was named and does not exist is an error, not the defaults."""
+        with pytest.raises(ConfigError, match=r"^/nonexistent/config\.yaml: does not exist"):
+            load_config(Path("/nonexistent/config.yaml"))
 
     def test_load_empty_file(self) -> None:
         """Test loading empty config file uses defaults."""
@@ -120,11 +127,6 @@ class TestBadConfigFile:
         path.write_text(text)
         with pytest.raises(ConfigError, match=str(path)):
             load_config(path)
-
-    def test_use_file_false_ignores_the_file(self, tmp_path: Path) -> None:
-        path = tmp_path / "config.yaml"
-        path.write_text("monitor_interval: [1, \n")
-        assert load_config(path, use_file=False).monitor_interval == 60
 
     def test_output_format_is_not_a_setting(self) -> None:
         assert "output_format" not in CJASettings.model_fields
@@ -180,10 +182,10 @@ class TestConfigPriority:
 
     def test_env_beats_config_file(self, tmp_path, monkeypatch) -> None:
         path = tmp_path / "c.yaml"
-        path.write_text("client_id: from_yaml\nmonitor_interval: 10\n")
-        monkeypatch.setenv("CLIENT_ID", "from_env")
+        path.write_text("default_days: 3\nmonitor_interval: 10\n")
+        monkeypatch.setenv("DEFAULT_DAYS", "5")
         settings = load_config(path)
-        assert settings.client_id == "from_env"
+        assert settings.default_days == 5
         assert settings.monitor_interval == 10
 
     def test_dotenv_beats_config_file(self, tmp_path) -> None:
@@ -509,12 +511,79 @@ def test_tilde_config_path_is_expanded(monkeypatch) -> None:
     assert get_config_path() == Path.home() / "x.yaml"
 
 
-def test_missing_explicit_config_warns(tmp_path, caplog) -> None:
-    missing = tmp_path / "missing.yaml"
-    with caplog.at_level(logging.WARNING):
-        load_config(missing)
-    shown = display_path(missing)
-    assert f"config file {shown} not found; using environment only" in caplog.text
+class TestNamedConfigFileMustExist:
+    """A path given with -c or CJA_CONFIG_PATH is never skipped for a lower source."""
+
+    ENV = {
+        "ORG_ID": "A1B2C3D4E5F6A7B8C9D0E1F2@AdobeOrg",
+        "CLIENT_ID": "aaaa1111bbbb2222cccc3333dddd4444",
+        "SECRET": "fake-secret-A-not-a-credential-0001",
+        "SCOPES": "openid,AdobeID",
+    }
+
+    @pytest.fixture(autouse=True)
+    def _a_full_credential_in_the_environment(self, monkeypatch) -> None:
+        for name, value in self.ENV.items():
+            monkeypatch.setenv(name, value)
+
+    def test_a_missing_file_is_an_error_that_names_the_path(self, tmp_path) -> None:
+        missing = tmp_path / "missing.yaml"
+        with pytest.raises(ConfigError) as info:
+            load_config(missing)
+        assert str(info.value) == f"{missing}: does not exist (given with -c)"
+        assert info.value.summary == "missing.yaml: does not exist (given with -c)"
+
+    def test_a_dangling_symlink_is_an_error(self, tmp_path) -> None:
+        link = tmp_path / "link.yaml"
+        link.symlink_to(tmp_path / "gone.yaml")
+        with pytest.raises(ConfigError, match="does not exist"):
+            load_config(link)
+
+    def test_a_folder_is_an_error(self, tmp_path, caplog) -> None:
+        tmp_path.chmod(0o755)
+        with pytest.raises(ConfigError, match="is a folder, not a file"):
+            load_config(tmp_path)
+        assert "chmod 600" not in caplog.text  # that advice is for a file
+
+    def test_a_missing_file_in_the_variable_is_an_error(self, tmp_path, monkeypatch) -> None:
+        missing = tmp_path / "missing.yaml"
+        monkeypatch.setenv("CJA_CONFIG_PATH", str(missing))
+        with pytest.raises(ConfigError) as info:
+            load_config()
+        assert str(info.value) == f"{missing}: does not exist (given with CJA_CONFIG_PATH)"
+
+    def test_a_file_in_the_variable_is_read(self, tmp_path, monkeypatch) -> None:
+        path = tmp_path / "other.yaml"
+        path.write_text("monitor_interval: 30\n")
+        path.chmod(0o600)
+        monkeypatch.setenv("CJA_CONFIG_PATH", str(path))
+        assert load_config().monitor_interval == 30
+
+    @pytest.mark.parametrize("command", [["cli", "list"], ["cli", "config"], ["tui"], []])
+    def test_the_cli_and_the_tui_stop_with_one_line(self, tmp_path, command) -> None:
+        from unittest.mock import patch
+
+        from click.testing import CliRunner
+
+        from cja_audit_log_monitor.cli import main
+
+        missing = tmp_path / "missing.yaml"
+        with patch("cja_audit_log_monitor.tui.CJAAuditApp") as make_app:
+            result = CliRunner().invoke(main, ["-c", str(missing), *command])
+        assert result.exit_code == 1
+        make_app.assert_not_called()
+        assert result.stdout == ""
+        line = result.stderr.replace("\n", "")
+        assert line == f"Configuration error: {missing}: does not exist (given with -c)"
+
+    def test_init_still_creates_a_file_that_does_not_exist(self, tmp_path) -> None:
+        from click.testing import CliRunner
+
+        from cja_audit_log_monitor.cli import main
+
+        path = tmp_path / "new.yaml"
+        result = CliRunner().invoke(main, ["-c", str(path), "cli", "init"])
+        assert result.exit_code == 0 and path.exists()
 
 
 def test_missing_default_config_is_quiet(caplog) -> None:
@@ -586,7 +655,7 @@ class TestUnusableDotEnv:
 
         (tmp_path / ".env").write_bytes(b"ORG_ID=x\xff\xfe@AdobeOrg\n")
         with pytest.raises(ConfigError, match=r"\.env is not UTF-8 text"):
-            load_config(tmp_path / "missing.yaml", use_file=False)
+            load_config()
 
     def test_an_unreadable_dotenv_is_a_config_error(self, tmp_path) -> None:
         import os
@@ -600,7 +669,7 @@ class TestUnusableDotEnv:
             pytest.skip("running as a user who can read any file")
         try:
             with pytest.raises(ConfigError, match=r"\.env cannot be read"):
-                load_config(tmp_path / "missing.yaml", use_file=False)
+                load_config()
         finally:
             env.chmod(0o600)
 

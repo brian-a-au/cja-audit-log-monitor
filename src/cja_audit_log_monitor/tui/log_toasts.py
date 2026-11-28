@@ -10,6 +10,8 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -27,20 +29,19 @@ class ToastLogHandler(logging.Handler):
     Records from worker threads reach the UI thread through ``app.call_from_thread``.
     """
 
-    def __init__(self, app: App) -> None:
+    def __init__(self, app: App, pending: list[tuple[str, str]] | None = None) -> None:
         super().__init__(level=logging.WARNING)
         self.app = app
         self.ready = False
-        self._pending: list[tuple[str, str]] = []
+        self._pending: list[tuple[str, str]] = list(pending or [])
         self._last_shown: dict[str, float] = {}
         self._ui_thread = threading.get_ident()
 
     def emit(self, record: logging.LogRecord) -> None:
-        try:
-            text = record.getMessage()
-        except Exception:
+        toast = _as_toast(record)
+        if toast is None:
             return
-        severity = "error" if record.levelno >= logging.ERROR else "warning"
+        text, severity = toast
         if not self.ready:
             self._pending.append((text, severity))
             return
@@ -69,9 +70,47 @@ class ToastLogHandler(logging.Handler):
         self.app.notify(text, severity=severity, markup=False)  # type: ignore[arg-type]
 
 
-def install(app: App) -> ToastLogHandler:
+def _as_toast(record: logging.LogRecord) -> tuple[str, str] | None:
+    """The text and severity of the toast for ``record``; None when it has no text."""
+    try:
+        text = record.getMessage()
+    except Exception:
+        return None
+    return text, "error" if record.levelno >= logging.ERROR else "warning"
+
+
+class _Collector(logging.Handler):
+    """Keep each warning as the text and severity of a toast."""
+
+    def __init__(self) -> None:
+        super().__init__(level=logging.WARNING)
+        self.found: list[tuple[str, str]] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        toast = _as_toast(record)
+        if toast is not None:
+            self.found.append(toast)
+
+
+@contextmanager
+def collect() -> Iterator[list[tuple[str, str]]]:
+    """Keep the package's warnings that are logged before the app exists.
+
+    The settings are loaded before the TUI opens. The list goes to ``install`` as
+    ``pending``, so those warnings show as toasts once the app is ready.
+    """
+    collector = _Collector()
+    logger = logging.getLogger(PACKAGE_LOGGER)
+    logger.addHandler(collector)
+    try:
+        yield collector.found
+    finally:
+        logger.removeHandler(collector)
+
+
+def install(app: App, pending: list[tuple[str, str]] | None = None) -> ToastLogHandler:
     """Add a handler for ``app`` to the package logger and return it."""
-    handler = ToastLogHandler(app)
+    handler = ToastLogHandler(app, pending)
     logger = logging.getLogger(PACKAGE_LOGGER)
     logger.addHandler(handler)
     if logger.getEffectiveLevel() > logging.WARNING:

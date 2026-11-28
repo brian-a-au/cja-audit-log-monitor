@@ -36,7 +36,8 @@ These options go before `cli` or `tui`, e.g. `cja-audit-log-monitor -c ./config.
 | Option | Meaning |
 |---|---|
 | `-v`, `--verbose` | Turn on debug logging. The log lines go to stderr. They never contain the client secret. This option affects the CLI only. The TUI has no log file and shows warnings as toasts. |
-| `-c`, `--config PATH` | Read the config file at `PATH` instead of the default file. See [Configuration](configuration.md#where-the-config-file-lives). |
+| `-c`, `--config PATH` | Read the config file at `PATH` instead of the default file. The file can be YAML or JSON, and it must exist. If it holds a credential, that credential is used. See [Configuration](configuration.md#where-the-config-file-lives). |
+| `--profile NAME` | Use the credential in the profile `~/.cja/orgs/NAME/config.json`. The tool reads the file and never writes it. You cannot give `--profile` and `-c` together. See [Profiles](configuration.md#profiles). |
 | `--version` | Print the version and exit. |
 | `--help` | Print the help and exit. |
 
@@ -49,7 +50,7 @@ There are two commands at the top level:
 
 ### JSON output
 
-These commands accept `-F json` (long form `--output-format json`): `list`, `search`, `query`, `user`, `component`, `dashboard`, `find-action`, `top-users`, `stats`, `timeline`, `anomalies`, `verify` and `alerts list`. The default is `-F table`.
+These commands accept `-F json` (long form `--output-format json`): `list`, `search`, `query`, `user`, `component`, `dashboard`, `find-action`, `top-users`, `stats`, `timeline`, `anomalies`, `config`, `verify` and `alerts list`. The default is `-F table`.
 
 With `-F json`, the command writes one valid JSON document to stdout. Long values are not wrapped, and brackets in names are kept as they are. You can pipe the output straight into another tool, e.g. `cja-audit-log-monitor cli list -F json | jq '.entries[0]'`.
 
@@ -68,7 +69,7 @@ Some commands have their own output rules:
 
 Data goes to stdout. Progress lines, warnings, errors and `-v` log lines go to stderr. This means you can redirect the data to a file and still see the messages on your screen. These cases are different:
 
-- `verify` prints its result on stdout, including a failure such as `Connection failed` or `Authentication failed: ...`. It then exits 1. Errors that happen before the check starts, such as a config error, still go to stderr.
+- `verify` prints its result on stdout, including a failure such as `Connection failed` or `Authentication failed: ...`. It then exits 1. Errors that happen before the check starts, such as a config error or a missing credential, still go to stderr.
 - `monitor` and `tail` print the entries and the status line on stdout. Their warnings about failed Slack or webhook delivery go to stderr.
 - `anomalies` prints the anomalies it finds, and the line `No anomalies found in the last N hours.`, on stdout. Its delivery warnings go to stderr in every output format.
 
@@ -419,12 +420,55 @@ See [Alert Rules](alert-rules.md) for how to write rules.
 
 ## Other commands
 
-Apart from `verify`, these commands have no flags other than `--help`.
+`config` and `verify` accept `-F json`. Apart from that, these commands have no flags other than `--help`.
 
 | Command | What it does |
 |---|---|
 | `cli actions` | Lists the action types. |
 | `cli components` | Lists the component types. |
-| `cli config` | Shows the settings in use and the config file path. It never shows the secret. |
-| `cli verify` | Logs in and makes one API call. On success it prints `Connection successful`, the organization, the API URL and the number of logs. On failure it exits 1. It also accepts `-F json`. |
+| `cli config` | Shows the settings in use, the config file path and where the credential comes from. It makes no network call and never shows the secret. See [Check the credential](#check-the-credential). |
+| `cli verify` | Signs in and fetches one audit log entry, and reports the two results separately. On failure it exits 1. See [Check the credential](#check-the-credential). |
 | `cli init` | Creates the config file. It asks before it replaces a file that exists. See [Configuration](configuration.md#4-optional-create-a-config-file). |
+
+### Check the credential
+
+`cli config` shows how the tool finds the credential, without a call to Adobe. It prints the source that gave the credential, the organization ID, the client ID, whether the secret is set, and the scopes. The client ID shows its first 4 and last 4 characters, e.g. `aaaa****4444`. The secret shows as `****`. A source that holds a credential and was not used is listed as `Not used`.
+
+`cli config -F json` writes the same facts as one JSON document. These are its keys:
+
+- `schema` is `adobe-credentials/v1/config-check`.
+- `tool`, `tool_version` and `product` name the tool. `product` is `cja`.
+- `ok` is true when a credential was found and there is no problem.
+- `profile` is the name of the profile in use, or null.
+- `sources` lists every source that holds a credential field, highest first. Each one has `kind`, `name`, `path`, `used`, `fields` and `skipped`. `fields` holds the names of the fields and never their values. A source with only some of the fields has `skipped` set to `partial` and a `missing` list.
+- `credential` holds `org_id`, the masked `client_id`, `secret_set` and `scopes`.
+- `problems` lists what is wrong. Each one has a `code` and a `message`. The codes are `no_credential`, `partial_source`, `profile_not_found`, `invalid_profile_name` and `profile_and_config_both_given`.
+- `notices` is always an empty list in this tool.
+
+`cli config` exits 0 when it finds no credential, and `ok` is false. It exits 1 when the lookup fails, e.g. when a profile does not exist. With `-F json` it still writes the document on stdout before it exits 1.
+
+`cli verify` tests the credential in two steps and reports each one:
+
+- **Sign-in** asks Adobe's sign-in service for a token.
+- **Log fetch** asks the audit log API for one entry with that token. It does not run when sign-in fails.
+
+A failed step shows a code and what to do about it, e.g. `Sign-in: failed (bad_secret)`. These are the codes:
+
+| Code | Step | Meaning |
+|---|---|---|
+| `bad_client_id` | Sign-in | Adobe does not know the client ID. |
+| `bad_secret` | Sign-in | Adobe knows the client ID and rejected the secret. |
+| `scopes_rejected` | Sign-in | Adobe rejected one or more scopes. |
+| `sign_in_failed` | Sign-in | Sign-in failed for another reason. The message holds Adobe's own text, cut to 200 characters. |
+| `no_product_access` | Log fetch | The audit log API answered 401 or 403. Add the Customer Journey Analytics API and the Adobe Experience Platform API to the credential, and add its technical account to a CJA product profile. |
+| `unreachable` | Either | The tool could not reach Adobe, or the answer was not one it could read. |
+
+`cli verify -F json` writes one JSON document with these keys:
+
+- `schema` is `adobe-credentials/v1/live-test`.
+- `tool`, `tool_version` and `product` name the tool.
+- `ok` is true when both steps worked.
+- `source` holds the `kind` and `name` of the source that gave the credential.
+- `sign_in` and `product_access` each hold `ok`, `code` and `message`. `ok` is null when the step did not run. `code` is null when the step worked.
+- `org_id` and `api_url` are the organization and the API address that were tested.
+- `total_logs_available` is the number of logs, when the log fetch worked.

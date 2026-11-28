@@ -4,11 +4,12 @@ import logging
 import re
 import threading
 from datetime import UTC, datetime, timedelta
-from urllib.parse import urlparse
+from urllib.parse import quote, quote_plus, urlparse
 
 import httpx
 
 from .config import CJASettings
+from .credentials import NO_CREDENTIAL
 from .models import TokenInfo
 
 logger = logging.getLogger(__name__)
@@ -24,13 +25,46 @@ class AuthenticationError(Exception):
 
     ``transient`` is True when trying again later may work: a network error, or IMS
     answering 429 or 5xx. Bad or missing credentials are not transient.
+
+    ``code`` is the sign-in code of the Adobe credentials standard that fits the failure.
+    ``detail`` is Adobe's own message, cut to 200 characters and with any secret removed.
     """
 
-    def __init__(self, message: str, transient: bool = False, network: bool = False) -> None:
+    def __init__(
+        self,
+        message: str,
+        transient: bool = False,
+        network: bool = False,
+        code: str = "sign_in_failed",
+        detail: str = "",
+    ) -> None:
         super().__init__(message)
         self.transient = transient
         # True when IMS could not be reached at all (DNS, refused, timed out).
         self.network = network
+        self.code = code
+        self.detail = detail or message[:200]
+
+
+def _redact(text: str, secret: str = "") -> str:
+    """``text`` without a client secret, cut to 200 characters.
+
+    ``secret`` is the secret that was sent. It is removed wherever the answer repeats it,
+    as it is and in the form a request body holds it.
+    """
+    text = re.sub(r"client_secret=[^&\s]+", "client_secret=***", text)
+    for form in {secret, quote_plus(secret), quote(secret, safe="")} - {""}:
+        text = text.replace(form, "***")
+    return text[:200]
+
+
+def sign_in_code(error_code: str, description: str) -> str:
+    """The standard's code for an IMS error answer. Only codes the tool can tell apart."""
+    if error_code == "invalid_client":
+        return "bad_secret" if "secret" in description.lower() else "bad_client_id"
+    if error_code == "invalid_scope":
+        return "scopes_rejected"
+    return "sign_in_failed"
 
 
 class TokenManager:
@@ -51,10 +85,7 @@ class TokenManager:
                 return self._token.access_token.get_secret_value()  # type: ignore
 
             if not self.settings.is_oauth_configured():
-                raise AuthenticationError(
-                    "OAuth not configured. Set ORG_ID, CLIENT_ID, SECRET and SCOPES as "
-                    "environment variables or in a .env file."
-                )
+                raise AuthenticationError(f"OAuth not configured. {NO_CREDENTIAL}")
 
             token = self._get_oauth_token()
 
@@ -96,10 +127,15 @@ class TokenManager:
                 try:
                     token_data = response.json()
                 except ValueError:
-                    raise AuthenticationError("IMS returned a non-JSON response") from None
+                    raise AuthenticationError(
+                        "IMS returned a non-JSON response", code="unreachable"
+                    ) from None
 
+                # A 200 answer without a token did not come from Adobe's sign-in service.
                 if not isinstance(token_data, dict) or not token_data.get("access_token"):
-                    raise AuthenticationError("IMS response had no access_token")
+                    raise AuthenticationError(
+                        "IMS response had no access_token", code="unreachable"
+                    )
                 try:
                     expires_in = int(token_data.get("expires_in", 86400))
                 except (ValueError, TypeError, OverflowError):
@@ -113,56 +149,69 @@ class TokenManager:
                 except (KeyError, ValueError, TypeError, AttributeError):
                     raise AuthenticationError("IMS response had no access_token") from None
         except httpx.HTTPStatusError as e:
-            error_detail = self._parse_oauth_error(e)
+            error_detail, code, detail = self._parse_oauth_error(e)
             status = e.response.status_code
-            raise AuthenticationError(error_detail, transient=status == 429 or status >= 500) from e
+            raise AuthenticationError(
+                error_detail,
+                transient=status == 429 or status >= 500,
+                code=code,
+                detail=detail,
+            ) from e
         except httpx.RequestError as e:
             host = urlparse(token_url).hostname or token_url
             raise AuthenticationError(
-                f"could not reach {host} ({type(e).__name__})", transient=True, network=True
+                f"could not reach {host} ({type(e).__name__})",
+                transient=True,
+                network=True,
+                code="unreachable",
             ) from e
 
-    def _parse_oauth_error(self, e: httpx.HTTPStatusError) -> str:
-        """Parse OAuth error response and return helpful message."""
+    def _parse_oauth_error(self, e: httpx.HTTPStatusError) -> tuple[str, str, str]:
+        """Parse an OAuth error answer: a helpful message, the code, and Adobe's own text."""
+        secret = self.settings.secret.get_secret_value()
         try:
             error_data = e.response.json()
-            error_code = str(error_data.get("error", ""))[:100]
-            error_desc = re.sub(
-                r"client_secret=[^&\s]+",
-                "client_secret=***",
-                str(error_data.get("error_description", "")),
-            )[:200]
-
-            if error_code == "invalid_client":
-                return (
-                    f"invalid_client: {error_desc}\n"
-                    "Check that CLIENT_ID and SECRET are correct and not expired. "
-                    "Re-retrieve credentials from Adobe Developer Console."
-                )
-            elif error_code == "invalid_scope":
-                return (
-                    f"invalid_scope: {error_desc}\n"
-                    "Copy SCOPES exactly from Developer Console > OAuth Server-to-Server > Scopes."
-                )
-            elif error_code == "unauthorized_client":
-                return (
-                    f"unauthorized_client: {error_desc}\n"
-                    "Ensure OAuth Server-to-Server is enabled in Developer Console."
-                )
-            else:
-                return f"OAuth error ({e.response.status_code}): {error_code} - {error_desc}"
+            raw_code = str(error_data.get("error", ""))
+            raw_desc = str(error_data.get("error_description", ""))
+            # The code is found from Adobe's own text, before any of it is removed.
+            code = sign_in_code(raw_code, raw_desc)
+            error_code = _redact(raw_code, secret)[:100]
+            error_desc = _redact(raw_desc, secret)
         except Exception:
             status = e.response.status_code
+            body = _redact(e.response.text, secret)
             if status == 401:
-                return "401 Unauthorized: Check that credentials are current and not regenerated."
+                text = "401 Unauthorized: Check that credentials are current and not regenerated."
             elif status == 403:
-                return (
+                text = (
                     "403 Forbidden: Ensure both CJA API and Experience Platform API are added "
                     "to your project in Developer Console, and service account is assigned "
                     "to product profiles in Admin Console."
                 )
-            body = re.sub(r"client_secret=[^&\s]+", "client_secret=***", e.response.text)[:200]
-            return f"OAuth authentication failed: {status} - {body}"
+            else:
+                text = f"OAuth authentication failed: {status} - {body}"
+            return text, "sign_in_failed", body or f"HTTP {status}"
+
+        if raw_code == "invalid_client":
+            text = (
+                f"invalid_client: {error_desc}\n"
+                "Check that CLIENT_ID and SECRET are correct and not expired. "
+                "Re-retrieve credentials from Adobe Developer Console."
+            )
+        elif raw_code == "invalid_scope":
+            text = (
+                f"invalid_scope: {error_desc}\n"
+                "Copy SCOPES exactly from Developer Console > OAuth Server-to-Server > Scopes."
+            )
+        elif raw_code == "unauthorized_client":
+            text = (
+                f"unauthorized_client: {error_desc}\n"
+                "Ensure OAuth Server-to-Server is enabled in Developer Console."
+            )
+        else:
+            text = f"OAuth error ({e.response.status_code}): {error_code} - {error_desc}"
+        detail = error_desc or error_code or f"HTTP {e.response.status_code}"
+        return text, code, detail
 
     def get_auth_headers(self) -> dict[str, str]:
         """Get headers with authentication for API requests."""

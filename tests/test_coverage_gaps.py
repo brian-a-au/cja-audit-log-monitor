@@ -175,7 +175,7 @@ class TestNoSubcommandLaunchesTui:
         with patch.object(cli_module, "run_tui") as run_tui:
             result = runner.invoke(main, ["--config", str(config)])
         assert result.exit_code == 0
-        run_tui.assert_called_once_with(config)
+        run_tui.assert_called_once_with(config, None)
 
 
 class TestEmptyJsonResults:
@@ -276,32 +276,6 @@ class TestInitCommand:
         assert result.exit_code == 0
         assert "Created config file" in result.output
         assert "old: true" not in config.read_text()
-
-
-class TestVerifyCommand:
-    def test_connection_failed_without_error_text(self, runner):
-        client = _client()
-        client.verify_connection.return_value = {
-            "connected": False,
-            "authenticated": True,
-            "org_id": "x@AdobeOrg",
-            "api_url": "https://cja.adobe.io",
-            "error": None,
-        }
-        with _patch_client(client):
-            result = runner.invoke(main, ["cli", "verify"])
-        assert result.exit_code == 1
-        assert "Connection failed" in result.output
-        assert "Error:" not in result.output
-
-    def test_json_reports_a_raised_error(self, runner):
-        import json
-
-        client = _client()
-        client.verify_connection.side_effect = AuthenticationError("bad secret")
-        with _patch_client(client):
-            result = runner.invoke(main, ["cli", "verify", "-F", "json"])
-        assert json.loads(result.output) == {"connected": False, "error": "bad secret"}
 
 
 class TestQueryQuiet:
@@ -525,6 +499,23 @@ class TestLogToasts:
         record = logging.LogRecord("x", logging.WARNING, __file__, 1, "%d", ("text",), None)
         handler.emit(record)
         assert handler._pending == []
+
+    def test_collect_keeps_the_warnings_logged_inside_it(self):
+        from cja_audit_log_monitor.tui import log_toasts
+
+        logger = logging.getLogger(log_toasts.PACKAGE_LOGGER)
+        with log_toasts.collect() as found:
+            logger.warning("kept %s", "one")
+            logger.error("kept two")
+        logger.warning("after the block")
+        assert found == [("kept one", "warning"), ("kept two", "error")]
+
+    def test_the_collector_drops_a_record_with_broken_format_args(self):
+        from cja_audit_log_monitor.tui.log_toasts import _Collector
+
+        collector = _Collector()
+        collector.emit(logging.LogRecord("x", logging.WARNING, __file__, 1, "%d", ("text",), None))
+        assert collector.found == []
 
     def test_record_from_a_thread_after_the_app_ended(self):
         from cja_audit_log_monitor.tui.log_toasts import ToastLogHandler
