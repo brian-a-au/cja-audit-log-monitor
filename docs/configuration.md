@@ -91,6 +91,8 @@ The tool looks for the credential in these places, in this order. It uses the fi
 
 One place gives all four fields. The tool never takes some fields from one place and the rest from another. If the first place that holds a field does not hold all four, the tool stops with an error that names the missing fields. For example, if `ORG_ID`, `CLIENT_ID` and `SECRET` are set as environment variables and `SCOPES` is not, the error names `SCOPES`, even when `.env` holds a full credential.
 
+A field with an empty value, e.g. `SECRET=`, counts as not set in each of these places.
+
 Run `cja-audit-log-monitor cli config` to see which place the tool uses. See [Check the credential](cli.md#check-the-credential).
 
 ## 4. (Optional) Create a config file
