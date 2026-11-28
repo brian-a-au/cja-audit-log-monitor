@@ -10,3 +10,4 @@
 - `cli verify` with no credential now prints `Configuration error: No credential was found.` on stderr and the ways to give one. Before, it printed `Authentication failed: OAuth not configured` on stdout. It still exits 1.
 - The client ID is now shown as its first 4 and last 4 characters, e.g. `aaaa****4444`, in `cli config` and in the TUI config view. Before, `cli config` showed the first 8 characters and the TUI showed the first 12. A client ID of 8 characters or fewer shows as `****`.
 - The "OAuth not configured" error now lists every way to give a credential.
+- **Breaking.** `cli config` now exits with 1 when the tool found no credential, in the text format and in JSON. Before, it exited with 0. The exit code is now 0 only when the JSON document says `"ok": true`.

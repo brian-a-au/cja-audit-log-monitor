@@ -18,6 +18,11 @@ from .conftest import verify_result
 ENV_SOURCE = Source(kind="environment", name="environment variables")
 
 
+def _ready_report() -> CredentialReport:
+    """A lookup that found a credential, so that ``cli config`` exits with 0."""
+    return CredentialReport(sources=[Source(kind="env", name="environment", used=True)])
+
+
 def _settings() -> MagicMock:
     """Stand-in settings with the real defaults for the values commands read."""
     return MagicMock(default_days=7, default_page_size=100, monitor_interval=60)
@@ -124,7 +129,7 @@ class TestConfigCommand:
         sample_settings,
     ) -> None:
         """Test showing current configuration."""
-        mock_load.return_value = (sample_settings, CredentialReport())
+        mock_load.return_value = (sample_settings, _ready_report())
 
         result = runner.invoke(main, ["cli", "config"])
         assert result.exit_code == 0
@@ -138,7 +143,7 @@ class TestConfigCommand:
         sample_settings,
     ) -> None:
         """Test config output reflects an explicit --config path."""
-        mock_load.return_value = (sample_settings, CredentialReport())
+        mock_load.return_value = (sample_settings, _ready_report())
 
         result = runner.invoke(main, ["--config", "custom.yaml", "cli", "config"])
         assert result.exit_code == 0
@@ -2254,7 +2259,7 @@ class TestEmptyResultsAndStreams:
         settings.client_id = "[bold]cid-1234567"
         settings.scopes = "[dim]openid"
         settings.alert_rules = []
-        mock_load.return_value = (settings, CredentialReport())
+        mock_load.return_value = (settings, _ready_report())
 
         result = runner.invoke(main, ["cli", "config"])
 
@@ -3007,7 +3012,7 @@ def test_cli_config_marks_a_missing_file(tmp_path, monkeypatch) -> None:
     missing = "m" * 55 + ".yaml"  # relative to the test's working folder, tmp_path
     monkeypatch.setattr(config, "DEFAULT_CONFIG_FILE", Path(missing))
     result = CliRunner().invoke(main, ["cli", "config"])
-    assert result.exit_code == 0
+    assert result.exit_code == 1  # no credential is set here, so the check is not "ok"
     assert f"{missing} (not found)" in result.stdout
 
 

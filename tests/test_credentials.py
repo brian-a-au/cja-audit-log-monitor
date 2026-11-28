@@ -372,9 +372,9 @@ class TestConfigCommand:
         assert "Not used: .env file (a higher source gave the credential)" in result.stdout
         assert A["secret"] not in result.output and A["client_id"] not in result.output
 
-    def test_text_with_no_credential_exits_0_and_says_how_to_give_one(self) -> None:
+    def test_text_with_no_credential_exits_1_and_says_how_to_give_one(self) -> None:
         result = CliRunner().invoke(main, ["cli", "config"])
-        assert result.exit_code == 0
+        assert result.exit_code == 1  # as in JSON, where "ok" is false
         assert "Credential source: (none)" in result.stdout
         assert "Secret: (not set)" in result.stdout and "Scopes: (not set)" in result.stdout
         assert "No credential was found." in result.stderr
@@ -429,7 +429,7 @@ class TestConfigCommand:
 
     def test_json_with_no_credential(self) -> None:
         result = CliRunner().invoke(main, ["cli", "config", "-F", "json"])
-        assert result.exit_code == 0
+        assert result.exit_code == 1
         document = json.loads(result.stdout)
         assert_shape(document, "config-check-v1")
         assert document["ok"] is False

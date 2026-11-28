@@ -1233,8 +1233,12 @@ def config(ctx: click.Context, output_format: str) -> None:
         emit_json(e.report.as_json(__version__))
         sys.exit(1)
 
+    # The exit code is 1 whenever the JSON document says "ok": false, in both formats.
+    ready = not report.problems()
     if output_format == "json":
         emit_json(report.as_json(__version__))
+        if not ready:
+            sys.exit(1)
         return
 
     console.print("[bold]Current Configuration[/bold]\n")
@@ -1264,6 +1268,8 @@ def config(ctx: click.Context, output_format: str) -> None:
     console.print(f"Alert rules: {len(settings.alert_rules)}")
     for problem in report.problems():
         err_console.print(f"[yellow]{literal(problem['message'])}[/yellow]", soft_wrap=True)
+    if not ready:
+        sys.exit(1)
 
 
 @cli.command()
