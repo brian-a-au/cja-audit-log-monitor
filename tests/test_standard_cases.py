@@ -446,7 +446,8 @@ def _check_config(document: Any, expect: dict[str, Any], caplog) -> None:
         elif key == "debug":
             assert wanted == "unknown_key"
             lines = [r for r in caplog.records if "'note'" in r.getMessage()]
-            assert [record.levelno for record in lines] == [logging.DEBUG]
+            # The command ran twice, as text and as JSON, and each run logs one line.
+            assert [record.levelno for record in lines] == [logging.DEBUG] * 2
         elif key == "profile_folder":
             folder = Path(os.path.expanduser(used[0]["path"])).parent
             assert folder == Path(os.path.expanduser(wanted))
