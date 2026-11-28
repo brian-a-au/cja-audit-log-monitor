@@ -669,29 +669,29 @@ class TestTui:
         assert args == (None,) and kwargs["profile"] == "prod"
         assert credential(kwargs["settings"]) == A
 
-    async def test_a_warning_from_the_first_load_shows_as_a_toast(self, tmp_path) -> None:
+    def test_warnings_from_the_first_load_go_to_the_app(self, tmp_path) -> None:
         """The settings are loaded before the TUI opens, where stderr is still on screen."""
         path = tmp_path / "config.yaml"
         path.write_text("monitor_intervall: 30\n")
         path.chmod(0o644)
-        made = []
-
-        def make_app(*args, **kwargs):
-            made.append(CJAAuditApp(*args, **kwargs))
-            return MagicMock(return_code=0)
-
         with (
-            patch("cja_audit_log_monitor.tui.CJAAuditApp", side_effect=make_app),
+            patch("cja_audit_log_monitor.tui.CJAAuditApp") as make_app,
             patch.object(cli, "exit_without_waiting_for_workers"),
         ):
+            make_app.return_value.return_code = 0
             cli.run_tui(path)
-        (app,) = made
-        app.state._client = MagicMock()
+        kept = make_app.call_args.kwargs["startup_warnings"]
+        assert [severity for _, severity in kept] == ["warning", "warning"]
+        assert "chmod 600" in kept[0][0]
+        assert "ignoring unknown setting 'monitor_intervall'" in kept[1][0]
+
+    async def test_the_app_shows_those_warnings_as_toasts(self, mock_app_state) -> None:
+        app = CJAAuditApp(startup_warnings=[("from the first load", "warning")])
+        app.state = mock_app_state
         async with app.run_test(size=(140, 40), notifications=True) as pilot:
             await pilot.pause()
             shown = [note.message for note in app._notifications]
-        assert sum("chmod 600" in text for text in shown) == 1
-        assert sum("ignoring unknown setting 'monitor_intervall'" in text for text in shown) == 1
+        assert shown.count("from the first load") == 1
 
     def test_the_state_uses_settings_that_are_already_loaded(self, monkeypatch) -> None:
         write_profile("prod", A)
