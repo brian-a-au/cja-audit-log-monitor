@@ -4,7 +4,7 @@ import logging
 import re
 import threading
 from datetime import UTC, datetime, timedelta
-from urllib.parse import urlparse
+from urllib.parse import quote, quote_plus, urlparse
 
 import httpx
 
@@ -46,9 +46,16 @@ class AuthenticationError(Exception):
         self.detail = detail or message[:200]
 
 
-def _redact(text: str) -> str:
-    """``text`` without a client secret, cut to 200 characters."""
-    return re.sub(r"client_secret=[^&\s]+", "client_secret=***", text)[:200]
+def _redact(text: str, secret: str = "") -> str:
+    """``text`` without a client secret, cut to 200 characters.
+
+    ``secret`` is the secret that was sent. It is removed wherever the answer repeats it,
+    as it is and in the form a request body holds it.
+    """
+    text = re.sub(r"client_secret=[^&\s]+", "client_secret=***", text)
+    for form in {secret, quote_plus(secret), quote(secret, safe="")} - {""}:
+        text = text.replace(form, "***")
+    return text[:200]
 
 
 def sign_in_code(error_code: str, description: str) -> str:
@@ -161,13 +168,18 @@ class TokenManager:
 
     def _parse_oauth_error(self, e: httpx.HTTPStatusError) -> tuple[str, str, str]:
         """Parse an OAuth error answer: a helpful message, the code, and Adobe's own text."""
+        secret = self.settings.secret.get_secret_value()
         try:
             error_data = e.response.json()
-            error_code = str(error_data.get("error", ""))[:100]
-            error_desc = _redact(str(error_data.get("error_description", "")))
+            raw_code = str(error_data.get("error", ""))
+            raw_desc = str(error_data.get("error_description", ""))
+            # The code is found from Adobe's own text, before any of it is removed.
+            code = sign_in_code(raw_code, raw_desc)
+            error_code = _redact(raw_code, secret)[:100]
+            error_desc = _redact(raw_desc, secret)
         except Exception:
             status = e.response.status_code
-            body = _redact(e.response.text)
+            body = _redact(e.response.text, secret)
             if status == 401:
                 text = "401 Unauthorized: Check that credentials are current and not regenerated."
             elif status == 403:
@@ -180,18 +192,18 @@ class TokenManager:
                 text = f"OAuth authentication failed: {status} - {body}"
             return text, "sign_in_failed", body or f"HTTP {status}"
 
-        if error_code == "invalid_client":
+        if raw_code == "invalid_client":
             text = (
                 f"invalid_client: {error_desc}\n"
                 "Check that CLIENT_ID and SECRET are correct and not expired. "
                 "Re-retrieve credentials from Adobe Developer Console."
             )
-        elif error_code == "invalid_scope":
+        elif raw_code == "invalid_scope":
             text = (
                 f"invalid_scope: {error_desc}\n"
                 "Copy SCOPES exactly from Developer Console > OAuth Server-to-Server > Scopes."
             )
-        elif error_code == "unauthorized_client":
+        elif raw_code == "unauthorized_client":
             text = (
                 f"unauthorized_client: {error_desc}\n"
                 "Ensure OAuth Server-to-Server is enabled in Developer Console."
@@ -199,7 +211,7 @@ class TokenManager:
         else:
             text = f"OAuth error ({e.response.status_code}): {error_code} - {error_desc}"
         detail = error_desc or error_code or f"HTTP {e.response.status_code}"
-        return text, sign_in_code(error_code, error_desc), detail
+        return text, code, detail
 
     def get_auth_headers(self) -> dict[str, str]:
         """Get headers with authentication for API requests."""

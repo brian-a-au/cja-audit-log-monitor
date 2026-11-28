@@ -6,6 +6,7 @@ import time
 
 import httpx
 import pytest
+from pydantic import SecretStr
 from pytest_httpx import HTTPXMock
 
 from cja_audit_log_monitor.auth import AuthenticationError, TokenManager
@@ -168,6 +169,33 @@ def test_oauth_error_body_redacted(httpx_mock: HTTPXMock, sample_settings) -> No
     with pytest.raises(AuthenticationError) as info:
         TokenManager(sample_settings).get_token()
     assert "TOPSECRET" not in str(info.value)
+
+
+@pytest.mark.parametrize("as_json", [True, False])
+def test_oauth_error_that_repeats_the_secret_is_redacted(
+    httpx_mock: HTTPXMock, sample_settings, as_json: bool
+) -> None:
+    secret = "fake secret/with+marks"
+    settings = sample_settings.model_copy(update={"secret": SecretStr(secret)})
+    text = f"the secret {secret} is wrong, sent as fake+secret%2Fwith%2Bmarks"
+    answer = {"json": {"error": secret, "error_description": text}} if as_json else {"text": text}
+    httpx_mock.add_response(url=re.compile(".*/ims/token/v3"), status_code=400, **answer)
+    with pytest.raises(AuthenticationError) as info:
+        TokenManager(settings).get_token()
+    for shown in (str(info.value), info.value.detail):
+        assert "with" not in shown
+        assert "is wrong" in shown
+
+
+def test_the_code_is_found_before_the_secret_is_removed(
+    httpx_mock: HTTPXMock, sample_settings
+) -> None:
+    settings = sample_settings.model_copy(update={"secret": SecretStr("secret")})
+    answer = {"error": "invalid_client", "error_description": "invalid client_secret parameter"}
+    httpx_mock.add_response(url=re.compile(".*/ims/token/v3"), status_code=401, json=answer)
+    with pytest.raises(AuthenticationError) as info:
+        TokenManager(settings).get_token()
+    assert info.value.code == "bad_secret"
 
 
 def test_token_info_repr_hides_token() -> None:

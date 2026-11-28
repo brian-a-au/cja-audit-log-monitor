@@ -1,0 +1,1 @@
+- A sign-in error from Adobe that repeats the client secret no longer shows it. The tool already removed a `client_secret=` pair from the error text. It now also removes the secret itself wherever the answer holds it.
