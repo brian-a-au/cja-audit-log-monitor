@@ -435,14 +435,16 @@ def run_tui(config_path: Path | None, profile: str | None = None) -> None:
     The settings are loaded first. A config file or a credential lookup that fails stops
     the TUI before it opens, with the same one line the CLI prints.
     """
-    from .tui import CJAAuditApp
+    from .tui import CJAAuditApp, log_toasts
 
     try:
-        settings, _ = load_config_with_report(config_path, profile=profile)
+        # A warning logged here is on stderr, which the TUI then covers: keep it for a toast.
+        with log_toasts.collect() as warnings:
+            settings, _ = load_config_with_report(config_path, profile=profile)
     except ConfigError as e:
         err_console.print(f"[red]Configuration error:[/red] {literal(str(e))}", soft_wrap=True)
         sys.exit(1)
-    app = CJAAuditApp(config_path, profile=profile, settings=settings)
+    app = CJAAuditApp(config_path, profile=profile, settings=settings, startup_warnings=warnings)
     # A loop of our own: asyncio.run() would wait for every worker thread at the end,
     # including one still waiting on the network after the user quit.
     loop = asyncio.new_event_loop()

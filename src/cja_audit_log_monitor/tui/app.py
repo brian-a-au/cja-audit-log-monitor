@@ -132,6 +132,7 @@ class CJAAuditApp(App):
         config_path: Path | None = None,
         profile: str | None = None,
         settings: CJASettings | None = None,
+        startup_warnings: list[tuple[str, str]] | None = None,
     ) -> None:
         """Initialize the TUI application.
 
@@ -139,8 +140,11 @@ class CJAAuditApp(App):
             config_path: Optional path to config file.
             profile: Optional name of the profile that gives the credential.
             settings: Settings that are already loaded from those two.
+            startup_warnings: Warnings logged while those settings were loaded, from
+                ``log_toasts.collect``. They show as toasts when the app is ready.
         """
         super().__init__()
+        self._startup_warnings = startup_warnings
         self.state = AppState(config_path, profile, settings)
         self._current_screen = "dashboard"
         self._screens: dict[str, ContentView] = {}
@@ -150,7 +154,7 @@ class CJAAuditApp(App):
 
     def on_load(self) -> None:
         """Before anything loads settings, start showing logged warnings as toasts."""
-        self._log_toasts = log_toasts.install(self)
+        self._log_toasts = log_toasts.install(self, self._startup_warnings)
 
     def on_unmount(self) -> None:
         """Stop sending log records to this app."""

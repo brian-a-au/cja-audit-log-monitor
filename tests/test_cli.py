@@ -4067,7 +4067,7 @@ class TestCommandEdges:
             patch.object(cli, "exit_without_waiting_for_workers") as exit_now,
         ):
             cli.run_tui(None)
-        make_app.assert_called_once_with(None, profile=None, settings=ANY)
+        make_app.assert_called_once_with(None, profile=None, settings=ANY, startup_warnings=[])
         loop = app.run.call_args.kwargs["loop"]
         assert loop.is_closed()
         exit_now.assert_called_once_with(3)

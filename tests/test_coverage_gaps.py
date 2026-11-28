@@ -500,6 +500,23 @@ class TestLogToasts:
         handler.emit(record)
         assert handler._pending == []
 
+    def test_collect_keeps_the_warnings_logged_inside_it(self):
+        from cja_audit_log_monitor.tui import log_toasts
+
+        logger = logging.getLogger(log_toasts.PACKAGE_LOGGER)
+        with log_toasts.collect() as found:
+            logger.warning("kept %s", "one")
+            logger.error("kept two")
+        logger.warning("after the block")
+        assert found == [("kept one", "warning"), ("kept two", "error")]
+
+    def test_the_collector_drops_a_record_with_broken_format_args(self):
+        from cja_audit_log_monitor.tui.log_toasts import _Collector
+
+        collector = _Collector()
+        collector.emit(logging.LogRecord("x", logging.WARNING, __file__, 1, "%d", ("text",), None))
+        assert collector.found == []
+
     def test_record_from_a_thread_after_the_app_ended(self):
         from cja_audit_log_monitor.tui.log_toasts import ToastLogHandler
 
